@@ -1,103 +1,3 @@
----
-title: "The Java Complete Deep-Dive"
-volume: 1
-series: "JAVA BASICS"
-subtitle: "Study & Interview Mastery Guide"
-author: "Madhu Kumari"
-source: "Java Deep-Dive Study Guide - Volume 1 (Java Basics).pdf"
-pages: 73
-extracted: 2026-09-27
----
-
-# The Java Complete Deep-Dive
-
-**Study & Interview Mastery Guide**
-
-*by Madhu Kumari*
-
-Copyright © 2026 Madhu Kumari
-
-All rights reserved. No part of this publication may be reproduced,
-
-distributed, or transmitted in any form or by any means, including
-
-photocopying, recording, or other electronic or mechanical methods,
-
-without the prior written permission of the author, except in the case of
-
-brief quotations embodied in critical reviews and certain other
-
-noncommercial uses permitted by copyright law.
-
-First Edition · 2026
-
-This digital edition is licensed for the personal use of the original purchaser. Reproduction,
-
-resale, or redistribution of this file, in whole or in part, without written permission from the
-
-author is prohibited.
-
-Java and OpenJDK are trademarks or registered trademarks of Oracle and/or its affiliates.
-
-This is an independent publication and is not affiliated with, endorsed by, or sponsored by
-
-Oracle Corporation.
-
-Reader feedback and corrections are always welcome and help improve future editions.
-
-## About the Author
-
-from that same standard: not "what's the syntax," but "what actually happens, and why does it matter when something breaks at 3am."
-
-### How This Guide Is Structured
-
-This is Volume 1 of a 9-volume Java mastery series. Each volume is a complete, standalone PDF covering one major part of the full curriculum, so you can study in sequence or jump straight to the area you're weak in.
-
-| Volume | Coverage |
-| --- | --- |
-| Volume 1 (this book) | Java Basics — syntax, JVM/JDK/JRE, data types, variables, operators, control flow, methods, arrays, strings |
-| Volume 2 | Object-Oriented Programming — all 20 OOP concepts in depth |
-| Volume 3 | Core Java — Object class, wrapper classes, exception handling, packages/access control, generics |
-| Volume 4 | Collections Framework — every major collection + HashMap internals |
-| Volume 5 | Java 8+ — lambdas, functional interfaces, Streams, Optional |
-| Volume 6 | Multithreading & Concurrency |
-| Volume 7 | JVM Internals & Memory Management |
-| Volume 8 | Advanced Java — reflection, annotations, serialization, records, sealed classes |
-| Volume 9 | Modern Java (17/21) + Production Troubleshooting Scenarios |
-
-Look out for these callout boxes throughout:
-
-> **MUST REMEMBER**
->
-> Core facts you should be able to recall instantly in an interview.
-
-> **INTERVIEW TRAP**
->
-> Places where candidates commonly say the wrong thing.
-
-> **PRODUCTION NOTE**
->
-> How the concept actually shows up in real backend/Spring Boot systems.
-
-> **PRODUCTION SCENARIO**
->
-> A realistic on-call / debugging situation tied to the concept.
-
-### Table of Contents — Volume 1
-
-- Chapter 1 — Java Introduction — p. 7
-- Chapter 2 — JDK, JRE & JVM — p. 11
-- Chapter 3 — Data Types — p. 16
-- Chapter 4 — Variables — p. 20
-- Chapter 5 — Operators — p. 23
-- Chapter 6 — Control Flow — p. 26
-- Chapter 7 — Methods — p. 29
-- Chapter 8 — Arrays — p. 33
-- Chapter 9 — Strings — p. 36
-- Chapter 10 — 100 Production-Based Questions — p. 41 *(Bonus)*
-- Chapter 11 — 100 Tricky Scenario Questions — p. 48 *(Bonus)*
-- Chapter 12 — 100 More Scenario-Based Questions — p. 54 *(Bonus Round 2)*
-- Chapter 13 — 100 Conceptual & Design-Level Tricky Questions — p. 64 *(Bonus Round 2)*
 # Part 1 — Java Basics
 
 you "already know" Java; the internals and interview traps here are what separate junior answers from senior ones.
@@ -126,10 +26,10 @@ How it works, at a glance: You write source code in a `.java` file. The Java com
 The independence comes from the two-step execution model. `javac` does not produce CPU-specific machine code — it produces bytecode, a standardized instruction set defined by the JVM specification. Every platform (Windows, Linux, macOS) has its own JVM implementation that knows how to translate that same bytecode into instructions its local CPU understands. The source code and compiled class file are portable; only the JVM itself is platform-specific.
 
 ```text
-javac                     JVM (platform-specific)
+             javac                     JVM (platform-specific)
 Hello.java  ───────►  Hello.class  ───────►  runs on Windows / Linux / macOS
 (source)              (bytecode,             (interprets or JIT-compiles
-portable)              bytecode to native machine code)
+                       portable)             bytecode to native machine code)
 ```
 
 > **MUST REMEMBER**
@@ -345,6 +245,55 @@ Once loaded, bytecode is executed by the Execution Engine, which has two coopera
 - Thinking class loading happens all at once at program start — it's lazy, on first active use.
 - Forgetting that static initializers run during the Initialization phase, not Loading.
 
+## Java Compilation Model — Notes
+
+**Is Java compiled or interpreted?**
+- Both. `.java` → compiled by `javac` → bytecode (`.class`) → JVM interprets/JIT-compiles bytecode at runtime.
+- Bytecode is platform-independent; JVM handles platform-specific execution.
+- Not purely compiled (like C) or purely interpreted (like classic Python).
+
+**JVM Execution Tiers (HotSpot)**
+- **Tier 0 — Interpreter**: every method starts here; instant execution, no compile delay.
+- **Tier 1 — C1 (no profiling)**: quick compile for simple, frequently-called methods.
+- **Tier 2 — C1 (limited profiling)**: adds invocation/loop counters.
+- **Tier 3 — C1 (full profiling)**: collects branch frequency, call-site types, loop counts — feeds C2.
+- **Tier 4 — C2 (full optimization)**: aggressive optimizations — inlining, loop unrolling, escape analysis (stack-alloc, lock elision), devirtualization.
+- Flow: Interpreter → warm → C1 → hot → C2.
+- **Deoptimization**: C2's optimistic assumptions (e.g., monomorphic call site) can break at runtime → JVM falls back to interpreter, reprofiles. Causes latency spikes mid-run.
+- Useful flags: `-XX:TieredStopAtLevel=1` (C1-only, good for short-lived processes), `-Xint` (interpreter-only, debugging).
+
+**JIT Warm-up**
+- Period after startup where code runs interpreted/C1-tier before C2 optimizes hot paths.
+- **Latency impact:**
+  - First N requests after deploy are slower (2–10x) than steady-state.
+  - Deoptimization = sudden latency spikes even after warm-up.
+  - Compiler threads (C1/C2) compete for CPU with app threads — worse in constrained containers.
+  - Un-optimized interpreted code allocates more → more GC pressure early on.
+- **Where it bites**: autoscaling/K8s "cold pod" problem, blue-green deploys failing latency SLOs, naive benchmarking (use JMH, not `System.currentTimeMillis()` in `main()`).
+- **Mitigations**: pre-warming (synthetic traffic before real traffic), `-XX:TieredStopAtLevel=1`, AppCDS (faster class loading), GraalVM native-image.
+
+**GraalVM Native-Image**
+- Ahead-of-time (AOT) compiler: `.java` → bytecode → **native-image tool** → standalone native binary. No JVM at runtime.
+- Uses **closed-world assumption**: static analysis traces all reachable code from `main()` at build time.
+- **Pros**: millisecond startup, low memory/RSS, no warm-up, immediate peak performance, smaller attack surface/disk footprint.
+- **Cons**:
+  - No runtime adaptive optimization (no profile-guided speculation like C2).
+  - Reflection/dynamic proxies/JNI/runtime classloading need explicit reachability metadata (breaks silently otherwise — e.g., Netty reported as problematic).
+  - Long, memory-heavy build step (CI/CD cost).
+  - Platform-specific binaries (no "write once, run anywhere").
+  - Peak throughput generally lower than JIT/C2 for long-running services (GraalVM Enterprise + PGO narrows this gap significantly).
+- **Best fits**: serverless/Lambda, CLI tools, K8s scale-to-zero/autoscaling.
+- **Rule of thumb**: uptime > 5 min & throughput matters → JIT/HotSpot. Startup time & short-lived → native-image.
+- Spring Boot 3.x has native support via Spring AOT.
+
+**Related/adjacent tech to know**
+- **AppCDS** — Application Class Data Sharing, speeds up class loading (startup, not JIT warm-up).
+- **Project CRaC** (Coordinated Restore at Checkpoint) — solves startup/warm-up without native-image's constraints.
+- **Project Leyden** — OpenJDK initiative targeting slow startup, slow time-to-peak, large footprint.
+- **Azul Falcon** — custom JIT (in Azul Prime) optimized for warm-up speed.
+
+**Sources referenced**: BackendBytes ("GraalVM Native Images in Production"), Medium ("Startup is Pain… Let's Talk JVM Warmup"), GraalVM team blog ("From JIT to Native"), developersvoice.com (Java Performance Tuning Playbook), Oracle Graal blog (GraalVM Enterprise 21.3).
+
 #### Interview Questions — JDK, JRE & JVM
 
 **Q1. Explain JDK, JRE, and JVM and how they relate.**
@@ -497,6 +446,32 @@ Binary floating point can't represent many decimal fractions exactly (e.g., 0.1)
 **Q7. Is `String` a primitive type?**
 
 No — it's a reference type (a class), even though it has literal syntax and special compiler support (string pool, concatenation via `+`).
+
+## BigDecimal Internal Storage — Quick Notes
+
+**Formula:**
+```
+value = unscaledValue × 10^(-scale)
+```
+
+**Fields:**
+- `BigInteger intVal` — unscaled digits
+- `int scale` — digits after decimal point (can be negative)
+- `long intCompact` — fast-path cache when unscaled value fits in a `long` (avoids BigInteger overhead)
+
+**Example:**
+```java
+new BigDecimal("123.45")
+// intVal = 12345, scale = 2 → 12345 × 10^-2 = 123.45
+```
+
+**Key gotchas:**
+| Issue | Detail |
+|---|---|
+| `equals()` vs `compareTo()` | `1.0` ≠ `1.00` via `equals()` (different scale), but `compareTo() == 0` |
+| Double constructor | `new BigDecimal(0.1)` captures float imprecision — use `BigDecimal.valueOf(0.1)` or `new BigDecimal("0.1")` |
+| Negative scale | `100` can be stored as unscaled `1`, scale `-2` |
+| Arithmetic | Scale isn't auto-normalized; `divide()` can throw `ArithmeticException` without a `RoundingMode` |
 
 > **CHAPTER 3 SUMMARY**
 >

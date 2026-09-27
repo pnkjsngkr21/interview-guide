@@ -1,0 +1,4782 @@
+---
+title: "The Microservices Complete Deep-Dive"
+volume: 3
+series: "OPERATIONS, PLATFORMS & EVOLUTION"
+subtitle: "Study & Interview Mastery Guide"
+---
+
+# The Microservices Complete Deep-Dive
+
+**Study & Interview Mastery Guide**
+
+## About This Guide
+
+This is a three-volume study guide to microservices for engineers who already know Java and
+are preparing for senior and staff-level interviews. Volumes 1 and 2 covered how you decide
+to split a system and how the pieces talk to each other. **Volume 3 is the volume where the
+system meets reality** — the one where a design that was correct on a whiteboard meets a
+production cluster at 3am with an on-call engineer who has never seen this code before.
+
+The three chapters in Volumes 1 and 2 are largely about *design-time* decisions: where the
+boundary goes, which side owns the data, whether a Saga or a choreography is the right
+shape. Those decisions are cheap to get wrong and expensive to fix, which is why they
+dominate the interview. But the decisions in this volume are different in kind. They are
+**operating decisions**, and they have a distinctly worse property: most of them are not
+one architect's choice, they are thousands of small choices made by dozens of engineers over
+months — a timeout here, a retry there, a metric label with a `userId` in it, a readiness
+probe that checks a database. None of them is individually wrong. Collectively they are an
+outage, and no single person can see the composition.
+
+That is the framing for the whole volume, and it is worth stating as a single sentence
+because it is the thing a candidate who has actually operated a system understands and a
+candidate who has only read about one does not: **distributed systems fail from the
+composition of individually-reasonable decisions, and the tools that catch composition
+failures — observability — are the tools most teams install badly and first.**
+
+Every chapter here therefore goes past the mechanism to the number and the organisational
+cause. What is the p99 actually made of, and what happens to it when you add a retry. How
+many label values before the metrics backend starts dropping series. Who owns the retry
+policy, and what happens when three teams each own a third of it and none of them owns the
+whole. The mechanisms themselves — a circuit breaker's state machine, a Deployment's rolling
+update, a sidecar proxy — are covered in the Spring volume (Chapters 4, 5 and 8) at the
+framework level. This volume goes deeper on the *operational* consequences, because that is
+where a senior interview starts to differ from a mid-level one.
+
+### Continuing From Volume 2
+
+| Volume | Coverage |
+| --- | --- |
+| Volume 1 | Foundations — service boundaries, DDD, decomposition, the modular monolith, Conway's law, migration |
+| Volume 2 | Communication, Data & Consistency — CAP, idempotency, REST/gRPC, event-driven architecture, messaging, sagas, outbox, data ownership |
+| Volume 3 (this book) | Operations, Platforms & Evolution — observability, resilience, deployment, Kubernetes, service mesh, scaling, antipatterns |
+
+### Table of Contents — Volume 3
+
+- Chapter 1 — Observability in Distributed Systems
+- Chapter 2 — Resilience: Timeouts, Retries, Breakers, Bulkheads, Shedding
+- Chapter 3 — Deployment & Progressive Delivery
+- Chapter 4 — Kubernetes for the Java Engineer
+- Chapter 5 — Service Mesh & Sidecars
+- Chapter 6 — Scaling, Load Testing & Capacity
+- Chapter 7 — Cost, Team Antipatterns & the Org Causes Behind Them
+- Chapter 8 — Interview Scenario Bank
+
+---
+
+# Part 3 — Operations, Platforms & Evolution
+
+## Chapter 1 — Observability in Distributed Systems
+
+### 1.1 The Three Signals, and What Each Is Genuinely For
+
+Metrics, logs and traces are often taught as three interchangeable ways to "see" a system,
+which is how teams end up with three tools, three bills and no answers. They are not
+interchangeable. Each answers a different question, has a different cost profile, and has a
+different failure mode. The useful mental model is not "three types of telemetry" but
+**three different data shapes with three different cardinalities**.
+
+| Signal | Shape | Answers | Cost profile | The failure mode |
+| --- | --- | --- | --- | --- |
+| **Metrics** | Pre-aggregated numeric series over time | *Is it bad?* How bad? Since when? Is it getting worse? | Very cheap per series; expensive per *label combination* | Cardinality explosion; you cannot drill to an individual request |
+| **Logs** | Discrete text records, per event, high detail | *What happened to this specific request?* What was the error, the payload, the SQL? | Cheap per record, ruinous at fleet scale without filtering | Nobody can find the one log line among 40 million; logs expire before the bug is reported |
+| **Traces** | A tree of timed spans per request | *Where did the time go?* Which service, in which order, under which parent? | The most expensive per unit; the easiest to over-collect | Sampling throws away exactly the traces you needed; a trace without propagated context is fiction |
+
+The framing that makes this click: **metrics are the only signal that answers a question
+about the past as a whole; logs are the only signal that answers a question about one
+thing; traces are the only signal that preserves the causal chain.** When someone says "I
+need observability", ask which of those three questions they have. If they cannot say, they
+will buy all three tools and still not find the answer, because the answer was in a
+dimension they never instrumented.
+
+```text
+THE THREE QUESTIONS, AND WHO CAN ANSWER THEM
+
+  "Is the error rate above 1% and when did it start?"
+      → METRICS.   aggregated, cheap, alertable, queryable over any time range.
+      → nobody else can do this. logs do not aggregate; traces are sampled.
+
+  "What was the actual exception and the request body for order 4471?"
+      → LOGS.      one record, full detail, searchable by a human-known dimension.
+      → metrics threw this away at aggregation time. traces may not have sampled it.
+
+  "Which of the six services made checkout slow, and did the slow part come
+   before or after the DB call?"
+      → TRACES.    the causal tree, the only signal that preserves structure.
+      → metrics cannot re-aggregate to one request. logs have no parent/child.
+```
+
+### 1.2 Why They Are Not Interchangeable — and the Dashboard Trap
+
+The reason this matters operationally is that each signal has a **resolution** that the
+others do not have, and a resolution you cannot recover. Once a metric has been
+aggregated, the individual data points are gone forever. Once a trace has been sampled
+away, the request is gone forever. Once a log has expired, the request is gone forever. In
+all three cases the answer "which one was it?" becomes unanswerable, and the debugging
+session becomes archaeology over a system that no longer holds the evidence.
+
+The classic failure is a team that treats **a dashboard as observability**. A dashboard is a
+rendering of queries someone wrote once. It answers the questions its author anticipated. The
+moment you are paged for something the author did not anticipate, the dashboard is useless,
+and if the underlying telemetry is at 1% head sampling and 7-day log retention, the
+evidence does not exist. This is the difference between *monitoring* (watching known
+signals for known conditions) and *observability* (being able to ask an unanticipated
+question of a system you have never seen fail before). A system with dashboards and no
+traces is monitored, not observable, and it will fail in a novel way at the worst
+possible moment.
+
+> **INTERVIEW TRAP**
+>
+> The common answer is "we have Grafana, Prometheus and Loki, so we have observability."
+> The senior correction is that a dashboard is a *pre-written question*, and observability is
+> the ability to ask a question nobody pre-wrote. The test for which you have is simple: at
+> 3am, when you are paged for something nobody has seen before, can you go from "the p99 on
+> `orders` went up" to **one specific trace ID, with its request ID, its customer, and the
+> exact span that was slow** — in under ten minutes, without asking the person who built
+> the dashboard? If not, you have a monitoring system with three storage backends.
+
+The second trap is the mirror image: treating a trace backend as a debugging tool. Traces
+are excellent for a *single* request and nearly useless for "how often". A sampled trace
+set cannot produce a reliable latency percentile, because the sampling is biased — head
+sampling is random (so slow requests are as likely to be dropped as fast ones) and tail
+sampling is biased towards slow and erroring requests (so your "typical" traces are
+deliberately atypical). If you compute a p99 from retained traces and compare it to your
+metric p99 they will disagree, and knowing *why* they disagree is the point.
+
+### 1.3 Cardinality — The Number That Ends Careers
+
+Cardinality is the number of distinct time series a metric name produces, and it is the
+resource that actually runs out in a metrics backend. Every modern backend — Prometheus,
+Cortex/Mimir, Thanos, VictoriaMetrics, Datadog — stores one time series per unique
+combination of label values, and holds it for the retention period regardless of whether
+data is still arriving for it.
+
+The arithmetic that matters:
+
+```text
+  metric name: http_server_requests_seconds  (a normal Spring/Micrometer metric)
+  labels:      uri, method, status, outcome, exception
+
+  a service with 200 distinct URI templates, 3 methods and 5 statuses produces
+  200 × 3 × 5 = 3,000 series.  That is a healthy number.
+
+  now add a label:
+      "userId"     → × 250,000 distinct users      = 750,000,000 series
+      "requestId"  → × 1 request per series        = unbounded
+      "rawPath"    → /orders/4471 vs /orders/4472  = one series per order ever
+
+  the backend does not error.  It gets slow, then it OOMs, then it starts
+  dropping series — and the metric that mattered most is among the dropped ones,
+  so you do not get an error, you get silence.
+```
+
+The practical ceiling, stated as a number because the interview wants a number: **a few
+hundred distinct label values per label per metric.** Above roughly 500 values on any one
+label, the series count multiplies into a range the backend was not sized for, and most
+teams have sized their backend for the number of series in their *original* service
+catalogue, not the number produced by a label added last quarter. Above a few thousand, you
+are not adding information — a human cannot distinguish 3,000 line series on a graph, and
+the query cost alone starts showing up in the query latency your own dashboard depends on.
+
+The mechanism, stated precisely: cardinality is bounded by **the number of distinct values
+that ever occur, not the number that occur concurrently.** A `userId` label is a permanent
+series per user, forever, even after that user has churned. A series that stops receiving
+samples becomes *stale* and is often retained until the retention window expires rather than
+deleted, so the "active" count and the "stored" count diverge over time and the backend's
+memory grows monotonically with business traffic rather than with current load.
+
+> **MUST REMEMBER**
+>
+> **High-cardinality identifiers belong in span attributes and log fields, never in metric
+> labels.** A trace backend is built to hold a million records with rich attributes; a
+> metrics backend is built to hold a few thousand series per metric and *nothing else*.
+> Putting a `userId` in a metric label is not a style violation — it is a memory leak in a
+> process you do not own, pointed at by code you shipped six months ago.
+
+The Java-side version of the mistake is short enough to memorise:
+
+```java
+// ✗ one series per user, forever
+meterRegistry.counter("orders.created", "userId", user.id()).increment();
+
+// ✗ one series per order, forever
+timer("order.fulfilment.duration", "orderId", order.id()).record(duration);
+
+// ✗ one series per raw path — /orders/4471 and /orders/4472 are different metrics
+counter("http.requests", "path", request.getRequestURI()).increment();
+
+// ✓ bounded: the URI *template*, not the URI
+counter("http.requests", "uri", "/orders/{id}", "method", "GET", "status", "200").increment();
+
+// ✓ bounded, and the high-cardinality value is still reachable — via the trace
+meterRegistry.counter("orders.created", "channel", order.channel().name()).increment();
+```
+
+The last one is the pattern to reach for: the *dimension you aggregate by* goes on the
+metric, the *dimension you search by* goes on the span and the log line. The user's ID is
+still one hop away — you find it in the trace that the metric's exemplar points at (below)
+— but it is no longer multiplied into the metrics backend.
+
+### 1.4 Exemplars — the Link from a Number to a Request
+
+This is the mechanism that resolves the "the p99 went up, show me a slow request" question
+without a human typing a query into six systems, and it is the single most under-used
+feature in most fleets. An **exemplar** is a pointer attached to a single point on a metric
+time series that references an external object — almost always a trace ID.
+
+```text
+  METRIC TIME SERIES  http_server_requests_seconds_bucket
+  ────────────────────────────────────────────────────────────────────
+   ...  ┊
+   ...  ┊    ┊
+   ...  ┊    ┊    ┊    ┊
+   ────┼────┼────┼────┼────┼──── time
+                  ▲
+                  │
+             exemplar{ trace_id="4bf92f3577b34da6a3ce929d0e0e4736" }
+
+  click the point on the graph  →  that exact trace, opened, with the slow
+                                  span, the query and the downstream calls
+```
+
+The combination is what makes it work: exemplars let you go **from an aggregate to an
+instance**, which is the direction metrics structurally cannot go, and they do it without
+anyone writing a query. The requirement on the other side is that your trace must exist and
+must be findable by a dimension a human knows — the customer's ID, the order ID, the
+request ID, the error message. If exemplar support is on but the trace retention is 15
+minutes, the pointer is dangling and the feature is decorative.
+
+The three-way relationship to get right, and it is worth being able to draw it:
+
+```text
+  logs     ── carry the requestId, the customerId, the error text
+              │  (the dimension a human knows)
+              ▼
+  traces   ── carry the causal tree, the span timings, the service order
+              │  (and, as a span attribute, the same identifiers)
+              ▼
+  metrics  ── carry the aggregate: rate, errors, duration
+                 ▲
+                 │  exemplar pointers → trace ID
+                 └── you can always walk UP from a spike to a trace,
+                     and DOWN from a trace to the metrics for that window
+```
+
+> **PRODUCTION SCENARIO**
+>
+> Problem: `orders` paged at 02:14 for a checkout error-rate spike. The on-call engineer had
+> three dashboards and could see the spike but not its cause.
+> Investigation: the dashboard showed a 4% 5xx rate on `/orders/{id}/submit` over a
+> ten-minute window — a fact, with no story in it. Drilling further required a log query
+> with a field nobody had documented.
+> Root cause: the service emitted no traces (the tracing SDK was on the classpath but the
+> exporter had no endpoint configured), logs were retained for 24 hours, and the on-call
+> rotation had changed three weeks earlier with no handover of the log field names. The
+> evidence needed to identify the failure was retained — for about four more hours.
+> Solution: turned on trace export with 100% sampling for the incident window, added an
+> exemplar to the error-rate counter, and documented the log field names in the runbook.
+> Prevention: a smoke test in the pipeline that asserts a trace ID is present in a real
+> request's response headers, and a `runbook.md` per service that is reviewed, not written
+> once.
+
+### 1.5 RED and USE — Which Applies to Which Layer
+
+The two method families exist because "monitor this" is not actionable until you know what
+kind of thing you are looking at. **RED (Rate, Errors, Duration)** applies to *services* — to
+anything that processes requests. **USE (Utilisation, Saturation, Errors)** applies to
+*resources* — to the constrained things a service is built on: a thread pool, a connection
+pool, a CPU, a disk, a queue.
+
+| Method | Question set | Applies to | The tell you have picked the wrong one |
+| --- | --- | --- | --- |
+| **RED** | Rate, Errors, Duration | HTTP endpoints, message consumers, RPC methods — anything request-shaped | You are paging on a *server's* CPU because "errors went up", and the errors are unrelated to the CPU |
+| **USE** | Utilisation, Saturation, Errors | Thread pools, connection pools, executors, disks, network interfaces, the JVM heap, containers | You are paging on "request rate" for a batch job that is not request-shaped, or on "CPU" with no saturation number |
+
+The distinction that produces the most value is **utilisation versus saturation**, and it is
+where most alerting goes wrong. Utilisation is how busy a resource is *right now*
+(percentage of a pool's threads in use, CPU percent). Saturation is how much *work is
+waiting* because the resource is busy (queue depth, the time a task waits for a thread,
+`pool.active` when `pool.max` is 100). A resource at 95% utilisation with zero queueing is
+fine; a resource at 60% utilisation with a growing queue is failing. The metric that tells
+you the truth is nearly always the second one.
+
+```text
+  USE on a thread pool
+    Utilisation : tomcat.threads.busy / tomcat.threads.max      → 180/200 = 90%
+    Saturation  : tomcat.threads.busy_max over a window         → was 200 for 40s
+    Errors      : tomcat.requests.failed / total
+
+  RED on the same server
+    Rate        : tomcat.requests per second                    → 4,300 rps
+    Errors      : status 5xx ratio                              → 0.4%
+    Duration    : p50 / p95 / p99 of request latency            → 40 / 180 / 1400 ms
+
+  the page should fire on Saturation (200 threads for 40s) and on
+  RED-Duration (p99 > 1s for 5m), NOT on Utilisation.
+```
+
+> **INTERVIEW TRAP**
+>
+> "We alert on CPU above 80%" is the wrong answer in a distributed system for a reason
+> that is worth stating explicitly: **CPU is a proxy for demand, and demand is not the
+> bottleneck.** A service doing database I/O sits at 15% CPU while completely saturated on
+> its connection pool. A service spinning in a retry loop sits at 95% CPU while doing no
+> useful work at all — the load test has just told the HPA to add three more replicas of a
+> service that was already failing. The staff-level answer: alert on RED for the service
+> and on saturation for the resource, and treat CPU as a *scaling signal* rather than a
+> *health signal*.
+
+### 1.6 Sampling — and Why Head Sampling Throws Away What You Need
+
+Every trace backend eventually needs sampling, because the cost of not sampling is linear
+in traffic and the cost of keeping every trace is a line item that gets noticed by finance
+before it gets noticed by engineering. The decision that matters is **where** the sample is
+taken.
+
+**Head sampling** decides at the root span, before any work happens, and propagates that
+decision downstream in the sampling flag byte of the `traceparent` header. It is cheap,
+requires no buffering, and is structurally incapable of being revised. The problem is
+exactly what the structure implies: at the moment of the decision, nobody knows whether this
+request will be slow or will fail. So you drop 99% of your errors and 99% of your slow
+requests, and you keep 99% of the boring ones. **The sample is unbiased with respect to
+outcomes and therefore useless for the only two questions you built the tracing for.**
+
+**Tail sampling** buffers spans until the trace *completes*, then decides on content. Keep
+every trace with `status = ERROR`. Keep every trace slower than 2s. Keep 1% of the rest for
+the shape of normal traffic. The result is that the sample is deliberately biased — which
+is correct, because you now keep 100% of the signals you care about at a fraction of the
+storage.
+
+```text
+  HEAD SAMPLING                              TAIL SAMPLING
+  ─────────────                              ─────────────
+  decision at the root span                  decision after the trace completes
+  cheap, no buffering, no memory             needs a buffer held in the collector,
+                                            and a decision on the whole tree
+  can only be "probability"                  can be content-aware:
+    keep if rand() < 0.01                      keep if status == ERROR        ← always
+    keep if rand() < 0.01                      keep if duration > 2000ms      ← always
+                                             keep 1% of the rest
+  "1% of ALL traffic"                        "100% of errors, 100% of slow,
+                                             and a sample of normal"
+  ⇒ 1% of your incidents are visible         ⇒ every incident has a trace
+  ⇒ 1% of your latency problems visible      ⇒ every slow request has a trace
+```
+
+The cost of tail sampling is real and should be stated, because "just do tail sampling" is
+not a free win: the collector must hold the full span set for in-flight traces in memory,
+so its memory scales with *(in-flight request rate × average trace duration × spans per
+trace)*. A service at 5,000 rps with a 300ms average trace and 16 spans holds roughly
+5,000 × 0.3 × 16 ≈ **24,000 spans in flight at any moment** — a collector sized for the
+ingest rate but not for the working set will OOM at exactly the moment you need the traces,
+which is during the incident. Tail sampling also adds export latency, because a decision
+cannot be made until the trace is complete, and a request that never completes (a genuine
+hang) is a request whose trace is never decided.
+
+**A rules-based sampler, and where it sits.** The pragmatic middle ground most fleets
+actually land on: a sampler that is probabilistic *and* content-aware at the client, keyed
+on the outcomes the client can already see. Keep everything non-2xx, keep everything over a
+latency threshold, keep 2% of 2xx under the threshold. This gets most of the value of tail
+sampling without the buffering, and it is the right answer for a client-side SDK. What it
+cannot do is know about errors that happen *downstream* of the client — a checkout that
+returns 200 while its payment leg failed is invisible to a client-side rule.
+
+> **MUST REMEMBER**
+>
+> **Most teams should not sample at the client at all.** The SRE book's guidance is
+> explicitly that you should collect 100% and let the *storage tier* decide what to keep,
+> because the storage tier can change its policy after the fact and the client cannot. A
+> client-side sample rate is a decision you can never revisit: lowering it destroys data you
+> did not know you needed, and raising it later cannot recover the 3am of last Tuesday.
+> If you must sample at the client, sample on a *rule* (errors and slow requests always
+> kept) rather than a *probability*, and treat the rate as a decision with an owner and a
+> review date.
+
+### 1.7 The Debugging Story — You Cannot Reproduce It Locally
+
+The defining constraint of a distributed system is that the failure is a property of the
+*system*, not of any component, and therefore cannot be reproduced in isolation. A bug that
+reproduces locally 100% of the time is a bug someone already fixed. The interesting class
+is the one that reproduces 1 in 4,000 times, only under production load, only when two
+services happen to be slow at the same moment, and only for requests from a particular
+customer's data volume.
+
+That means the debugging loop is entirely dependent on being able to **find the evidence
+for a specific occurrence** after the fact. Three properties are required, and each one is
+missing from a surprisingly large number of real systems:
+
+1. **A durable correlation identifier that a human can produce.** The customer says "it
+   happened to me on Tuesday". You need the trace to be findable by their account ID, their
+   order ID, or a timestamp window plus a filter — not by a request ID that only exists
+   inside a log line they never saw.
+2. **Retention long enough to cover the reporting lag.** Users report things days later.
+   Trace retention of 24 hours covers an on-call engineer debugging *now* and nobody
+   debugging a report from last Tuesday. This is a cost decision, and it is almost always
+   made implicitly by the tool's default.
+3. **Enough context retained to answer the question.** A trace with spans that have
+   durations but no attributes is a pretty picture; a trace with the SQL statement, the
+   queue name, the retry count and the error type on each span is evidence. Instrumenting
+   the *outcome* of each span is as important as instrumenting its duration.
+
+```text
+  A REPORTABLE INCIDENT AND WHAT YOU NEED TO ANSWER IT
+
+  user: "checkout failed for me on Tuesday afternoon"
+    │
+    ├── need: find by userId or email          → span attribute + log field
+    │       and a time window, retained 7+ days
+    ├── need: the causal chain                 → traces with propagated context
+    │       (if the browser sent the request, the edge must propagate too)
+    ├── need: the failure point                → span status + error attributes
+    ├── need: what the system looked like     → metrics for that window,
+    │       then                                              retained alongside
+    └── need: what changed                    → deploy markers, config change log,
+                                                   flag changes, autoscaling events
+
+  note the last one: a timeline of DEPLOYS overlaid on the metrics graph is
+  the single highest-yield debugging tool, and it is free.
+```
+
+The right build order, in case you are asked "where would you start": metrics that tell you
+*whether* it is bad and *since when*, logs that answer *what* happened, traces that answer
+*where*, and then — the thing that most teams never do and that pays for itself in a week —
+**a deploy/event marker on every dashboard**, so that the first question you ask is "what
+shipped an hour before this started". It is astonishing how often the answer is "a config
+change at 14:02" and nobody knew until the chart showed a marker.
+
+### 1.8 What a Trace Still Does Not Tell You
+
+Over-claiming is the failure mode of observability advocacy, and a staff candidate should
+volunteer the limits rather than wait to be asked.
+
+- **It shows where time went, not why a decision was made.** A 180ms `stock-check` span
+  tells you `stock-check` was slow. It does not tell you it took a row lock, ran a
+  sequential scan on an unindexed column, or called a third-party API three times because
+  the first two returned empty.
+- **It does not tell you whether the business outcome was correct.** A trace of a clean
+  200 that charged a customer twice is a beautiful trace of a wrong outcome. Business
+  correctness is a different class of check — invariants, reconciliation, domain-level
+  assertions — and no amount of tracing substitutes for it. *Observability tells you the
+  system did what it did; it does not tell you that was right.**
+- **It is a sample and the sample is biased.** Do not compute a percentile over retained
+  traces and expect it to agree with the metric percentile. Under head sampling they will
+  disagree randomly; under tail sampling they will disagree *systematically*, because the
+  retained set is enriched for exactly the slow requests that dominate the metric's tail.
+- **It does not show the work that is not instrumented.** A span over a `JdbcTemplate`
+  call tells you the database took 71ms. It does not tell you the database spent most of
+  that blocked on a lock held by a transaction belonging to another service — the single
+  most common real cause — unless lock waits are instrumented, which they usually are not.
+- **It cannot see across an untraced boundary.** A trace ends at the point where context
+  propagation stops: an un-updated SDK, a queue consumer that ignores headers, a
+  third-party API, a database whose internals are not instrumented. Every such boundary is
+  a place where the causal chain quietly becomes two unrelated stories.
+
+#### Common Mistakes
+
+- Treating metrics, logs and traces as three interchangeable views of the same data, then
+  buying three tools and still being unable to answer a question.
+- A `userId`, `orderId` or raw `requestURI` in a metric label — a permanent series per
+  distinct value, in a backend nobody sized for it.
+- Treating a dashboard as observability, and finding during an incident that the answer was
+  in a dimension the dashboard's author never thought of.
+- Alerting on CPU and calling it health; CPU is demand, not saturation, and a
+  database-bound service is saturated at 15% CPU.
+- Head sampling at 1% "to keep costs down", which discards 99% of errors and 99% of slow
+  requests — the two things the traces were installed to find.
+- 100% head sampling "to see everything", which turns a storage decision into a surprise
+  bill and then gets "fixed" by dropping to 10%, at which point the sampling is both
+  expensive and blind.
+- Trace retention of 24 hours, which covers on-call debugging and not a customer report
+  filed on day three.
+- No deploy or config-change markers on the dashboards, so the first hour of every
+  investigation is spent correlating by hand.
+- Treating a trace as proof that the business outcome was correct.
+
+#### Interview Questions — Observability in Distributed Systems
+
+**Q1. A team has Prometheus, Grafana and Loki. They page for an incident and cannot find
+the cause. What is missing?** `STAFF`
+
+Observability, as distinct from monitoring. A dashboard is a pre-written query for an
+anticipated question; observability is the ability to ask an unanticipated question of the
+system. Concretely, three things are usually missing: traces, so there is no causal chain
+across services; a durable correlation identifier a human can search on, so the customer's
+report cannot be joined to the system's data; and retention long enough to cover the
+reporting lag. I would not start by adding a tool. I would start by taking one recent
+incident and asking whether the evidence needed to explain it still exists, and if not, why
+not.
+
+**Q2. Why is a `userId` in a metric label worse than a `userId` in a log line?** `TRICKY`
+
+Because the metrics backend holds one time series per unique label combination, for the
+whole retention window, whether or not data is still arriving. 250,000 users means 250,000
+permanent series for that one metric, multiplied by every other label. A log backend is
+designed to hold a million records with rich fields and to index them for search; a metrics
+backend is designed to hold a few thousand series per metric and has no notion of a record.
+So the identifier belongs in the log line and in the span attribute, where it is
+searchable, and the metric should carry the bounded dimension you actually aggregate by —
+with an exemplar pointing at a trace so the walk from the aggregate down to the individual
+is still one click.
+
+**Q3. Your p99 latency doubled. How do you get from that number to one specific slow
+request?** `TRICKY`
+
+Exemplars, or the manual equivalent. On the latency histogram, attach an exemplar carrying
+the trace ID for a sample of observations in each bucket. Click the point on the graph and
+the trace opens with the slow span identified, the sibling calls visible, and the request
+and customer identifiers as span attributes. The manual version is the same walk done by
+hand: take the spike window, filter logs on the request ID pattern, extract the trace ID,
+open the trace. What I would check first is that the trace actually exists for that
+request — under head sampling most of them do not, which is the real answer more often than
+anyone expects.
+
+**Q4. When is head sampling acceptable?** `ADVANCED`
+
+When the traces are for a specific, narrow purpose that the outcome does not affect — a
+one-off investigation, a canary with known behaviour, a service with low enough volume that
+100% is affordable. It is not acceptable as a general fleet policy, for three reasons. The
+decision is made before the outcome is known, so the sample is blind to errors and
+latency, which are the only two things you keep traces for. It cannot be revised: lowering
+the rate destroys data, raising it cannot recover a past incident. And the SRE book's own
+guidance is that the client should collect 100% and let the storage tier apply retention
+policy, because that decision is reversible and the client-side one is not. The pragmatic
+middle is a rules-based client sampler — always keep errors, always keep requests over 2s,
+keep 2% of the rest — which gets most of the benefit without the collector buffering that
+tail sampling requires.
+
+**Q5. Your p99 from the metrics backend and the p99 you compute from retained traces
+disagree. Which is right?** `TRICKY`
+
+The metric, and the reason the trace number is not comparable. If you head-sampled at 1%,
+the trace set is a uniform random sample of *requests*, which is actually unbiased for the
+median but has enormous variance in the tail — you do not have enough slow samples to
+estimate a p99 at all. If you tail-sampled, the trace set is deliberately enriched for
+slow and erroring requests, so the p99 computed from it is *higher* than the true p99 by
+construction. Neither is a bug; both mean the trace set is not a sample you can compute
+statistics from. Traces answer "where did the time go for this request", and the metric
+answers "how often is it slow". Use each for what it is for.
+
+**Q6. A service has 200 endpoints, 4 methods and 6 statuses. Is its cardinality
+reasonable?** `ADVANCED`
+
+That is 4,800 series for a single metric name, which is at the top of what is reasonable
+and should be checked rather than assumed. The reductions that matter: collapse statuses
+into a small enumerated set (`2xx`, `4xx`, `5xx`) rather than one label per status, since
+nobody alerts on 418 specifically; use the URI *template* not the raw path, which is
+already assumed here; and be suspicious of per-endpoint timers where a handful of hot
+endpoints carries 95% of the traffic — those can be aggregated and the rest sampled
+separately. The number I hold is a few hundred distinct values per label, so 6 statuses is
+completely fine and 4,800 endpoints would be a crisis.
+
+**Q7. You are paged for a spike and your only telemetry is a dashboard. What is your first
+action?** `SCENARIO`
+
+Check the deploy and config-change markers on the graph first, because that is the highest
+probability cause and it is free — most incidents are preceded by a change. Then check
+whether the spike is in one region, one instance type, or one tenant, since the shape of the
+blast radius tells you what kind of failure this is. Then look for a correlate: did the
+dependency's error rate move at the same instant, or did the instance count change (which
+points at an autoscaling event or a rollout)? What I would *not* do is start querying logs
+across forty minutes of data trying to find a needle. If the dashboard had exemplars this
+would take two minutes, which is the argument for having them.
+
+**Q8. A team wants to add "one more dashboard" instead of improving observability. What
+do you push back with?** `STAFF`
+
+A dashboard adds a question; it does not add the ability to ask a question. The useful
+framing is to ask what incident last happened that the new dashboard would have helped with,
+and whether that incident's evidence still exists. Usually the answer is no, because the
+data is sampled away or expired, and the dashboard is a pretty rendering of a fact the
+engineer still cannot drill into. The higher-leverage investments in order: traces with
+error-biased retention, an identifier a human can search, exemplars, and deploy markers.
+None of those is a dashboard, and all four pay for themselves the first time they are used.
+
+> **CHAPTER 1 SUMMARY**
+>
+> The three signals are not interchangeable: metrics are the only ones that aggregate
+> (answers "is it bad, since when"), logs the only ones with per-instance detail (answers
+> "what happened to *this* request"), and traces the only ones that preserve the causal chain
+> (answers "where did the time go"). They fail differently — metrics die by cardinality, a
+> label with a `userId` in it being a permanent series per user and a few hundred values per
+> label being the practical ceiling; logs die by retention and by nobody knowing the field
+> names; traces die by sampling, and head sampling is structurally blind to the errors and
+> slow requests that are the only reason to collect them, which is why most teams should
+> collect 100% and let the storage tier decide. RED is the service-level method, USE the
+> resource-level one, and the distinction that earns its keep is utilisation versus
+> saturation. Exemplars are the bridge from an aggregate to an instance, and they only work
+> if a human can produce a correlation identifier and retention outlasts the reporting lag.
+> And the honest ceiling: observability tells you the system did what it did — it does not
+> tell you that was right.
+
+#### Further Reading
+
+- [Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/) — the four golden signals and the SRE book's own argument that client-side sampling is usually the wrong call.
+- [Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/) — why alert on symptom rather than cause, and why "burn rate" is a better paging signal than a threshold.
+- [Prometheus Naming](https://prometheus.io/docs/practices/naming/) and [Instrumentation](https://prometheus.io/docs/practices/instrumentation/) — label hygiene and the cardinality discipline, written by the people who built the thing that OOMs when you ignore it.
+- [OpenTelemetry Sampling](https://opentelemetry.io/docs/concepts/sampling/) — head, tail and the cost model of each; read before arguing about sampling in an interview.
+- [Application Metrics](https://microservices.io/patterns/observability/application-metrics.html) and [Distributed Tracing](https://microservices.io/patterns/observability/distributed-tracing.html) — the two observability patterns in their canonical form, and a useful corrective to the idea that there is one "observability pattern".
+- [Spring Boot Actuator Metrics](https://docs.spring.io/spring-boot/reference/actuator/metrics.html) — the metric names and tag sets you get for free, and therefore the cardinality you get for free.
+
+## Chapter 2 — Resilience: Timeouts, Retries, Breakers, Bulkheads, Shedding
+
+### 2.1 The Framing: Every Mechanism Is a Bound on What a Dependency Can Take From You
+
+This chapter is the deepest in the volume, so it is worth stating the frame before the
+mechanisms. **Timeouts, retries, circuit breakers, bulkheads and load shedding are not five
+independent patterns. They are five different answers to five different bounds on the same
+question: how much of me is this dependency allowed to consume before I stop it?**
+
+- A **timeout** bounds *duration*. How long a single call may hold my resources.
+- A **retry limit** bounds *attempts*. How much extra work I may generate.
+- A **circuit breaker** bounds *contact*. How often I may discover the dependency is down.
+- A **bulkhead** bounds *concurrency*. How much of my capacity the dependency may occupy.
+- **Load shedding** bounds *admission*. How many requests I accept at all.
+
+A caller that has only a timeout is a service that can be held indefinitely. A caller that
+has only retries is a service that amplifies a dependency's failure. A caller that has only
+a breaker is a service that fails fast but still spends all its time discovering the
+dependency is down. The mechanisms are composable and the composition is where the bugs
+live — which is why they are presented here as a chain, in the order the failures arrive.
+
+> **STAFF-LEVEL CONSIDERATION**
+>
+> The reason these mechanisms are usually configured wrongly is not that engineers do not
+> know the patterns — Resilience4j, Hystrix, Polly and the service mesh all ship them with
+> sensible defaults. It is that **they are added per-team with no central policy on who owns
+> the policy.** Every team's decision is locally correct and the composition is not visible
+> from inside any one team. The senior-level question is therefore never "which breaker
+> config should I use" but "who owns the retry and timeout policy for calls *into* this
+> service, and is that a team or a document". An unowned retry policy is a distributed
+> monolith of load, and it will take down a service no team owns.
+
+### 2.2 Timeouts — And the Arithmetic That Must Always Be Done
+
+A timeout is the cheapest and most universally necessary mechanism, and the most commonly
+wrong. Three separate mistakes, in increasing order of how much they cost.
+
+**Mistake one: no timeout.** The client library's default. For a JDBC-backed HTTP client
+this is frequently "none at all", or a 30s connect timeout paired with a 30s read timeout —
+which is 60 seconds of holding a connection and a thread per call. In a servlet stack with
+200 Tomcat threads, a call that never returns takes the whole service down in roughly the
+time it takes for 200 concurrent requests to arrive, which at 400 rps is about thirty
+seconds. This is a resource leak with a timer, and the timer is generous.
+
+**Mistake two: a timeout larger than the caller's.** Strictly worse than having no timeout,
+because the caller has already given up and you are still spending a thread and a
+connection waiting for a response nobody will read. The deeper version: **a timeout is a
+contract between a caller and a callee, and it must be smaller at every hop going inward.**
+The inner call has to have time to answer before the outer call gives up, and it has to
+account for its own network, its own work, and the propagation delay.
+
+**Mistake three — the one that actually causes incidents: equal timeouts at every hop.**
+Three services in a chain, each with a 3-second timeout. The innermost call has *no time to
+answer*, because by the time the request reaches it, the middle service has already spent
+budget on connection, and the outer service will abandon the whole chain at 3s regardless.
+The result is that the timeout fires, a retry fires, the retry arrives to a service whose
+thread pool is now full of requests that are themselves waiting on the same thing, and the
+slowdown becomes a queue.
+
+**The budget chain, with numbers.** The rule is that the budget *shrinks at each hop* and
+the innermost timeout is comfortably under the outermost — comfortably, because the
+outermost also has to pay for its own work, response assembly, and the network in both
+directions.
+
+```text
+  END-TO-END BUDGET: 300ms for the whole checkout
+
+  gateway → orders            timeout 250ms
+                │
+                ├── inventory  timeout 80ms
+                ├── pricing    timeout 80ms   (parallel — the budget is for the SUM
+                └── fraud      timeout 120ms    of the parallel set, not each one)
+                │
+                └── (orders' own work + assembly: 70ms)
+
+  WHY SHRINKING WORKS
+    outer 250ms  >  inner 80ms  +  network 2ms + (orders' own work ~40ms) + response
+    the inner call returns at 80ms worst case, orders has 170ms left to do its own work
+    and still answers inside 250ms. The margin is what absorbs GC pauses, jitter, and the
+    fact that a p99 is not a p100.
+
+  WHY EQUAL TIMEOUTS FAIL
+    gateway 3000ms ──► orders 3000ms ──► inventory 3000ms
+    inventory is given 3000ms and is told nothing about the 3000ms the outer calls
+    already burned. Under normal load the chain is 40ms and nobody notices. Under
+    degradation, inventory takes 2.5s, orders times out at 3s having spent 3s, the gateway
+    times out at 3s — three layers of thread held, and a retry storm on top.
+```
+
+The arithmetic worth memorising, because it is the one an interviewer asks for: **if the
+end-to-end budget is B and the chain is n hops deep, the innermost timeout must be less
+than B minus the sum of the other hops' own budgets and network costs — and it must be
+less than the *p99* of the inner call, not the mean.** Setting a downstream timeout to the
+inner service's median is a guaranteed false-positive rate: half of all calls are slower
+than their own timeout. Setting it to the p99 means 1% timeouts, which is usually the
+right place to be, and the right place to be is a *decision* rather than a default.
+
+```java
+// ✗ the classic: one global default applied to every client
+@Bean
+RestClient orderClient(RestClient.Builder b) {
+    return b.baseUrl("http://orders").build();   // whatever the default is
+}
+
+// ✓ per-dependency, derived from a published budget, and asserted in a test
+@Bean
+RestClient inventoryClient(RestClient.Builder b,
+                           @Value("${budget.checkout.total-ms}") long totalMs) {
+    // inventory gets 80ms of a 300ms end-to-end budget; connect is a fifth of that
+    // because a connect that hangs is the failure mode a connect timeout exists for.
+    return b.baseUrl("http://inventory")
+            .requestFactory(simpleFactory(
+                    Duration.ofMillis(totalMs * 25 / 100),   // connect
+                    Duration.ofMillis(totalMs * 25 / 100)))  // read
+            .build();
+}
+```
+
+> **INTERVIEW TRAP**
+>
+> "We set timeouts on all our clients" scores nothing on its own, because everyone has
+> timeouts. The question underneath it is: *is the timeout smaller than the caller's, and
+> did you do the arithmetic?* A 5-second default in a chain whose caller gives up at 300ms
+> is a thread pool draining itself for no benefit. The senior answer includes the chain: the
+> end-to-end budget, the budget at each hop, and why the innermost is comfortably under the
+> outermost rather than equal to it.
+
+### 2.3 Retries — the Load Multiplier
+
+A retry is the most dangerous mechanism in the list, and the reason is structural: **a retry
+is a load multiplier applied to a component that is already struggling.** If a dependency is
+slow enough to cause timeouts, retrying does not fix the slow dependency — it multiplies
+the offered load by the number of attempts, which deepens the queue, which increases the
+latency, which increases the timeouts. The system is positive-feedback.
+
+The per-hop multiplication:
+
+```text
+  maxAttempts = 3, timeout = 1s, three services in a chain, every layer retries
+
+  ONE user request
+    gateway → orders        1 request   (plus 2 retries = up to  3)
+      orders → inventory    1 request   (×3 retries at this layer = up to  9)
+        inventory → pricing 1 request   (×3 retries at this layer = up to 27)
+          pricing → fraud
+
+  WORST CASE: 3 × 3 × 3 = 27 requests at the deepest dependency,
+  for ONE user request. Not 27 in the good case — in the BAD case,
+  which is exactly when the dependency can least afford it.
+
+  and this is a three-service chain. Six is 729.
+```
+
+That is how a slowdown becomes an outage, and the sequence is always the same: a dependency
+briefly slows (a deploy, a cache miss storm, a noisy neighbour, a GC pause) → timeouts fire
+→ retries fire → offered load on the dependency rises 3×, 9×, 27× → the dependency's queue
+grows → latency grows further → more timeouts → more retries. The service that was coping is
+now the service causing the outage, and the original trigger is usually long over.
+
+> **SCALING REALITY CHECK**
+>
+> A 3-hop chain where every layer retries 3× with a 1s timeout can generate **27× the
+> offered load on the deepest dependency** in the failure case. Six hops is 729×. This is
+> not a theoretical worst case that never happens — it is the *normal* behaviour of a
+> degraded system, which is precisely when you can least afford it. **A retry is a load
+> multiplier, so it belongs at exactly one layer, not all of them.**
+
+Which layer? Generally the layer closest to the *user or the caller* — the edge, where the
+request is a request and a failure is a 500 to one user. Retrying at the innermost hop
+converts one user's failure into N additional calls to the component that is already
+broken, for no user-visible benefit whatsoever, because the retry happens below the layer
+that could have degraded.
+
+### 2.4 Backoff, Jitter, and Why Everyone's Herd Is Identical
+
+If you do retry, the delay must grow (backoff) and it must not be the same delay for
+everyone (jitter). Both parts are load-bearing.
+
+**Exponential backoff** — 100ms, 200ms, 400ms, 800ms — exists because retrying immediately
+during a dependency's recovery window is exactly wrong: the dependency is presumably
+overloaded, and adding load in the first second is how it stays overloaded. Doubling the
+interval gives it room to drain.
+
+**Jitter** exists because of a specific and extremely common failure. Every client was
+given the same interval — "retry after 1 second" — so every client that failed at 10:00:00
+fails at 10:00:01, and retries at 10:00:01, and if the dependency is still down every one of
+them fails again at 10:00:02 and retries at 10:00:02. **The retries are perfectly
+correlated, so the herd is a herd, and the recovery is a synchronised stampede onto a
+component that is just barely healthy.** Adding randomness destroys the correlation:
+
+```text
+  NO JITTER — 1,000 clients, 1s interval, dependency recovers at t=10s
+
+  t=0.0  1000 failures, all clients back off to t=1.0
+  t=1.0  1000 retries fire SIMULTANEOUSLY  → dependency: 1000 requests, capacity 200
+  t=1.0  800 time out, all back off to t=2.0
+  t=2.0  800 retries fire SIMULTANEOUSLY  → dependency: 800 requests, capacity 200
+  ... repeat.  The dependency NEVER sees less than 200 rps of offered load
+      even though it has recovered, because the herd re-synchronises every interval.
+
+  FULL JITTER — retry_delay = random(0, min(cap, base × 2^attempt))
+
+  t=1.0  retries spread uniformly over [0, 1s] → 200 arrive in the first 200ms,
+         40 in the next, 2 in the next.  The dependency's offered load is
+         BELOW capacity for most of the window, so it actually recovers.
+```
+
+The variant to know is **full jitter** (`random(0, computed_backoff)`) versus **equal
+jitter** (`computed_backoff/2 + random(0, computed_backoff/2)`). Full jitter is what the
+AWS Builders' Library article recommends and it is the better default; equal jitter is a
+reasonable compromise when you need a lower bound on the delay for some reason. Decorrelated
+jitter is a third option that is better at long horizons. The staff-level answer does not
+require picking between them — it requires saying that *uncorrelated retries synchronise
+into a herd, and that the herd is why a recovered dependency is knocked over again*,
+which is a fact about the recovery, not just the failure.
+
+### 2.5 Retry Budgets — the Correct Senior Answer
+
+Both forms of jitter are still per-client. The mechanism that solves the actual problem is
+the **retry budget**: a policy that caps the fraction of requests allowed to retry, and
+therefore caps the multiplier at *every* traffic level rather than only the happy one.
+
+```text
+  RETRY BUDGET
+
+  rolling_window = 60s
+  budget = 0.20                    # at most 20% of requests may be retried
+
+  actual_retries / total_requests ≤ 0.20   →  retries proceed normally
+  actual_retries / total_requests > 0.20   →  retries are dropped; the failure
+                                              is returned to the caller immediately
+
+  the multiplier is therefore BOUNDED BY 1.2 in steady state, always,
+  no matter how badly the dependency is behaving.
+```
+
+The elegance is that the budget is self-regulating in the direction you want. When the
+system is healthy, retries are rare, the budget is barely touched, and all of it is
+available. When the system degrades and the retry rate climbs, the budget is consumed within
+seconds and the excess retries are *dropped* — which is exactly the correct behaviour, and
+it is the opposite of what a naive client does. **The budget converts "retry more when it is
+hurting" into "retry less when it is hurting",** and it does so without any human
+switching anything.
+
+The additional property that matters for the *composition* problem: a budget is a policy
+about a fraction of traffic, and a fraction is *additive across layers* in a way an
+absolute retry count is not. Every layer can have "up to 20%", and the compounding is
+bounded at 1.2^n rather than 3^n — but more importantly, each layer's budget is measured
+against *its own* inbound traffic, so a layer that is not retrying much cannot exhaust the
+budget of a layer that is.
+
+> **MUST REMEMBER**
+>
+> **A retry is a load multiplier, so it belongs at one layer, not all of them.** Google's
+> "Addressing Cascading Failures" is the canonical treatment and the phrase that carries
+> the argument: if you have retries at multiple layers, the number of retries against the
+> lowest service can be exponential in the depth of the call tree. Retrying at multiple
+> levels is not defensive — it is a coordinated denial of service you are inflicting on
+> yourself.
+
+### 2.6 Circuit Breakers — and the Threshold That Means Nothing
+
+The state machine is standard and worth being able to draw: **CLOSED** (traffic flows, failures
+counted) → on threshold exceeded → **OPEN** (calls fail immediately without touching the
+dependency, for a `waitDurationInOpenState`) → **HALF_OPEN** (a limited number of probe
+calls allowed through) → if they succeed, **CLOSED**; if they fail, back to **OPEN**. The
+value of the half-open state is that it makes recovery *observable* and *gradual* rather
+than an all-at-once stampede of every client that timed out simultaneously.
+
+```text
+              failure rate > threshold
+        ┌──────────────────────────────────┐
+        │                                  ▼
+   ┌─────────┐   wait duration elapsed  ┌────────┐  probe succeeds
+   │  CLOSED │ ────────────────────────► │  OPEN  │ ──────────────┐
+   │ (normal)│ ◄──────────────────────── │(fail  │                 │
+   └─────────┘   probe succeeds          │ fast) │                 │
+        │                                └────────┘                 │
+        │        probe fails              ┌───────────┐            │
+        └───────────────────────────────► │ HALF_OPEN │ ◄──────────┘
+                back to OPEN              │ (limited  │
+                                           │  probes)  │
+                                           └───────────┘
+```
+
+The misconfiguration to know cold, because it is the single most common circuit-breaker
+bug in production:
+
+> **A `failureRateThreshold` is meaningless below a `minimumNumberOfCalls`.** The failure
+> rate is a *ratio*, and a ratio computed over four calls is noise. Set
+> `minimumNumberOfCalls: 5` and `failureRateThreshold: 50`, and a single unlucky call out
+> of five trips the breaker — at which point every request fails fast, for a dependency that
+> is fine, and the incident you caused is indistinguishable from a real outage. The
+> converse also happens: set `minimumNumberOfCalls: 1000` on a service that receives 20
+> requests a minute and the breaker will *never* open, because the rolling window never
+> fills, and the mechanism silently does nothing for the entire incident you installed it
+> for.
+
+The two numbers have to be chosen against each other deliberately. A useful way to state it
+at interview: the window should be long enough to contain a meaningful number of calls
+(at 20 rps, 100 calls is 5 seconds — too short to distinguish a blip from a failure), and
+the minimum number low enough to actually be reachable at your traffic. At low traffic, the
+honest answer is a **consecutive-failure counter** rather than a rate, because the rate
+never becomes significant.
+
+Other things the breaker does that are not obvious, and which map onto the Spring
+Volume 11 Chapter 4 material:
+
+- **A breaker that opens is a silent outage.** Every call fails fast with a `CallNotPermitted`
+  — and if the caller's fallback returns a success-shaped response, your **error rate stays
+  at 0% while the service is returning wrong answers**. Every breaker needs a metric on
+  *rejected* calls, and that metric needs an alert, because a service that is 100%
+  degraded by its own breaker looks perfect on a RED dashboard.
+- **Half-open probe volume is a real number.** If you allow 10 half-open probes and there
+  are 10,000 clients, you are testing recovery with 10 calls and then letting 10,000 in at
+  once. The probe count should be sized against the dependency's real capacity, not chosen
+  by feel.
+- **Breakers are per dependency, not per service.** One breaker for "the payments call
+  graph" means a fraud-provider outage opens the breaker for the pricing call too. The
+  breaker must be as narrow as the failure you are insulating against.
+
+### 2.7 Bulkheads — Pool Isolation vs Semaphore Isolation, and Why the Difference Matters
+
+A **bulkhead** bounds how much of your capacity a dependency can consume, by partitioning
+the resource that makes the call. The two implementations are not equivalent, and the
+distinction is the kind of thing a staff interviewer will press on.
+
+**Thread-pool isolation** — the calling thread hands the work to a dedicated pool and moves
+on. A dependency that hangs consumes the *bulkhead's* threads, not yours. **Semaphore
+isolation** — the calling thread acquires a permit, does the call inline, releases. A
+dependency that hangs consumes a permit *and* a thread from the pool that was already
+serving it.
+
+```text
+  POOL ISOLATION (dedicated executor per dependency)
+  ─────────────────────────────────────────────────
+    request thread (Tomcat, 200 threads)      bounded by bulkhead, NOT by the dependency
+        │  submit() and return immediately
+        ▼
+    ┌──────────────┐   ┌──────────────┐
+    │ orders-pool  │   │ pricing-pool │   each 20 threads, each its own queue
+    │ 20 threads   │   │ 20 threads   │
+    └──────┬───────┘   └──────┬───────┘
+           │                  │
+           ▼                  ▼
+     dependency X       dependency Y
+
+    X hangs → 20 threads + 20 queue slots consumed → 180 Tomcat threads still serving
+    X is slow and saturated → 21st request is QUEUED, not refused → 200 Tomcat threads
+                              still serving, X's callers wait in the pool queue
+    ✔ the dependency CANNOT consume your request-handling capacity
+    ✘ extra threads, extra context switches, queues hide the failure unless you set
+      a queue size AND a rejection handler
+
+
+  SEMAPHORE ISOLATION (permit per dependency)
+  ──────────────────────────────────────────
+    request thread acquires permit, calls INLINE, releases
+    Tomcat 200 threads share everything, with N permits per dependency
+
+    X hangs → 20 permits + 20 Tomcat threads consumed → 180 threads still serving
+    X is slow and saturated → 21st request gets CallNotPermitted IMMEDIATELY → fast fail
+    ✔ zero extra threads, zero context switches, fails fast and visibly
+    ✘ the permits are NOT isolated from the request threads — a hung dependency still
+      eats 20 of your 200 Tomcat threads, permanently, until they time out
+```
+
+The honest summary, and the sentence to give at interview: **pool isolation contains a hung
+dependency; semaphore isolation does not.** A semaphore bounds the *number of concurrent
+calls* and nothing else — the threads doing those calls are still your threads, so a
+dependency that accepts the connection and never responds consumes your request-handling
+capacity until the timeout fires. Pool isolation puts a wall between the two, at the cost
+of an extra executor and a queue that can hide backpressure unless you size it deliberately
+and attach a rejection handler.
+
+The common misconfiguration in both: **a bulkhead with an unbounded queue.** A queue with
+10,000 slots means requests wait rather than fail fast, so latency climbs to 10 seconds
+while your error rate stays at zero, and the user experience is a spinner rather than an
+error. A bulkhead exists to fail *fast*; an unbounded queue is the opposite of a bulkhead.
+
+```java
+// Pool isolation, bounded, with a rejection handler that produces a real outcome
+ThreadPoolExecutor fraudPool = new ThreadPoolExecutor(
+        20, 20,                       // fixed: the bulkhead IS the number
+        0L, TimeUnit.MILLISECONDS,
+        new ArrayBlockingQueue<>(50), // bounded: 50 waiters max
+        new ThreadPoolExecutor.AbortPolicy());   // reject, do not queue forever
+
+// The rejection handler is the part everybody omits. Without it, ThreadPoolExecutor
+// silently DROPS the task and the caller returns a success-shaped response, so the
+// service is quietly not doing the thing it exists to do.
+
+// Semaphore isolation
+Semaphore fraud = new Semaphore(20, /* fair: */ true);
+if (!fraud.tryAcquire(50, TimeUnit.MILLISECONDS)) {
+    throw new DependencyOverloaded("fraud", /* degraded: */ true);
+}
+try {
+    return fraudClient.check(order);      // inline, on the request thread
+} finally {
+    fraud.release();                      // finally, or a thrown exception leaks a permit
+}
+```
+
+### 2.8 Load Shedding — Deliberate Refusal as a Feature
+
+Every mechanism so far bounds what happens to a request that is *already in flight*. Load
+shedding bounds the requests you **accept**. It is admission control, and it is the
+mechanism that turns a collapse into a degradation.
+
+The idea: when a service is past a measured threshold of load — queue depth, CPU, in-flight
+requests, or its own p99 against a budget — it starts returning a fast, cheap, *correct*
+refusal to some fraction of incoming requests, and serving the rest at full quality. A
+rejected request costs microseconds. A request admitted into a saturated system costs
+seconds and then times out anyway, and it also holds resources that could have served a
+request that would have succeeded.
+
+```text
+  NO SHEDDING — 2,000 rps offered, 1,000 rps capacity
+
+    t=0     1000 in flight, all slow but eventually complete (p99 = 2s)
+    t=1s    1000 more arrive → 2000 in flight, 1000 queued
+    t=2s    the first 1000 complete; 2000 more have arrived → 2000 in flight again
+    ⇒ steady state: p99 = 4s, p99.9 = 10s+, connection pool exhausted,
+      threads blocked, error rate rising as timeouts fire
+    ⇒ the queue is the failure mode. Every request is slow, and the queue
+      grows without bound until something times out and frees a slot.
+
+  WITH SHEDDING — reject above 800 in flight, 429 or a degraded response
+
+    t=0     800 in flight served at p99 = 120ms
+    t=0.1s  200 more arrive → rejected immediately, 200 × "try again shortly"
+    ⇒ steady state: 800 served well, 20% rejected fast
+    ⇒ the user experience is "some requests fail instantly and can be retried"
+       instead of "everything takes 4 seconds and then times out"
+    ⇒ and crucially: total work DONE is higher. 1000 successful operations
+       per second beats 2000 half-finished timeouts.
+```
+
+The decision that makes this a design question rather than a switch is **how you choose
+what to shed**, and the honest answer has three tiers:
+
+1. **Admit-control by priority.** Reject the requests that are cheapest to reject. A search
+   that the user will simply re-issue is a good shed candidate; a payment confirmation is
+   not. Any system that processes writes should shed read traffic first.
+2. **Graceful degradation, in the response.** Before shedding a request, return a *degraded*
+   answer: stale cache data instead of a live call, a partial result instead of a 500. This
+   is strictly better than rejection where it is possible, and the ordering is: fresh →
+   cached → stale → partial → rejected.
+3. **Randomise the rejection.** Rejecting the *newest* or the *oldest* requests is a
+   systematic bias that will be noticed; rejecting a random fraction is a fair-share
+   admission policy, and randomising per-request rather than per-client prevents one
+   unlucky client from being shed every time.
+
+And the operational requirement that is routinely skipped: **the shed rate must be a
+first-class exported metric with its own alert.** A service that is shedding 40% of its
+traffic and reporting a healthy 5xx rate is worse than one that is down, because nothing
+wakes anybody up. The shed counter is a RED metric and it needs a dashboard and a burn-rate
+alert, because "we are protecting ourselves" is only a good thing if the humans find out.
+
+> **PRODUCTION SCENARIO**
+>
+> Problem: `search` returned 5xx for eleven minutes on a Tuesday. Latency was the primary
+> symptom; errors followed.
+> Investigation: error rate started at 03:41, three minutes *after* queue depth began
+> climbing at 03:38. That three-minute gap is the whole story: the queue absorbed the first
+> wave, the queue was unbounded, and the errors only appeared once the connection pool
+> started failing.
+> Root cause: an upstream retry amplification event (a partner API began returning 429s;
+> three layers of the checkout chain each retried 3×) tripled offered load to `search`
+> within 40 seconds. `search` had no bulkhead on that call and no shed path — it queued
+> everything, so the 40 seconds of 3× load became 11 minutes of degraded service for
+> unrelated traffic too.
+> Solution: a bulkhead (pool isolation, 20 threads) on the partner call, a retry budget at
+> the edge, and a load-shed path that returns a degraded result (cached, tag-filtered) above
+> 600 in-flight requests instead of queueing.
+> Prevention: load tests that run past saturation until the *failure* is characterised
+> rather than stopping at the knee, and a dashboard panel for queue depth that pages
+> independently of the error rate.
+
+#### Common Mistakes
+
+- Timeouts equal at every hop, so the innermost call has no budget to answer in.
+- A timeout *larger* than the caller's, which is strictly worse than no timeout: the caller
+  has left and you are still holding a thread and a connection.
+- A timeout set to the dependency's *mean* rather than its p99, which produces a ~50%
+  false-positive rate by construction.
+- Retries at more than one layer, multiplying to 3ⁿ against the deepest dependency.
+- Backoff without jitter, which re-synchronises every client that failed at the same
+  instant and knocks over a dependency that has already recovered.
+- Retries with no budget, so the multiplier grows without bound exactly when the
+  dependency can least afford it.
+- `failureRateThreshold` set with a `minimumNumberOfCalls` low enough that a single unlucky
+  call trips the breaker — or a minimum high enough that the breaker never opens at your
+  traffic level.
+- A breaker whose fallbacks return success-shaped responses, so a 100%-rejected service
+  reports a 0% error rate.
+- Bulkheads implemented as semaphores when the failure mode being insured against is a hang,
+  or implemented with an unbounded queue, which turns fast failure into a 10-second wait.
+- No `finally` around a semaphore permit, or no rejection handler on a bulkhead executor, so
+  permits leak and tasks are silently dropped.
+- No load shedding, so overload is absorbed by an unbounded queue and every request
+  becomes slow rather than some requests failing fast.
+- Shedding with no metric on the shed rate, so the deliberate degradation is invisible to
+  the humans who need to know.
+
+#### Interview Questions — Resilience
+
+**Q1. A three-service chain each has a 3-second timeout. What is wrong and what is the
+fix?** `TRICKY`
+
+The inner call has no time to answer. The outer caller abandons the chain at 3s regardless
+of how much budget the inner services have already burned, and every hop in between is
+holding a thread and a connection for work whose result nobody will read. The fix is a
+shrinking budget: derive an end-to-end budget from the SLO, and at each hop inward take a
+fraction that leaves room for that service's own work and for the network. A 300ms
+end-to-end budget might give the gateway 250ms, orders 150ms, and inventory 60ms — so that
+the inner call returns with time to spare at every level. The number that matters is that
+the innermost timeout must exceed the *p99* of the inner call and still be comfortably
+under the outermost.
+
+**Q2. Our service retries 3× with a 1s timeout at three layers of a call chain. What's the
+worst case?** `TRICKY`
+
+27 requests at the deepest dependency for one user request — and crucially that is the
+failure case, not the happy case, which is the only case that matters because that is when
+the dependency is struggling. Three layers is 3³ = 27; six layers is 729. The mechanism is
+that a slowdown produces timeouts, timeouts produce retries, retries multiply offered load
+onto a component that is already saturated, which deepens the slowdown. A retry is a load
+multiplier, so it belongs at one layer — the edge, where a failure is one user's 500 — and
+not at every layer.
+
+**Q3. What is a retry budget and why is it better than a retry count?** `ADVANCED`
+
+A retry budget caps the *fraction* of requests allowed to retry over a rolling window —
+commonly 10–20%. A retry count caps attempts per request, which is the same thing when
+traffic is steady and completely different when it is not. The budget is self-regulating in
+the right direction: healthy traffic barely touches it, so the whole budget is available
+when a transient blip happens; degraded traffic exhausts it within seconds and the excess
+retries are dropped, so the multiplier stays bounded at 1.2 while the dependency recovers.
+A count gives you no such property — it lets every request retry 3× at exactly the moment
+the dependency is least able to take it. Google's *Addressing Cascading Failures* is the
+canonical reference.
+
+**Q4. A circuit breaker has `failureRateThreshold: 50` and `minimumNumberOfCalls: 5`. What
+happens in production?** `ADVANCED`
+
+It trips on a single unlucky call out of five, because 1/5 is 20% and 2/5 is 40% and 3/5 is
+60% — the ratio is dominated by noise at that sample size. So the breaker opens during
+ordinary variance, every call fails fast with `CallNotPermitted`, and the resulting outage
+is indistinguishable from a real one. The threshold is meaningless below a minimum number
+of calls large enough to make the ratio stable — which means the two settings have to be
+chosen together against the actual traffic rate. At 20 rps, a 100-call window is 5 seconds,
+which is too short to distinguish a blip from a failure; at low traffic the honest answer is
+a consecutive-failure counter rather than a rate, because the rate never becomes
+significant.
+
+**Q5. Thread-pool bulkhead or semaphore bulkhead — when does each one apply?** `ADVANCED`
+
+Thread pool when the failure you are insuring against is a *hang* — a dependency that
+accepts the connection and never responds. Pool isolation puts a wall between the
+dependency and your request-handling threads, so a hung call consumes the bulkhead's
+threads rather than Tomcat's, and the extra cost is an executor plus a context switch.
+Semaphore when the failure is *saturation* and you want fast, visible failure — the 21st
+concurrent call is rejected immediately rather than queued. The critical asymmetry is that
+a semaphore does not isolate your threads: a hung dependency still consumes a Tomcat thread
+for the permit it holds, so pool isolation contains a hang and semaphore isolation does not.
+Either way the queue must be bounded, because an unbounded queue converts the fast failure
+a bulkhead exists to provide into a ten-second wait with a 0% error rate.
+
+**Q6. What is load shedding and how is it different from a bulkhead?** `TRICKY`
+
+A bulkhead bounds a *dependency's* consumption of your capacity; shedding bounds the
+requests you *admit* at all. Shedding is admission control: above a measured threshold —
+in-flight requests, queue depth, or your own p99 against budget — the service starts
+returning a fast, cheap, correct refusal for a fraction of incoming traffic while serving
+the rest at full quality. A rejected request costs microseconds; an admitted request into a
+saturated system costs seconds and often times out anyway, so shedding *increases* total
+successful work. The design question is what to shed and in what order — fresh, then
+cached, then stale, then partial, then rejected — and the operational requirement most
+teams skip is exporting the shed rate as its own metric, because a service shedding 40% of
+traffic with a 0% 5xx rate is a silent outage.
+
+**Q7. A teammate proposes adding retries "just to be safe" to a call that already has a
+timeout and a breaker. What do you say?** `SCENARIO`
+
+That the three mechanisms are not independent insurance; they multiply. The timeout bounds
+duration, the breaker bounds contact, and the retry undoes both — it re-creates the contact
+the breaker just refused, and it does so with a multiplier, on the one dependency that
+cannot take it. The concrete objection is that the composition is invisible: this team's
+retry is correct for this team, and the fact that it multiplies with two other teams'
+retries against the same service is a system-level fact that nobody can see from inside a
+team. What I would propose instead is a retry budget at this layer, jittered backoff, and
+an explicit decision about which single layer owns the retry for this path.
+
+**Q8. Our service is returning wrong answers and the error rate is 0%. What mechanism
+explains this?** `SCENARIO`
+
+Circuit breakers with success-shaped fallbacks, and it is worth walking the other
+possibilities in order. A breaker rejecting 100% of calls with a fallback that returns a
+cached or empty result gives a 0% error rate and a 100% incorrect result. Bulkhead
+rejections that produce a default value behave the same way. A retry budget that silently
+drops retries is fine on its own — that one degrades correctly. The fix is the same in all
+cases: every degradation path needs its own counter, and `CallNotPermitted` /
+`BulkheadFullException` need to be visible on a dashboard and in an alert, because they are
+failures that deliberately do not look like failures.
+
+> **CHAPTER 2 SUMMARY**
+>
+> The five mechanisms are five different bounds on one question — how much of me a dependency
+> may take — and they are composable, which is exactly where the bugs are. **Timeouts** must
+> shrink at each hop: three services with equal 3s timeouts give the innermost call no time
+> to answer, and a timeout larger than the caller's is worse than none at all. **Retries** are
+> a load multiplier — 3 layers × 3 attempts is 27× the offered load on the deepest dependency
+> in exactly the case where it cannot be afforded — so they belong at one layer, and the
+> correct bound is a **retry budget** on a fraction of traffic, which self-regulates toward
+> retrying *less* as the system degrades. **Jitter** is not optional: uncorrelated retries
+> resynchronise into a herd that knocks over a dependency that has already recovered.
+> **Breakers** are meaningless below a `minimumNumberOfCalls`, and a breaker with a
+> success-shaped fallback is an outage with a 0% error rate. **Bulkheads**: pool isolation
+> contains a hung dependency, semaphore isolation only bounds concurrency, and an unbounded
+> queue turns a bulkhead into a latency generator. **Shedding** is admission control and is
+> what turns collapse into degradation — provided the shed rate is a metric somebody alerts
+> on. And the reason all of this is usually wrong: each team configured its half correctly
+> and nobody owns the composition.
+
+#### Further Reading
+
+- [Addressing Cascading Failures](https://sre.google/sre-book/addressing-cascading-failures/) — the canonical treatment of retry amplification across call layers, and the origin of the "retries belong at one layer" argument.
+- [Timeouts, Retries and Backoff with Jitter](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/) — the definitive argument for full jitter and for token-bucket retry limiting; the section on why equal backoff creates a thundering herd is the one to read twice.
+- [Using Load Shedding to Avoid Overload](https://aws.amazon.com/builders-library/using-load-shedding-to-avoid-overload/) — admission control from the people who run the largest fleet; the load-shedding policy section is directly usable.
+- [Circuit Breaker](https://microservices.io/patterns/reliability/circuit-breaker.html) — the pattern in its canonical form, including the state machine the chapter above is drawing.
+- [Handling Overload](https://sre.google/workbook/overload/) — the SRE workbook's chapter on queues, load shedding and the specific danger of an unbounded queue as the failure amplifier.
+
+## Chapter 3 — Deployment & Progressive Delivery
+
+### 3.1 Immutable Artifacts and Why a Mutable Server Is a Rollback Problem
+
+The first decision in a release process is whether the thing you deploy is the same thing
+that runs. **Immutable** means: build once, produce a content-addressed artifact, deploy
+that exact artifact everywhere, and never modify a running environment in place. Mutable —
+ssh into the server, `apt upgrade`, patch a config file, restart — sounds operationally
+simple and is the reason rollbacks are terrifying.
+
+The failure mode is not theoretical and it is well known. With a mutable server, after
+production runs for three weeks you no longer have a machine matching any build. The
+config has drifted, two packages have been upgraded by hand to fix an incident, and one
+hotfix was applied with `sed`. Now "roll back" means "work out what the machine used to look
+like", which is an archaeology project, and during an incident nobody can do archaeology.
+Worse, the rollback is *not verifiable* — you cannot tell from the artifact registry whether
+the thing you are about to restore is the thing that was running when the incident started,
+so the rollback is a guess.
+
+An immutable pipeline gives you three things at once: the artifact ID *is* the version, so
+rollback is `kubectl set image` back to a known digest; the environment is described by
+versioned config (Chapter 4's ConfigMaps), so drift is impossible by construction; and
+"what is running in production" is answerable by querying the cluster, because the cluster
+is the source of truth and the pods say what they are.
+
+```text
+  MUTABLE SERVER                        IMMUTABLE PIPELINE
+  ──────────────                        ──────────────────
+  ssh in → apt upgrade libssl          docker build → sha256:9f2a... → push to registry
+  edit /etc/app/config.yml             deploy by digest (never by tag — tags move)
+  systemctl restart                    config from a versioned ConfigMap
+                                       │
+  what is running?        ???          what is running?  kubectl get pods -o json
+  roll back to last      ???          roll back to       kubectl set image ...=sha256:...
+  good version?
+  drift is invisible,   yes           drift is impossible — the pod is replaced,
+  rollback is a guess                   not modified
+```
+
+One detail that is worth stating because it is a real incident source: **deploy by image
+digest, not by tag.** Tags are mutable — `:latest` moves, `:1.4.2` can be rebuilt with a
+different base image — so a rollback to a tag may not be a rollback to the same bytes. The
+digest is the content hash and it is the only stable identifier.
+
+### 3.2 Blue/Green
+
+Two identical environments, `blue` and `green`, with a load balancer in front. Deploy the
+new version to the idle colour, verify it, then flip the routing. The flip is a DNS or
+load-balancer change and takes effect in seconds.
+
+**What you get.** Rollback is a second flip — seconds, and independent of how broken the new
+version is, because nothing about the new environment has to be healthy to stop routing to
+it. That is the genuine strength of blue/green: **the rollback does not depend on the new
+version working.** A canary's rollback depends on the analysis pipeline being able to make
+a decision, which depends on telemetry being correct, which is a dependency the rollback
+should not have.
+
+**What it costs.** Double the capacity, permanently, for the service — not just during a
+release. This is the number that kills it for a large fleet: if you run 200 services at
+average 6 instances each, blue/green means 2,400 instances' worth of provisioned capacity
+instead of 1,200, and roughly double the infrastructure bill for a release strategy that
+many teams could achieve more cheaply with a canary. The mitigation is "green when
+idle, blue when idle" — scale the idle colour to zero and scale it up on deploy — which
+works but reintroduces a cold start on every release, and cold starts are where the
+database connection pool storm happens.
+
+**The single point of catastrophic failure.** The cutover is a single event with no
+middle: before it, 100% old; after it, 100% new. If the smoke test is weak — if it checks
+that the service returns 200 on `/health` and nothing about whether it can actually process
+a real request — then the flip is the point at which a broken version meets 100% of
+production traffic, and there is no partial exposure to detect the problem early. The
+practical consequence: **a blue/green cutover must be gated on a check that would catch the
+actual defect**, which usually means a synthetic transaction that exercises a real code
+path (create a real order in a test tenant) rather than a liveness probe. A green/blue
+rollout with a weak gate is a slower way to cause an outage than simply deploying, because
+at least deploying gives you a gradual exposure.
+
+### 3.3 Canary — and the Requirement That Actually Matters
+
+A canary sends a small percentage of traffic to the new version while the rest stays on the
+old, and increases that percentage in stages: 1%, 5%, 25%, 50%, 100%. The advantage over
+blue/green is that the risk is *gradual and continuous* rather than a single cliff, and the
+advantage over a plain rolling update is that both versions are running simultaneously, so
+a real A/B comparison is possible on live traffic.
+
+**The requirement that matters is an automatic, metric-based rollback trigger.** Not a human
+watching a graph. A canary without an automated abort is a slower way to cause an outage
+than a direct deploy, for two reasons: the exposure ramps slowly enough that the human
+watching may not be looking, and the detection latency is now minutes instead of seconds,
+during which the damage accumulates.
+
+The design work is in three numbers, and an interviewer will want all three:
+
+```text
+  1. THE ANALYSIS WINDOW
+     How long must the canary run at each step before you decide?
+     Long enough that the failure mode is observable, short enough that
+     the exposure is acceptable.
+
+     Rule of thumb: ≥ 5× your p99 latency at the new version. A canary judged
+     after 30 seconds against a service with a 2-second p99 has not observed
+     a single slow request — it has measured the fast path and called it healthy.
+     Minimum practical: 5–10 minutes per step. Below that you are not measuring,
+     you are sampling.
+
+  2. THE COMPARISON
+     Canary vs baseline, NOT canary vs absolute threshold.
+     A 2% error rate that is 2× worse than yesterday is a regression.
+     A 2% error rate that is the same as yesterday is Tuesday.
+     Absolute thresholds fire on your traffic shifts; relative comparison
+     catches the regression and ignores the shift.
+
+  3. THE THRESHOLD
+     A statistically meaningful relative degradation. Common: abort if the canary's
+     error rate exceeds the baseline's by more than a factor (2×) with enough
+     samples to be sure (a few hundred requests, so the confidence interval
+     is not dominated by noise), sustained for the window.
+
+     ⚠ the sample-size requirement is the one that gets skipped. At 1% traffic
+       and 10 rps, a canary sees 0.1 rps. In a 5-minute window it has seen
+       30 requests. Any percentage you compute from 30 requests is noise, and
+       an abort on noise is a false rollback; a *failure* on noise is worse.
+       Either raise the canary's traffic share, or extend the window, or
+       accept that the earliest canary steps are effectively blind.
+```
+
+The honest limitation, which belongs in the same breath: a canary detects *statistical*
+problems. It cannot detect a defect that only affects a specific tenant, a specific data
+shape, or a code path that 1% of traffic does not exercise — and 1% of traffic is a
+vanishingly small sample of the *space* of behaviour even when it is a large sample of
+requests. That is why canary analysis is a composite: error rate and latency from RED
+metrics, plus a **synthetic transaction** that exercises the specific new feature, plus
+business-level assertions where they exist. The synthetic check is what catches "1% of
+traffic is fine and 4% of orders are wrong".
+
+### 3.4 Feature Flags — Deploy and Release Are Different Decisions
+
+A feature flag is the most genuinely valuable and most genuinely abused mechanism in this
+chapter, and the important idea inside it is narrow: **deployment and release are separate
+decisions.** You can deploy code to production with the feature off, and release it later to
+a percentage of users. That single separation buys you a large amount of risk reduction — the
+code is in production, exercised by the test path, warmed in the JVM, with the schema
+already migrated, and *not yet affecting anyone*.
+
+The type taxonomy is worth having, because they have different lifetimes and different
+dangers:
+
+| Type | Lifetime | Example | Risk if left behind |
+| --- | --- | --- | --- |
+| **Release flag** | Days to weeks | New checkout flow behind `checkout_v2_enabled` | Combinatorial explosion; branches nobody tests |
+| **Experiment flag** | Weeks | A/B test on pricing display | Statistical validity, and it *never* ends — the control group becomes permanent |
+| **Operational flag** | Months to years | Turn off a risky third-party integration | It becomes an untested branch that everything depends on |
+| **Kill switch** | Indefinite | Disable a subsystem without a deploy | It is the one that must be tested — if the flag path has never run, the switch does not work |
+
+The discipline, and this is the part that matters more than the mechanism: **flags
+accumulate.** Four flags with 20% each is not two configurations, it is a combinatorial
+space of 16, and after a few months there are hundreds of thousands of theoretically
+possible configurations, of which your test suite exercises perhaps three. The result is
+that a "safe" flag system becomes the opposite: every code path is conditional, no path is
+tested, and the only way to know what your system does is to enumerate the flags in
+production right now.
+
+The rules that keep it survivable:
+
+- **Every flag gets an owner and an expiry date, at creation time.** A flag with no owner
+  and no removal date is a permanent branch, and permanent branches accumulate until the
+  code is unreadable.
+- **A flag is removed, not defaulted off.** A flag that is permanently `false` and never
+  deleted is a branch that still exists in every stack trace and every code review forever.
+  Delete the branch and the flag; the behaviour is now the default.
+- **Flags are evaluated on the server, in one place, and injected as configuration** — not
+  scattered `if (flagService.isEnabled(...))` calls through business logic. This is what
+  makes them testable and removable.
+- **Flags are not a substitute for a branch.** A flag whose condition has more than a
+  handful of interacting values is a release branch with extra steps.
+
+> **INTERVIEW TRAP**
+>
+> "We use feature flags, so we can deploy safely" is a true-sounding answer that hides a
+> cost. The correct continuation: flags separate deploy from release, which is genuinely
+> valuable, and they also convert a linear codebase into a combinatorial one. Four flags at
+> 20% each is sixteen configurations, and your tests exercise two of them. Flags are a
+> short-term tool with a mandatory expiry — they work when they are removed on a schedule
+> and they are actively dangerous when they are not.
+
+### 3.5 Rollback — and the Asymmetry Nobody Budgets For
+
+**Rolling back code is easy**: point the deployment at the previous image digest, and within
+the rollout window the old code is serving. It is genuinely cheap and it is the reason
+immutable artifacts matter.
+
+**Rolling back a schema change is not.** This is the asymmetry to state clearly at
+interview, because it is the one that turns a 2-minute rollback into a multi-day incident:
+
+| Change | Rollback | Why |
+| --- | --- | --- |
+| Code reading a column | Trivial | Old code ignores the new column |
+| Code *writing* a new column | Hard but doable | Old code doesn't write it; new values exist for old readers to ignore |
+| Adding a nullable column | Easy | Additive |
+| Adding a `NOT NULL` column with no default | Hard | Old code's `INSERT` fails against the new schema |
+| **Renaming or dropping a column** | **Often impossible** | The data is gone. Not "hard to restore" — gone, unless you took a backup and restoring it loses everything written since |
+| Changing a type (`int` → `bigint`) | Hard | Old code may overflow or mis-parse |
+| Adding a foreign key that existing data violates | Hard | The migration fails, or succeeds and rejects old writes |
+
+A **destructive** migration — `DROP COLUMN`, a narrowing type change, a data-truncating
+operation — makes the release **irreversible**. And "irreversible" is the word that changes
+the risk conversation: it means the deploy is no longer a decision, it is a commitment, and
+the rollback plan that every other part of the process depends on does not exist for it.
+
+**Expand and contract** is the pattern that keeps migrations reversible, and it is worth
+being able to state as four phases with a timeline:
+
+```text
+  PHASE 1 — EXPAND (this release)
+    add the new column, nullable, no constraint      ← old code works, new code works
+    deploy code that writes BOTH old and new          ← readers of either shape work
+    backfill historical rows
+    verify: row counts and checksums match
+
+  PHASE 2 — MIGRATE (this release, after verification)
+    switch reads to the new column behind a flag      ← per-endpoint, with a metric
+    dual-write continues
+    watch the backfill job; it must finish before phase 3
+
+  PHASE 3 — CONTRACT (a LATER release, days later, not the same day)
+    add the constraint / NOT NULL / index             ← now that nothing writes the old
+    stop dual-writing                                     column
+    stop reading the old column
+
+  PHASE 4 — REMOVE (a later release still)
+    drop the old column
+
+  the rule: never phase 1 and phase 3 in the same release. The gap between them is
+  what makes the deploy reversible, and a migration that is "expand and contract in one
+  deploy" is a migration with a rollback plan that does not work.
+```
+
+### 3.6 Database Deploys — Backfill, Dual-Write, Switch, Drop
+
+Because the schema is the hardest thing to roll back, it deserves its own release
+discipline, and the four steps map onto the phases above.
+
+**Backfill on a large table takes an exclusive lock, and the details matter.** This is not
+generic database lore, it is the specific reason backfills take down production:
+
+```sql
+-- ✗ on a 200M-row table: ALTER TABLE takes an ACCESS EXCLUSIVE lock.
+-- Every SELECT, INSERT, UPDATE and DELETE on that table blocks for the duration.
+-- On a busy table that is a full outage for the length of the rewrite.
+ALTER TABLE orders ADD COLUMN channel varchar(32);
+
+-- ✗ UPDATE without a batch: one enormous transaction, one enormous lock, and a
+-- replication lag that takes the replica to disk and stalls reads there too.
+UPDATE orders SET channel = 'web' WHERE channel IS NULL;
+
+-- ✓ add the column without a table rewrite (modern Postgres: no default = metadata only,
+--   which is why "add the column" and "add the column WITH DEFAULT" differ so much)
+ALTER TABLE orders ADD COLUMN channel varchar(32);
+
+-- ✓ backfill in batches, each its own transaction, between the size of a lock
+--   someone will notice and the size that takes hours
+UPDATE orders SET channel = 'web'
+ WHERE id IN (SELECT id FROM orders WHERE channel IS NULL LIMIT 5000);
+-- repeat in a loop, with a sleep, throttled by replication lag
+```
+
+The three failure modes to name: the **exclusive lock** (add the column as metadata only,
+never with a volatile default on a large table), the **replication lag** (a 200M-row
+`UPDATE` generates a WAL stream that takes the replica minutes to apply, so reads from the
+replica go stale and read-after-write guarantees break fleet-wide), and the **long
+transaction** (a single huge transaction holds locks and bloats the WAL). The discipline is
+*batches of a few thousand rows, each its own transaction, throttled by observed replication
+lag*, run as a job that can be stopped and resumed — never as a migration step that must
+complete before the deploy finishes.
+
+**Dual-write** is the phase-1 code: write both the old and new representations in the same
+transaction, so there is never a moment where one exists without the other. It is simple to
+implement and it has one real cost: the write path now does double work and has two places
+to fail, so the code that does it needs to be small, tested, and eventually removed. The
+alternative to dual-write — "backfill then cut over" — has a race window between the
+backfill finishing and the cutover starting, in which writes go to the old column only and
+the backfill's result is stale. Dual-write closes the window; that is what it is for.
+
+**Switch reads** per-endpoint behind a flag, with a metric on each, so the cutover is
+observable and reversible at the granularity of an endpoint rather than the whole service.
+
+**Drop** in a later release. Not the same release. The gap is the entire mechanism, and
+collapsing it removes the rollback path.
+
+> **PRODUCTION SCENARIO**
+>
+> Problem: `accounts` began returning 5xx for all reads at 11:04 on a Wednesday. Writes
+> appeared to work.
+> Investigation: the error rate spiked instantly, not gradually, and `pg_stat_activity` showed
+> a large number of processes in `Lock` waiting on an `ACCESS EXCLUSIVE` lock. The blocker
+> was an `ALTER TABLE ... ADD COLUMN ... NOT NULL DEFAULT 'x'` — the kind of statement that
+> rewrites the entire table on older PostgreSQL versions and holds the lock for the rewrite.
+> Root cause: a backfill migration was shipped in the same deploy as the code, with no
+> batching, and the table was 180M rows. The migration was in the deploy pipeline, so it ran
+> as a pre-deploy step and blocked on the first statement.
+> Solution: killed the migration, added the column as nullable metadata-only, wrote a
+> batched backfill job (5,000 rows per transaction, throttled by replication lag), and
+> deployed the code to dual-write. Total time to restore reads: 4 minutes.
+> Prevention: a migration review checklist that separates additive schema changes from
+> destructive ones, a rule that no migration runs in the deploy path without an explicit
+> human gate, and an alert on `pg_locks` wait duration so an `ACCESS EXCLUSIVE` blocker is
+> visible before it is an outage.
+
+### 3.7 The Release Train, Trunk-Based Development, and the Maturity Signal
+
+Two release cadences, and the choice between them is mostly about *how many services* you
+have.
+
+**Release train** — a schedule (weekly, biweekly, monthly) on which a batch of changes ships
+together, and the batch leaves together. The classic benefit is coordination cost: a single
+window means a single on-call escalation, a single set of release notes, and one team
+watching the graphs instead of fifty. The costs are real and they grow with the fleet: a
+change with a bug sits in the train until the next departure, so the mean time to detect a
+bad deploy is half the train interval, and a rollback that would take two minutes on a
+continuous deploy takes a day because the code has moved on. At 200 services, a monthly
+train means 200 deploys on one day, which is its own outage.
+
+**Trunk-based development** — small changes, merged to trunk frequently, released
+continuously behind flags. The property that matters is not the branching model, it is
+**batch size**: trunk-based development keeps the batch size at one, which is what makes
+the rollback story, the bisect story and the "which commit broke it" story tractable. The
+cost is that trunk must always be releasable, which is only achievable if the risky parts
+are behind flags and the *tests* cover the flagged paths — which is a genuine engineering
+investment rather than a process change.
+
+The maturity signal worth stating, because it is the one that reliably distinguishes teams:
+
+> **A team that cannot deploy daily has a process problem before it has a tooling
+> problem.** Almost always the cause is one of three: the test suite is slow or flaky (so
+> nobody trusts it), the release requires a coordinated window with another team (so the
+> architecture does not support independent deployment), or the rollback story is unknown
+> (so nobody is willing). Each has a different fix, and none of them is "buy a CI tool".
+> Deploying daily is not a goal — it is a measurement of whether the change is
+> batch-size-one, batch-size-one is what makes rollback cheap, and cheap rollback is what
+> makes daily deployment possible. The chain runs backwards from the first step.
+
+#### Common Mistakes
+
+- Mutable servers and hand-patched config, which makes "what is running?" unanswerable and
+  rollback an archaeology project.
+- Deploying by tag rather than by digest, so a rollback may not be a rollback to the same
+  bytes.
+- Blue/green with a smoke test that only checks `/health`, which makes the cutover a cliff
+  rather than a gate — and pays double capacity permanently for it.
+- A canary with no automatic abort, which converts a 2-minute detection into a 10-minute one
+  and still exposes real users.
+- Canary analysis against an absolute threshold rather than against the current baseline, so
+  it fires on your traffic shifts and misses the regression.
+- A canary analysis window shorter than ~5× the p99, which means the slow path was never
+  observed before the traffic was increased.
+- Feature flags with no owner and no expiry, producing a combinatorial configuration space
+  that no test suite can cover.
+- A flag that has been permanently off and never deleted, which is a permanent untested
+  branch.
+- Renaming or dropping a column in the same release that stops using it, which converts a
+  reversible deploy into a permanent one.
+- A backfill in the deploy path, unbatched, on a large table, holding an exclusive lock and
+  generating a replication-lag event.
+- Dual-write that was never removed, which is a permanent double-write on the hot path.
+- A monthly release train across a large fleet, which is a single release with 200 changes
+  and one graph-watcher.
+
+#### Interview Questions — Deployment & Progressive Delivery
+
+**Q1. Blue/green or canary — how do you choose?** `TRICKY`
+
+Blue/green when the failure mode you fear is *catastrophic and expensive* — a data
+corruption, a total outage — because its rollback does not depend on the new version being
+able to report on itself, and the flip back is a routing change that works even if the new
+version is broken in every way. It costs double the capacity permanently. Canary when the
+risk is *statistical and gradual* — a performance regression, a behavioural change affecting
+a fraction of users — because it gives continuous comparison against a live baseline and
+ramps exposure rather than cliff-edging it. The real answer is usually a hybrid: canary for
+the common case, and an explicit "this release is a blue/green release" flag for the
+quarterly one that cannot be rolled back. What I would not do is blue/green everywhere,
+because the capacity cost is the largest line item in the deploy strategy and it is usually
+spent on releases that did not need it.
+
+**Q2. What makes a canary rollback trustworthy?** `STAFF`
+
+An automated, metric-based abort, not a human watching a graph. Three numbers define it:
+the analysis window has to be long enough to observe the failure mode, which means at least
+five times the p99 of the new version, and five to ten minutes per step as a practical floor
+— a canary judged at 30 seconds against a 2-second p99 has measured nothing but the fast
+path. The comparison has to be against the current baseline rather than an absolute
+threshold, because a regression is a *relative* degradation and an absolute threshold fires
+on your traffic shifts. And the sample has to be big enough to mean anything: at 1% of
+10 rps you see 30 requests in a five-minute window, and no percentage computed from 30
+requests is a measurement. The failure modes the canary cannot catch are the ones tied to a
+specific tenant or data shape, which is why a synthetic transaction exercising the new
+feature is part of the gate, not an optional extra.
+
+**Q3. What does a feature flag buy you, and what does it cost?** `STAFF`
+
+It separates the decision to *deploy* from the decision to *release*, which is the genuinely
+valuable idea: code can be in production, exercised by the test path, with the schema
+migrated, and affecting nobody, so the release itself becomes a config change you can undo
+in seconds. The cost is combinatorial. Each flag is a dimension, four flags at 20% each is
+sixteen configurations, and after a few months the space is effectively unbounded and your
+tests cover a handful of it — so a system that feels safer becomes one where the only way
+to know what it does is to enumerate the flags that are set in production right now. The
+discipline that keeps it survivable: every flag has an owner and an expiry at creation, a
+flag that has been off for a month is *deleted* rather than defaulted, and flags are
+evaluated in one place and injected as configuration rather than scattered through business
+logic.
+
+**Q4. Why is rolling back a schema change harder than rolling back code, and what makes it
+impossible?** `TRICKY`
+
+Because the old code has to run against the new schema, and the schema change may have
+destroyed data the old code needs. Adding a nullable column is safe; a `DROP COLUMN` is not,
+because the data is gone and restoring it from a backup also discards everything written
+since. A rename is a drop and an add wearing a trench coat, and a `NOT NULL` column with no
+default makes every `INSERT` from the old code fail. The pattern that keeps it reversible
+is expand-and-contract in separate releases: add the new column and dual-write in this
+release, migrate reads and backfill, then add constraints and stop the dual-write in a
+release days later, then drop the column in a release after that. The gap between expand
+and contract *is* the rollback window; collapsing them is what makes a release
+irreversible.
+
+**Q5. A 200M-row table needs a new column. Walk me through the migration.** `ADVANCED`
+
+Four phases. Add the column as nullable with no default, which on modern PostgreSQL is a
+metadata-only operation and takes a brief lock — adding it *with* a non-volatile default can
+rewrite the table and hold an `ACCESS EXCLUSIVE` lock for the duration, which is the
+classic outage. Then deploy code that dual-writes both representations. Then backfill in
+batches — a few thousand rows per transaction, as a resumable job rather than a migration
+step, throttled by observed replication lag, because a single 200M-row `UPDATE` generates a
+WAL stream that takes replicas minutes to apply and breaks read-after-write across the
+fleet. Verify with row counts and checksums. Then switch reads per endpoint behind a flag
+with a metric. Then, in a later release days later, add the constraint and stop dual-writing.
+Then, later still, drop the old column. The three things that go wrong in practice are the
+exclusive lock, the replication lag, and doing all of it inside the deploy pipeline with no
+human gate.
+
+**Q6. A team's release train runs monthly across 200 services. What's wrong?** `SCENARIO`
+
+Three compounding problems. The batch size is the release size, so a bug ships to every
+service in the train rather than to the one service that was changed, and the blast radius
+of a bad deploy is the whole train. The mean time to detect is half the train interval, so a
+regression is live for up to a fortnight. And a rollback that would take two minutes on a
+continuous deploy takes a day, because the code has moved on — which is the number that
+eventually destroys trust in the release process. Fixing it is a batch-size problem, not a
+calendar problem: shorten the train, and the way to shorten the train is to fix whatever
+makes shipping feel risky — a slow or flaky test suite, a coordinated window with another
+team, or an unknown rollback story. Each of those is the actual work.
+
+**Q7. "We can't deploy daily." What do you investigate, and in what order?** `STAFF`
+
+In this order, because it discriminates between three very different problems. First: does
+the test suite block merge? If it is slow or flaky, the fix is test infrastructure and it is
+the cheapest of the three. Second: does the deploy require another team's permission or a
+coordinated window? If so, the architecture does not support independent deployment, and
+that is an architecture problem, not a tooling one — the usual culprit is a shared
+dependency such as a database schema or a library version. Third: is rollback unknown or
+believed to be slow? If nobody trusts the rollback, nobody is willing to ship, and the fix
+is the immutable-artifact discipline in 3.1 that makes rollback a digest change. A team
+that cannot deploy daily has a process problem before it has a tooling problem, and buying
+a CI tool does not address any of the three.
+
+**Q8. What does deploying dark mean, and when is it the right call?** `TRICKY`
+
+Deploying the new code to production with the feature flag off, so the code is present,
+loaded, warmed and running through the test path, but affects no user. It is the right call
+when the risk is in the *interaction between components* rather than in the logic of the
+feature — a change to a serialisation format, a new dependency version, a config change
+whose effect is a different question, or a release whose main risk is "does it start up
+correctly against production dependencies". It is genuinely valuable because it separates
+the deploy question from the release question, and the release then becomes a config flip
+you can undo in seconds. It is not sufficient on its own: dark code still consumes a code
+path in production, it still has to be correct enough to start, and a flag nobody has ever
+set to true has never been executed in production, so the dark release gives you evidence
+about startup and nothing about behaviour.
+
+> **CHAPTER 3 SUMMARY**
+>
+> Immutable artifacts are the foundation, because they are what make rollback a digest
+> change rather than an archaeology project — and you deploy by digest, not by tag, because
+> tags move. **Blue/green** buys an instantaneous rollback that does not depend on the new
+> version being able to report on itself, at the price of double capacity permanently and a
+> single cliff at the cutover, which is only safe if the gate is a synthetic transaction
+> rather than a health check. **Canary** trades the cliff for gradual exposure and is only
+> trustworthy with an **automatic, metric-based abort** whose three numbers are the analysis
+> window (at least 5× the p99), the comparison against a live baseline rather than an
+> absolute threshold, and a sample size big enough to be more than noise. **Feature flags**
+> separate deploy from release — the one genuinely important idea — and cost you a
+> combinatorial configuration space unless every flag has an owner, an expiry, and is
+> actually deleted when it goes permanent. **Rollback is asymmetric**: code is easy, schema
+> is not, and a destructive migration is irreversible, which is why expand-and-contract in
+> separate releases is not optional — the gap between the phases *is* the rollback window.
+> And the maturity marker: a team that cannot deploy daily has a process problem before a
+> tooling one, and the chain runs backwards from batch size to cheap rollback to daily
+> deploys.
+
+#### Further Reading
+
+- [FeatureToggle](https://martinfowler.com/bliki/FeatureToggle.html) — Fowler's taxonomy of release, experiment, operational and kill-switch flags, and the honest note that all four types need the same owner-and-expiry discipline.
+- [Parallel Change](https://martinfowler.com/bliki/ParallelChange.html) — the expand-and-contract discipline in its general form; it applies to schemas, APIs and configuration files alike.
+- [Microservices](https://martinfowler.com/articles/microservices.html) — the deployment-independence section, which is the requirement every pattern in this chapter exists to make safe.
+- [Run a Stateless Application Using a Deployment](https://kubernetes.io/docs/tasks/run-application/run-stateless-application-deployment/) — the rollout mechanics in practice, including what a rolling update actually does to your capacity while it is in progress.
+- [MonolithFirst](https://martinfowler.com/bliki/MonolithFirst.html) — the counter-case to release-train thinking: the reason a train is long is usually that the pieces were never independently releasable.
+
+## Chapter 4 — Kubernetes for the Java Engineer
+
+The point of this chapter is not to teach Kubernetes. It is to cover, in the order a Java
+engineer who now owns a service actually hits them, the parts of the platform that change
+how you write and configure the application — and the handful of them that will take the
+service down if you get them wrong. The resources are in K8s whether you want them or not,
+so "we use Kubernetes" is not a reason to skip this; it is a reason to know which objects are
+load-bearing.
+
+### 4.1 Pods — Why a Pod Is Not a VM
+
+A pod is the smallest deployable unit, and the abstraction that trips people up is that a
+pod is **a group of containers that share a network namespace and a volume**, not a small
+virtual machine. Containers in a pod see each other on `localhost` and share a process
+namespace if `shareProcessNamespace` is set. That is the entire reason a pod exists as a
+concept: some workloads genuinely need two things that must ship together.
+
+```text
+  A POD — one or more containers, one IP address, shared volumes
+
+  ┌─────────────────────────────────────────┐
+  │  POD  10.244.1.17                      │
+  │                                         │
+  │  ┌───────────────────┐ ┌──────────────┐ │
+  │  │  app container    │ │  sidecar     │ │
+  │  │  (your Spring     │ │  (mesh proxy,│ │
+  │  │   Boot jar)       │ │   or log     │ │
+  │  │                   │ │   shipper)   │ │
+  │  │  port 8080        │ │              │ │
+  │  └───────────────────┘ └──────────────┘ │
+  │                                         │
+  │  they see each other at localhost:8080   │
+  │  and share every volume mounted here     │
+  └─────────────────────────────────────────┘
+            │
+            ▼  a pod is scheduled onto ONE node; it can never
+               straddle two nodes, so anything requiring
+               two processes is why the pod abstraction exists
+```
+
+Three consequences that matter more than the definition. First, **a pod is ephemeral and
+replaceable** — if you treat it as anything else, you have built a system that cannot be
+scaled or upgraded, which is the statelessness requirement from Chapter 6 arriving early.
+Second, **a pod is scheduled to one node**, so anything that must survive a node drain needs
+a replica somewhere else and a way to fail over; that is what a Deployment gives you. Third,
+**pods get rescheduled and IPs change**, so nothing outside the cluster may cache a pod IP,
+and service discovery inside the cluster goes through Services and DNS (4.3) rather than
+addresses.
+
+The other thing a Java engineer needs to know about a pod is the **restart and eviction
+policy**. `restartPolicy: Always` restarts a crashed container in place. `restartPolicy:
+OnFailure` does not restart a container that exited cleanly. And a pod can be evicted
+entirely — by a node drain during a cluster upgrade, by resource pressure, or by a
+`PodDisruptionBudget` shortage — with a SIGTERM, a grace period, and then SIGKILL. The
+grace period defaults to **30 seconds**, and that number interacts with your own shutdown
+code: if your Spring application takes longer than the grace period to close its connection
+pool and drain in-flight requests, Kubernetes kills the JVM mid-request. Setting
+`terminationGracePeriodSeconds` and handling `SIGTERM` is not optional for a Java service
+and is the single most commonly missed piece of Spring-on-Kubernetes.
+
+### 4.2 Deployments and ReplicaSets — the Rolling Update
+
+A **ReplicaSet** keeps a stated number of identical pods running. A **Deployment** manages a
+ReplicaSet and gives you the thing you actually want: a declarative, supervised rollout.
+You declare the desired state — 3 replicas of image `sha256:abc` — and the Deployment
+controller continuously makes reality match it, which means a crashed pod is replaced
+automatically.
+
+The **rolling update** is the default strategy, and its parameters are where the operational
+consequences live. `maxUnavailable` and `maxSurge` (default 25% each) determine how many
+pods are taken down and how many are added at a time. The default behaviour of "25% surge,
+25% unavailable" means with 4 replicas, the rollout first brings up **1 extra pod** (total
+5), waits for it to become ready, then takes **1 pod** out, and repeats. The important
+property is that the new pods must pass their **readiness probe** before old ones are
+removed — that is the mechanism that makes a rolling update safe, and it is the same
+readiness probe from 4.4, so its configuration matters twice.
+
+```text
+  ROLLING UPDATE — 4 replicas, maxSurge 1, maxUnavailable 1
+
+  t0   ████ v1     (4 ready)
+  t1   ████ v1  ▓▓▓ v2 (5 pods; v2 is starting)
+  t2   ████ v1  ████ v2 (4 v1 ready, 1 v2 READY — surge pod passed readiness)
+  t3   ███ ████ v2      (1 v1 removed, now 4 pods)
+  ...
+  t8   ████ v2     (4 ready on v2)
+
+  CAPACITY NOTE: during the rollout you run at up to maxSurge (25%) EXTRA capacity.
+  If you are autoscaling with a CPU target, a rollout doubles the pods and the HPA
+  sees CPU halve and scales the OLD version down — so maxUnavailable effectively
+  becomes 50% of your real capacity while the rollout is in progress.
+```
+
+That last note is a real and commonly-missed interaction: **a rolling update and an HPA
+fighting each other is a rollout that deletes half your capacity.** The mitigations are to
+pin `maxSurge`/`maxUnavailable` to a floor, to scale on a non-CPU signal during the
+rollout, or to use a canary (Chapter 3) so the change is not a simultaneous replacement of
+every pod.
+
+A Deployment also gives you `revisionHistoryLimit` (the last N ReplicaSets kept for
+rollback, default 10) and the crucial `rollout undo` / `kubectl rollout history` commands.
+Combined with the immutable-digest rule from Chapter 3, a deployment rollback is exactly
+"point the Deployment at the previous image digest" — a 2-minute operation that does not
+depend on the new version being healthy.
+
+### 4.3 Services and the Three-Tier Networking, and What DNS Does Not Do
+
+A **Service** is a stable virtual IP and DNS name in front of a changing set of pods. It is
+the thing that makes pods replaceable: the name `orders` resolves to whichever pods are
+currently ready, and clients connect to the name, never to a pod.
+
+There are three types, and the differences are about *exposure*, not about which one you
+use inside the cluster:
+
+| Type | Reachability | Use |
+| --- | --- | --- |
+| **ClusterIP** | Cluster-internal only. A virtual IP, load-balanced across ready pods | The default. Service-to-service calls. This is what almost all of your internal traffic uses. |
+| **NodePort** | Exposed on every node's IP on a port 30000–32767 | Legacy / simple external access without a cloud load balancer. Rarely the right choice in production. |
+| **LoadBalancer** | A real external IP via a cloud provider (or a bare-metal equivalent) | Ingress from outside the cluster. Usually fronted by an Ingress controller for HTTP routing. |
+
+The most important thing to understand is what the Service selector and the endpoints
+mechanically do, because the failure mode is confusing when you hit it. The Service selects
+pods by **label**; it maintains an **EndpointSlice** (formerly Endpoints) containing the IPs
+of the pods that are ready. Traffic to a ClusterIP is **load-balanced across the endpoints**,
+and — critically — the endpoints list is driven by the **readiness probe**, not by liveness.
+A pod that is alive but not ready is removed from the endpoints and stops receiving Service
+traffic, which is precisely the mechanism that makes the readiness configuration in 4.4 the
+most consequential setting on this page.
+
+**What DNS does and does not do** is worth stating because it produces a specific, common
+confusion. The Kubernetes DNS server resolves `orders.default.svc.cluster.local` to the
+Service's ClusterIP. The *load balancing across pods* is NOT done by DNS — it is done by
+`iptables`/`IPVS` rules in the kernel on the node, rewritten as pods come and go. That
+matters because:
+
+- A single DNS lookup returns a single ClusterIP, and the per-request pod selection happens
+  below that in the netfilter layer. So "the DNS lookup is cached" is not a thing; the
+  ClusterIP never changes for the life of the Service.
+- Because selection is connection-level (kube-proxy's `random` or `least-conn` on a per-
+  connection basis), **a single long-lived TCP connection stays on one pod even as the
+  endpoint set changes underneath it.** If your client keeps one HTTP/1.1 connection to a
+  Service, that connection pins to one pod. If that pod is then drained, the connection
+  breaks rather than rebalancing. This is one reason connection pooling and `keep-alive`
+  interact badly with rollouts, and why connection churn (a readiness-driven drain that
+  closes keep-alives) is sometimes desirable.
+- Split-horizon and external DNS behaviour is separate: within the cluster you get the
+  ClusterIP; from outside, unless the Service is NodePort/LoadBalancer, the name does not
+  resolve at all. An "NXDOMAIN in production" for a name that "works in staging" is
+  usually this.
+
+### 4.4 Probes — Liveness vs Readiness vs Startup, and the Readiness Bug
+
+This is the highest-value thing in the chapter for a Java engineer and the one most likely
+to be tested in a senior loop, so it gets the most space. There are three probe kinds, they
+answer three different questions, and confusing them is a leading cause of self-inflicted
+outages.
+
+| Probe | Question | Consequence of failure | Should it check dependencies? |
+| --- | --- | --- | --- |
+| **Startup** | Has the app finished starting? | Retried until it passes; then liveness/readiness begin | No. It runs *before* the app is up, so a dependency check here just extends startup. |
+| **Liveness** | Is this process wedged and in need of a restart? | **The container is killed and restarted** | **Almost never** |
+| **Readiness** | Can this instance serve traffic *right now*? | Removed from the Service's endpoints; no traffic | Sometimes, and this is where the bug lives |
+
+```text
+  WHAT EACH PROBE CONTROLS
+
+  startup   ──► kubelet keeps waiting; liveness/readiness probes are DISABLED
+                  until it passes. Use it for a slow Spring Boot start
+                  (JIT, large context, warm caches).
+
+  liveness  ──► kubelet sends SIGTERM then SIGKILL. The POD IS RESTARTED.
+                  failureCost = a restart loop, cold caches, in-flight requests killed
+
+  readiness ──► the pod's IP is removed from the EndpointSlice.
+                  The pod keeps running and keeps consuming memory/CPU,
+                  it just stops receiving NEW Service traffic.
+                  failureCost = reduced capacity, NOT a restart
+```
+
+**The readiness-on-a-dependency bug.** This is the one to memorise and to raise unprompted,
+because it converts a partial outage into a total one and it is extremely common, since it
+looks like good practice. A readiness probe implemented as "can I reach the database and
+the cache?" means: **when the shared database degrades, every pod of every service that
+readiness-checks it drops out of rotation simultaneously.** A service with 6 pods goes from
+6 to 0. It does not degrade; it disappears. And because the pods are now not-ready but
+still running, they still hold their heap, their connection pools (which are themselves
+failing to open, and failing slowly, and timing out), their threads — so as they drop out of
+the load balancer the cluster's resource pressure goes *up*, not down. A dependency blip
+that should have cost you a few percent of capacity has instead cost you 100% of it.
+
+> **MUST REMEMBER**
+> >
+> > **A readiness probe that checks a dependency removes your instances from rotation when
+> > that dependency degrades — turning a partial outage into a total one.** Liveness should
+> > almost never check dependencies either, because a failing liveness probe **restarts a
+> > pod that was coping**: a pod that is slowly retrying a degraded cache is surviving, and
+> > the liveness check kills it, drops its warm caches, and starts it from cold, so it now
+> > also fails the readiness probe and cannot rejoin. The correct split: liveness checks
+> > "is this process alive and not deadlocked" (a thread dump, a heartbeat, never a
+> > dependency); readiness checks "can I serve a request I have in hand" (and at most a
+> > shallow, cached, non-blocking check of critical local state). **If your readiness probe
+> > makes a network call, you have built a coordinated global outage.**
+
+There is a legitimate middle case — readiness *may* check a hard dependency, but only if you
+accept that you have chosen availability of the dependent service over availability of this
+one, and you have a fallback that makes the check pass. Spring Boot's health groups
+(`livenessState`, `readinessState`, plus any custom group with explicit `include`/`exclude`
+components) exist precisely to let you separate "am I alive" from "am I ready" from
+"is my whole dependency graph up", and the exclusion list is the mechanism for keeping a
+slow database out of liveness while still surfacing it in a human-facing health view. The
+interview move is to say: show me which components are in the liveness group and which are
+in readiness, and if the same dependency is in both, ask why.
+
+### 4.5 ConfigMaps vs Secrets — and What a Secret Actually Is
+
+A **ConfigMap** is a key-value store for non-confidential configuration, mountable as
+environment variables or as files. A **Secret** is the same thing for confidential
+material — with one crucial caveat a staff engineer should state without hesitating:
+
+> **A Kubernetes Secret is base64-encoded, not encrypted.** The value in the manifest is
+> trivially decodable by anyone who can read the Secret. The protection it gives is
+> *RBAC* (who can read Secrets in the namespace) and *base64-in-transit-in-etcd-when-at-rest-
+> encryption-is-enabled* — and that last clause is off by default on many clusters. Unless
+> you explicitly enable etcd encryption at rest, or a KMS-backed provider, or an external
+> secrets manager, a Secret is an RBAC-controlled plaintext file.
+
+```text
+  BASE64 IS NOT ENCRYPTION
+  ────────────────────────
+  kubectl create secret generic db \
+    --from-literal=password=cGFzc3dvcmQxMjM=
+
+  manifest:  data: { password: cGFzc3dvcmQxMjM= }
+  echo cGFzc3dvcmQxMjM= | base64 -d   →   password123
+
+  what actually protects it:
+    ✓ RBAC — only the ServiceAccount bound to the pod can read it
+    ✓ etcd encryption at rest  — MUST be explicitly enabled, off by default
+    ✗ anything else.  If your threat model includes "someone with read access to
+      the repo" or "someone who can kubectl get secrets", a Secret does nothing
+      for you and you need Vault / a cloud secret manager / external-secrets.
+```
+
+For a Spring Boot service, the two ways to consume these differ in an important way:
+**environment variables are read at startup and become properties; mounted files can be
+re-read.** A ConfigMap mounted as a file updates on disk (eventually — the kubelet syncs
+it, with a cache delay, so "eventually" can be over a minute), but Spring Boot does not
+pick that up without either `@RefreshScope` (which requires spring-cloud-context and a
+refresh trigger) or reading the file yourself. Mounted Secrets have an additional quirk:
+Kubelet writes Secret volumes via a symlink swap (`..data`), so a file watcher that watches
+the *inode* will miss updates to a ConfigMap/Secret; it must watch the directory. This is a
+real source of "the config changed but the app never saw it" confusion, and the more
+common answer is simply that **config change should be a deploy**, not a hot reload — which
+returns you to Chapter 3's release discipline.
+
+### 4.6 HPA — and the Problem With Scaling on CPU
+
+The **Horizontal Pod Autoscaler** watches a metric and sets the replica count on a workload
+to hold a target value. The default resource target is **70% of the CPU *request***, averaged
+over the stabilisation window. It can also target custom or external metrics.
+
+The mechanism has two halves that are often confused. The **scaling** rules
+(`averageUtilization`, or a per-pod target) decide the desired replica count. The
+**stabilisation windows** (default 300s scale-down) prevent flapping by keeping a longer
+history for scale-*down* decisions than scale-up. That asymmetry is deliberate and good:
+scale up fast, scale down slowly, so a brief traffic spike does not buy instances you then
+pay for all day. But it also means **the HPA is a lagging instrument on the way down**, and
+if your traffic genuinely dropped, you are paying for the stale capacity for up to 5 minutes
+past the last spike's end. The mitigation is the other half of the cost story in Chapter 6.
+
+The real problem, and the one to say at interview:
+
+> **The HPA scales on a signal that is often not the bottleneck.** The default is CPU, and
+> CPU is a decent proxy only for compute-bound services. For a service that is waiting on a
+> database, a cache, or a downstream HTTP call, CPU will sit at 20% while the service is
+> completely saturated on connections or threads. The HPA sees "plenty of headroom" and
+> scales to nothing, while users time out. Worse — and this is the pathological case — a
+> service in a **retry storm** has *high* CPU (spinning through backoff and reconnection)
+> while failing. The HPA reads that as "we need more capacity" and adds replicas of a
+> service that was already broken, which adds load to the dependency that caused the storm
+> and accelerates the outage. Scaling on a saturation signal instead (in-flight requests,
+> queue depth, active connections) or on a business signal (requests per second) avoids
+> both.
+
+### 4.7 JVM in a Container — the cgroup Trap and OOMKill
+
+A JVM has, for twenty years, sized its heap by **detecting the host's total memory** and
+taking a fraction (by default 1/4) of it. In a container this is a lie: the JVM's default
+ergonomics see the *node's* 256GB, not the container's 512MB limit, and will happily set
+`-Xmx` to 64GB. The JVM then believes it has memory it does not, the container is capped
+well below that, the cgroup OOM-killer fires when the limit is exceeded, and you get the
+classic `OOMKilled` with **no `OutOfMemoryError`, no heap dump, and no stack trace** — just
+a container that vanished. This is a distinct failure from a Java heap OOM and the
+distinction matters when reading the incident: `OOMKilled` is the kernel killing the
+process for exceeding its **cgroup memory limit** (which counts heap *plus* Metaspace,
+*plus* thread stacks, *plus* direct/native buffers, *plus* the JVM's own overhead), not the
+JVM failing to allocate on the heap.
+
+Modern JVMs (roughly JDK 8u191+ with `UseContainerSupport`, default-on from JDK 10) read
+the cgroup limit instead of the host, so the default behaviour is usually correct. But the
+setting must be explicit and must be sized for the *whole container*, not just the heap:
+
+```bash
+# The essential pair: the JVM sees the cgroup limit, and the heap leaves room
+# for everything that is NOT heap.
+JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError"
+
+# ⚠ cAdvisor already reserves ~1GB per container for the JVM's non-heap memory
+#   (Metaspace, code cache, thread stacks, GC structures). If your limit is
+#   smaller than that, MaxRAMPercentage=70 is still too generous, and a heap
+#   that fills will OOMKill before it can throw OutOfMemoryError.
+#
+# Concrete failure: limit=256Mi, MaxRAMPercentage=75 → heap=192Mi, non-heap
+# reserve ~1GB → the cgroup kills the JVM at 256Mi long before the heap fills.
+# The fix for small limits is to set -Xmx explicitly, not to use a percentage.
+```
+
+The second container-specific trap, and it is a *latency* trap rather than an OOM trap:
+**CPU limits cause throttling.** A `limits.cpu: 1` does not reserve a core; it sets a
+quota. A JVM using multiple threads — every non-trivial Spring service — will hit the
+quota within each 100ms enforcement period and be **throttled for the remainder of the
+period**, which shows up as a latency spike with no CPU usage to explain it. This is why
+the widely-held guidance is: **set CPU requests, leave CPU limits unset.** The request is
+the scheduler's guarantee (the scheduler reserves it and the JVM's `AvailableProcessors`
+respects it, so the GC and JIT size themselves correctly). The limit, on a CPU-bound
+service, buys you nothing except throttling and an OOMKill at exactly the moment the
+service is least able to absorb a kill.
+
+### 4.8 Requests, Limits, and the Rest of the Scheduling Surface
+
+`requests` are what the scheduler reserves and what the HPA's CPU target is a percentage of;
+`limits` are the hard cgroup cap. Getting these wrong is the difference between a pod that
+is scheduled sensibly and a pod that is either starved or killed.
+
+```text
+  resources:
+    requests:      cpu: 500m   memory: 512Mi
+    limits:        memory: 768Mi        # cpu limit DELIBERATELY omitted (see 4.7)
+
+  memory  request vs limit:
+    request = floor → how many pods fit on this node (scheduling density)
+    limit   = ceiling → when THIS pod is OOMKilled
+    limit > request is normal; limit == request is fine but removes headroom for
+    spikes in non-heap usage (a thread burst, a direct-buffer allocation)
+
+  cpu  request vs limit:
+    request = guarantee AND the number the JVM sees as AvailableProcessors
+              (so it sizes GC threads and JIT correctly)
+    limit   = a quota, enforced every 100ms, causing THROTTLING for the rest of
+              the period. On a multithreaded JVM this is latency with no CPU spike.
+```
+
+**Storage and ephemeral volumes.** The default volume a pod gets is an *ephemeral* volume:
+it lives and dies with the pod, is written to the node's disk, and is deleted when the pod
+is removed. This means: **a container restart, a pod eviction, a node drain, or a redeploy
+all lose the data**, and with a Deployment rolling update, every rollout loses it. That is
+fine and correct for a stateless service, and it is the reason Chapter 6's statelessness
+requirement is a scheduling requirement as well as an architectural one. For a pod that
+*does* need state you need a `PersistentVolumeClaim` — the pod requests storage and the
+volume is bound to a `PersistentVolume`, and now the pod is no longer freely movable, which
+is precisely why "just use a volume" is not a statelessness fix but a relocation of it.
+
+### 4.9 A Real Spring Boot Deployment
+
+Everything above, in one manifest. The parts worth pointing at are marked.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  labels: { app: orders, version: "3" }
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1              # explicit: don't let the HPA fight the rollout
+      maxUnavailable: 0        # explicit: keep full capacity during the rollout
+  selector:
+    matchLabels: { app: orders }
+  template:
+    metadata:
+      labels: { app: orders, version: "3" }   # the Service selects on this
+    spec:
+      terminationGracePeriodSeconds: 45       # Spring drains in-flight before SIGKILL
+      containers:
+        - name: orders
+          image: registry.internal/orders@sha256:9f2a3c...   # digest, not tag (Ch 3)
+          ports:
+            - { containerPort: 8080, name: http }
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: orders-db, key: password }   # RBAC-protected, NOT encrypted
+          envFrom:
+            - configMapRef: { name: orders-config }               # non-confidential config
+          resources:
+            requests: { cpu: 500m, memory: 512Mi }
+            limits:   { memory: 768Mi }     # ⚠ no CPU limit: a limit throttles the JVM
+          startupProbe:                      # runs FIRST; gates the other two
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 30             # 150s to start — for a slow Spring Boot start
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 2
+            # ⚠ this endpoint must NOT include a database or cache check.
+            #    If it does, a DB blip removes every pod from the Service at once.
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+            # ⚠ NEVER a dependency check: a failing liveness RESTARTS a pod that
+            #    was coping, killing its warm caches and starting it cold.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]   # let endpoint removal propagate
+                                                      # before the app stops accepting
+          volumeMounts:
+            - { name: config, mountPath: /etc/orders, readOnly: true }
+      volumes:
+        - name: config
+          configMap: { name: orders-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+spec:
+  type: ClusterIP                    # internal only; the gateway reaches it
+  selector: { app: orders }          # the label the EndpointSlice watches
+  ports:
+    - { port: 80, targetPort: http, name: http }
+```
+
+The `preStop` sleep deserves a note because it looks like cargo cult and is not. When a pod
+is deleted, Kubernetes removes it from the EndpointSlice and *simultaneously* sends SIGTERM.
+Endpoint propagation to every kube-proxy on every node is asynchronous and can take a
+couple of seconds. A client that opened a keep-alive connection in that window will have
+its request routed to a pod that has already stopped accepting — producing a small spike of
+5xx on every rollout and every node drain. Sleeping 5 seconds before shutting down lets the
+removal propagate first. It is a workaround for a real race, and it is the reason a
+"rolling restart causes a brief 5xx spike" fix is often just `preStop`.
+
+#### Common Mistakes
+
+- Treating a pod as a VM and putting state on it — which the next rollout, eviction or node
+  drain silently deletes, because the default volume is ephemeral.
+- A readiness probe that checks the database or cache, so a shared-dependency blip removes
+  every pod of every service from rotation at once and turns a partial outage into a total
+  one.
+- A liveness probe that checks any dependency, restarting pods that were coping — losing
+  their warm caches and making them fail readiness too.
+- No `startupProbe` on a service with a slow start, so the liveness probe's `failureThreshold`
+  kills the JVM during a legitimate 90-second warm-up.
+- Ignoring `terminationGracePeriodSeconds` and the 30-second default, so SIGKILL lands
+  mid-request and every rollout produces a spike of aborted transactions.
+- No `preStop` delay, so the EndpointSlice removal and the SIGTERM race and every rollout
+  produces a small burst of connection-refused.
+- A CPU limit on a multithreaded JVM, causing 100ms-period throttling that looks like
+  unexplained latency with no CPU spike to explain it.
+- `MaxRAMPercentage` set too high for a small memory limit, so the cgroup OOMKills the JVM
+  before the heap can fill and throw an `OutOfMemoryError` — no heap dump, no stack trace.
+- Treating a base64-encoded Secret as encryption, with etcd encryption at rest disabled and
+  no external secrets manager.
+- A rolling update with default `maxSurge`/`maxUnavailable` fighting an HPA, so the rollout
+  effectively removes 50% of capacity while a CPU-based HPA scales the old version down.
+- Hot-reloading a ConfigMap mount and expecting Spring to see it, which requires
+  `@RefreshScope` or a directory watcher (Secret volumes swap symlinks, not inodes).
+
+#### Interview Questions — Kubernetes for the Java Engineer
+
+**Q1. Is a readiness probe that checks the database a bug?** `STAFF`
+
+Yes, and it is one of the most common causes of self-inflicted total outages. Readiness
+controls whether a pod receives Service traffic, and the endpoint set is driven by
+readiness — so a readiness probe that fails whenever the database is unreachable removes
+*every* pod of *every* service that checks it, simultaneously, the moment a shared
+dependency degrades. You convert a database blip affecting a few percent of requests into a
+total outage, and it is worse than that, because the pods stay running and keep their heaps
+and their failing connection pools while contributing no capacity. The correct design
+separates the three concerns: liveness checks only that the process is not wedged, readiness
+checks that the instance can serve a request in hand, and dependency health goes in a
+separate human-facing health group that a human looks at. If readiness genuinely must check
+a hard dependency, you have made a deliberate choice that this service's availability is
+lower than the dependency's, and you should have a fallback that makes the check pass.
+
+**Q2. Why should liveness never check a dependency?** `TRICKY`
+
+Because a liveness failure *restarts* the container, and a pod that is slowly degrading
+against a struggling dependency is not wedged — it is coping. The liveness check kills it,
+which drops its JIT-warmed code and its connection pool, and a cold JVM with a cold pool
+fails readiness as well, so it is out of rotation while it re-warms. Now the service has
+fewer serving pods than it had thirty seconds ago, each colder, during a dependency
+incident, and the restart loop may never terminate because the dependency is still
+degraded. Liveness answers exactly one question: is this process permanently unable to
+progress — a deadlock, a stuck event loop. A thread-dump heartbeat answers that question
+correctly. A dependency call does not.
+
+**Q3. A Java service in Kubernetes is being OOMKilled with no OutOfMemoryError. What's
+happening?** `ADVANCED`
+
+Two different things produce "out of memory" and the distinction is in the container. The
+cgroup OOM-killer kills the process when the *container's* total memory — heap, Metaspace,
+code cache, thread stacks, direct and native buffers, JVM overhead — exceeds the container
+limit. That produces a container that disappears with no Java-level exception, no heap dump
+and no stack trace, which is why it is often misdiagnosed as a mysterious crash. A Java
+heap OOM, by contrast, throws `OutOfMemoryError` inside the JVM and leaves a dump. The
+usual cause is a JVM that sized its heap from the node's memory rather than the container
+limit, which pre-`UseContainerSupport` JVMs did by default; modern JVMs read the cgroup
+limit, so the remaining causes are that `MaxRAMPercentage` is too aggressive for the limit
+(cAdvisor reserves roughly 1GB per container for non-heap, so a 256Mi limit with
+`MaxRAMPercentage=75` gets killed long before the heap fills) or that non-heap usage
+genuinely grew. I would set `-Xmx` explicitly for small limits and leave a real margin for
+everything that is not heap.
+
+**Q4. What happens during a rolling update, and what can go wrong?** `TRICKY`
+
+The Deployment creates a new ReplicaSet and brings up `maxSurge` extra pods (default 25%),
+waits for them to pass **readiness**, then removes up to `maxUnavailable` old pods (default
+25%) and repeats. The failure modes are three. If readiness is misconfigured, old pods are
+removed before the new ones can actually serve, so the rollout causes a real gap. If an HPA
+is also running on CPU, the surge pods halve the average CPU across the Deployment, the HPA
+reads that as "we can scale down", and the old version is removed on top of the planned
+`maxUnavailable` — so the rollout takes out roughly half your capacity. And a third is the
+grace period: pods get 30 seconds by default, and a JVM that has not drained its in-flight
+requests and closed its pools by then is SIGKILLed mid-transaction. The mitigations are
+explicit `maxSurge`/`maxUnavailable`, a `preStop` sleep so endpoint removal propagates
+before SIGTERM, and a `terminationGracePeriodSeconds` matched to your actual drain time.
+
+**Q5. Our HPA scales on 70% CPU and the service times out under load. Why?** `ADVANCED`
+
+Because CPU is not the bottleneck. A service waiting on a database, a cache or a downstream
+call sits at 20% CPU while completely saturated on connections or threads, so the HPA
+computes that it needs fewer replicas — the opposite of correct. The pathological version is
+worse: a service in a **retry storm** has *high* CPU (backoff loops, reconnection churn,
+exception handling) while failing, so the HPA adds replicas of an already-broken service,
+which adds load to the dependency that started the storm and accelerates the outage. The
+fix is to scale on the saturation signal — in-flight requests, queue depth, active
+connections, or a business signal like requests per second — rather than on CPU, and to
+keep CPU as a secondary signal. The HPA supports custom and external metrics for exactly
+this, and the two behaviours to configure carefully are the asymmetric stabilisation
+windows: scale up fast, scale down slowly (default 300s), which prevents flapping at the
+cost of paying for stale capacity for minutes after a spike ends.
+
+**Q6. Is a Kubernetes Secret encrypted?** `TRICKY`
+
+No — it is base64-encoded, which is trivially reversible by anyone who can read it. What a
+Secret actually gives you is RBAC (which ServiceAccounts in the namespace can read it) plus
+etcd encryption at rest *if you have explicitly enabled it*, which is off by default on many
+clusters. So the honest threat-model statement: a Secret protects against a developer who
+can run `kubectl` in the wrong namespace, and does nothing against someone who can read your
+manifests, your CI, or your repository. If your threat model includes any of those, you want
+a real secrets manager — Vault, AWS/GCP secrets manager — with the cluster fetching at
+runtime, or at minimum etcd encryption at rest plus strict RBAC and no Secrets in Git.
+
+**Q7. Why is a CPU limit harmful on a JVM service?** `ADVANCED`
+
+Because a CPU limit is a *quota* enforced every 100ms, not a reservation. A Spring service
+is heavily multithreaded — Tomcat threads, the GC, the JIT compiler, async executors — so it
+will routinely consume its full quota within a period and then be throttled for the
+remainder of that period, repeatedly. The symptom is latency that spikes for no observable
+reason, with CPU *usage* looking low, which is the hardest kind of incident to diagnose
+because the throttling is invisible in the usual metrics. The request, by contrast, is a
+real reservation: the scheduler sets it aside and `AvailableProcessors` respects it, so the
+JVM sizes its GC threads and JIT compiler correctly for the parallelism it actually has. So
+set CPU requests, leave CPU limits off, and set the memory limit with explicit headroom
+above the request.
+
+**Q8. What does DNS do in Kubernetes, and what does it not do?** `TRICKY`
+
+DNS resolves the Service name (`orders.default.svc.cluster.local`) to the Service's
+ClusterIP — a stable virtual IP for the life of the Service. It does **not** do the
+load-balancing across pods; kube-proxy programs `iptables` or IPVS rules in the kernel that
+do per-connection selection, and the EndpointSlice it consults is maintained from pod
+*readiness*. Two consequences follow that confuse everyone at first. Because selection is
+per-connection and not per-request, a long-lived keep-alive connection stays pinned to one
+pod even as the endpoint set changes under it — which is why connection pooling interacts
+badly with rollouts. And because the ClusterIP never changes, "the DNS cache is stale" is
+not a real diagnosis; from *outside* the cluster the name simply does not resolve unless the
+Service is NodePort or LoadBalancer, which is the usual explanation for an NXDOMAIN that
+works in staging and not in production.
+
+**Q9. A service keeps losing 5xx on every rolling restart. Where do you look?** `SCENARIO`
+
+The EndpointSlice/SIGTERM race. When a pod is deleted, Kubernetes removes it from the
+EndpointSlice and sends SIGTERM at the same time, but endpoint propagation to every node's
+kube-proxy takes a second or two. A client that opened a keep-alive connection in that
+window sends a request to a pod that has already stopped accepting. It presents as a small
+burst of connection-refused or 5xx that correlates exactly with rollouts and node drains and
+is invisible at low traffic. The fix is a `preStop` hook that sleeps a few seconds before
+shutdown, so the endpoint removal has propagated before the app stops accepting. The other
+thing to check in the same incident is `terminationGracePeriodSeconds`: if it is at the
+30-second default and your Spring app does not drain in-flight requests within it, you also
+have a second population of aborted requests, and that one needs real shutdown handling
+rather than a longer timeout.
+
+> **CHAPTER 4 SUMMARY**
+>
+> A pod is a group of containers sharing a network namespace — not a small VM — and it is
+> ephemeral, schedulable onto one node, and backed by an ephemeral volume, which is the
+> statelessness requirement arriving as a scheduling constraint. A Deployment gives you
+> replicas and a rolling update, and the rolling update is only as safe as the readiness
+> probe that gates it, which is also where the HPA can fight it and take out half your
+> capacity. Services give a stable ClusterIP and a selector-driven EndpointSlice; the
+> load-balancing is kernel-level per connection, not DNS, which is why keep-alive
+> connections pin to a pod across a rollout. **The highest-value thing on the page is the
+> probe configuration**: a readiness probe that checks a dependency removes every instance
+> from rotation when that dependency degrades and converts a partial outage into a total
+> one, and a liveness probe that checks a dependency restarts a pod that was coping, so
+> liveness should almost never touch the network. ConfigMaps and Secrets are versioned
+> config rather than a hot-reload mechanism, and a Secret is base64-encoded rather than
+> encrypted unless etcd encryption at rest or an external secrets manager is in place. The
+> HPA scales on a signal that is often not the bottleneck — CPU is demand, not saturation,
+> and a retry storm looks like load to it. And the JVM needs explicit container awareness:
+> the memory limit covers non-heap too, a CPU limit throttles a multithreaded JVM into
+> unexplained latency, and both requests and limits need to be set with the whole container
+> in mind.
+
+#### Further Reading
+
+- [Configure Liveness, Readiness and Startup Probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/) — the canonical treatment, including exactly why liveness and readiness must be different checks and what happens when each fails.
+- [Service](https://kubernetes.io/docs/concepts/services-networking/service/) — the three types, the selector, and how ClusterIP load-balancing actually works below the DNS layer.
+- [Pods](https://kubernetes.io/docs/concepts/workloads/pods/) — the pod abstraction, the shared-network rationale, lifecycle and eviction; read the eviction section for the node-pressure story.
+- [Resource Management for Pods and Containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/) — requests versus limits, QoS classes, and the eviction ordering that makes an over-committed node kill your best-effort pods first.
+- [Pod Disruptions](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/) — voluntary disruption, drain semantics, and PDBs; the missing piece when a cluster upgrade takes more replicas down than you can afford.
+
+## Chapter 5 — Service Mesh & Sidecars
+
+### 5.1 What a Mesh Actually Provides
+
+A service mesh moves the per-service networking concerns out of the application and into an
+infrastructure layer: a **sidecar proxy** running alongside every workload, plus a **control
+plane** that programs every proxy. Istio and Linkerd are the two production implementations;
+Envoy and HAProxy are the usual data-plane proxies underneath.
+
+The honest description of the value is that it makes four things **configuration instead of
+code**, and one thing possible at all:
+
+```text
+  WHAT THE MESH MOVES OUT OF YOUR APPLICATION
+
+  mTLS between every pair of services
+      was: a library, an interceptor, a certificate-management job,
+           and — crucially — one thing every service had to remember to do
+      now: a DestinationRule and a PeerAuthentication, applied fleet-wide
+
+  traffic policy — retries, timeouts, circuit breaking, load balancing, outlier detection
+      was: a Resilience4j config in every service, at 6 different values
+      now: one VirtualService/ServiceEntry applied by the control plane
+
+  traffic splitting (canary by weight)
+      was: load-balancer config, or a feature flag, or two deployments and
+           hand-maintained percentages
+      now:  canary: 5 → destination: orders-v1
+            canary: 95 → destination: orders-v2
+
+  telemetry
+      was: per-language SDK, per-team, with different metric names
+      now:  every proxy emits RED-ish metrics for every upstream uniformly
+```
+
+The argument the mesh makes, stated at its strongest, is the one in Chapter 7 of the Spring
+volume: **mTLS and traffic policy belong as close to the workload as possible, because that
+is the only place where every single connection is guaranteed to pass through.** A library
+you add to one service is a library that service can forget, misconfigure, or disable, and
+a service that does not do mTLS is a service that reaches the internal network in plaintext.
+The mesh's real claim is not "proxies are faster than libraries" — they are not — it is
+"the policy is enforced below the application, so the application's bugs cannot bypass it".
+That is a genuinely strong argument and it deserves to be stated at interview rather than
+dismissed.
+
+### 5.2 The Cost Side, Honestly
+
+A mesh is a second control plane, a proxy process on every request path, and a substantial
+operational surface. Saying so is not disloyalty; it is what makes the recommendation
+trustworthy.
+
+- **Latency.** Every request pays a proxy hop on each side: an inbound sidecar and an
+  outbound sidecar for a call between two meshed services. Proxies are fast — Envoy adds
+  single-digit milliseconds at worst for local traffic, often under 1ms — but the cost is
+  real, and it compounds with connection pools, because a proxied connection pool is managed
+  by the proxy, not your client, and its behaviour under failure is not something your
+  application code can see.
+- **A data plane on every request path.** A meshed pod cannot make an outbound call without
+  its sidecar; the sidecar is in the pod's network namespace and intercepts. That makes the
+  proxy a **shared-fate component of every request the pod makes**, which is the failure mode
+  in 5.5.
+- **A second control plane to operate.** Istio's control plane is a distributed system
+  itself, with its own version compatibility matrix, its own CRDs, its own upgrade
+  procedure, and its own failure modes. A cluster where the mesh control plane is unhealthy
+  has a mesh that cannot reprogram — and depending on the mode, either keeps running on the
+  last good config or drops new configuration, and you need to know which.
+- **A debugging story that is now harder.** This is the one experienced on-call engineers
+  feel immediately. `tcpdump` on the pod no longer shows the application's traffic; the
+  outbound connection is made by the proxy, and the trace of who connected to what is inside
+  the proxy's own logs and metrics. When a connection fails, the first question becomes "is
+  this the app or the sidecar?", and there is a new component in the failure path that
+  half the team has never debugged. `istioctl proxy-status` and the proxy's own `/stats`
+  endpoint become tools you have to learn before you need them.
+- **A YAML layer with its own configuration errors.** And these are *silent*: a
+  `VirtualService` that does not match your host is simply never applied, a `DestinationRule`
+  with a subset typo falls back to defaults, and a `PeerAuthentication` with `STRICT` on the
+  wrong port breaks traffic for a subset of callers. You have moved a class of bug from
+  "loud, in code, caught in review" to "quiet, in YAML, caught only in production".
+
+### 5.3 When NOT to Use One
+
+This is the section that separates a staff answer from an enthusiast one.
+
+> **The honest case against a mesh: under roughly ten services, do not.** mTLS between a
+> handful of services can be done at the library level in a day, and — more importantly — at
+> that scale you can *see* the traffic. The mesh's value is enforcement uniformity across a
+> fleet you cannot reason about individually, and a fleet of six services is a fleet you can
+> reason about. The mesh's cost is roughly one to two engineer-months of platform work plus
+> permanent operational surface, and at six services the value it delivers is mTLS and
+> consistent telemetry, both of which you can get more cheaply and more visibly from a
+> library. Below ten services the operational cost is not justified.
+
+The other two "not yet" conditions worth naming. **If your platform team does not exist or
+does not have capacity to own a control plane**, the mesh becomes a thing nobody maintains
+and the next Istio upgrade is done by whoever finds it. And **if you do not yet have
+conventionally observable services** — no metrics, no traces, no SLOs — a mesh gives you
+proxy-level telemetry that will look like a win while the application-level questions stay
+unanswered. Instrument the services first; the mesh's telemetry is a supplement, not a
+substitute, and proxy metrics cannot tell you that your business logic is wrong.
+
+And the migration framing, which is the version of the answer most people miss: **a mesh is
+a migration, not a purchase.** You can adopt it incrementally — mTLS first (the highest-value,
+lowest-risk piece, in `PERMISSIVE` mode), then traffic policy for a few services, then
+outlier detection, then telemetry. Adopting "the mesh" as a single decision, with everything
+in `STRICT` on day one, is how organisations end up with a mesh that only 3 of 40 teams
+opted into and an architecture that is now two architectures.
+
+### 5.4 mTLS — Where It Belongs, and Why the Mesh's Argument Is Real
+
+The question "where does mTLS belong?" has three candidate answers and the right one depends
+on who you trust.
+
+| Placement | What it buys | What it costs |
+| --- | --- | --- |
+| **In the app** (a library/interceptor) | Full context — the app knows who the caller is and can make authorisation decisions on identity | Every service must implement it correctly; one omission is a plaintext service; cert rotation is every service's problem; frameworks differ and you get inconsistent behaviour |
+| **In the mesh** (sidecar) | Uniform, fleet-wide, enforced below the app — the app *cannot* bypass it | The proxy is a process that can fail; the app cannot see or influence the TLS; debugging moves out of the app |
+| **In the platform** (e.g. a service-proxy at the ingress/egress) | Only covers traffic through that point | Internal east-west is unprotected — which is the traffic that matters |
+
+The mesh's real argument, and it is a good one: **identity should be established at the
+workload boundary, not inside the application, because the workload boundary is the only
+place every connection passes through and the only place the platform can guarantee
+anything.** A library-based mTLS implementation is a policy that 200 teams must each
+remember; a mesh is a policy the platform applies. The counter-argument is equally real and
+is what the mesh vendors do not put on the homepage: **moving TLS below the app means the app
+loses the identity.** The proxy terminates the connection, so the application's "who is my
+caller?" question now requires a *separate* mechanism — a signed token (a SPIFFE identity
+propagated as a JWT, or a mesh extension header) — and if you forget it, your service
+authenticates nothing and trusts whatever the proxy put in a header, which is forgeable by
+anything inside the mesh boundary. So the mesh does not remove the mTLS work; it moves the
+*transport* part down and leaves the *identity* part up, and a mesh deployment that does
+both parts deliberately is materially more work than a mesh that only does one.
+
+### 5.5 The Sidecar Failure Mode
+
+A sidecar is a process. That is the whole problem, and it deserves to be stated plainly
+because it is the argument that most often decides "no" in a real design review.
+
+```text
+  THE PROXY IS A PROCESS, AND PROCESSES FAIL
+
+  ● the sidecar is in the pod's network namespace; if it dies or OOMs,
+    the application's outbound calls fail too — even if the app is perfect
+    ● a sidecar memory leak is a pod memory leak, and it takes the app
+    down with it when the cgroup limit is hit
+    ● a mesh misconfiguration can blackhole traffic that would otherwise work:
+    a VirtualService that matches too broadly, a DestinationRule pointing at
+    a ServiceEntry with no endpoints, a mTLS mode set to STRICT on a port
+    where the caller is not meshed → connection refused, for everyone
+  ● startup ordering: the app can start before the proxy is ready, and
+    early requests fail in a window that is usually short and usually
+    misdiagnosed as an application bug
+  ● the control plane being down is usually survivable (proxies keep the last
+    good config) but the *blast radius* of a bad config push is the whole
+    fleet, and it is applied in seconds
+
+  THE ASYMMETRY TO STATE: without the mesh, a bad network config affects
+  the pods that read it. With the mesh, a bad network config is pushed to
+  every proxy in the mesh by the control plane, in seconds, with no
+  per-service review gate.
+```
+
+That last point is the one a staff candidate should raise unprompted: **the mesh
+concentrates authority.** Configuration that was previously reviewed, versioned per team,
+and deployed through a pipeline is now pushed fleet-wide by a control plane, and the
+rollback unit is no longer a team. That is genuinely valuable (uniform enforcement) and
+genuinely dangerous (no local review gate), and both facts are true at once.
+
+### 5.6 Mesh vs API Gateway — the Distinction That Gets Conflated
+
+This conflation is common and it leads to putting business logic in the wrong layer, so it
+is worth drawing rather than describing.
+
+| | **API Gateway** | **Service Mesh** |
+| --- | --- | --- |
+| Position | The **ingress boundary** — one entry point for traffic from outside | An **ambient layer** around every workload, inside and outside |
+| Scope | North-south: external clients → your services | East-west *and* north-south: every service-to-service hop |
+| Count | A few, usually | One proxy per workload |
+| Owns | Auth at the edge, rate limiting, routing by path, protocol translation, aggregation | mTLS, service identity, per-service traffic policy, retries/timeouts/circuit breaking, mesh telemetry |
+| Business logic | **Legitimately here** — request routing, coarse auth, request shaping | **Never here** — it has no idea what your business rule is |
+| Failure blast radius | External traffic only | Internal traffic too — every service-to-service call |
+
+The conflation's consequence: teams write aggregation and business rules into mesh config
+because the mesh "has routing", and then find that a business rule now requires a mesh
+config change and a control-plane push, reviewed by the platform team, to fix a pricing
+bug. A gateway is a place where **you own the code and can put domain behaviour**; a mesh
+is a place where **the platform owns the config and you may not**. Anything that needs a
+code change, a business rule, or a per-team review should live at the gateway or in the
+service, not in the mesh.
+
+#### Common Mistakes
+
+- Adopting a mesh for mTLS alone in a fleet of six services, where a library does it in a day
+  and you can still see all the traffic.
+- Turning `STRICT` mTLS on everywhere on day one, so services that were not opted in break
+  in a way that looks like a network fault.
+- Losing the caller identity: terminating TLS at the proxy while assuming the app can read
+  the caller's identity from it, and trusting an unauthenticated header instead.
+- Debugging a connection failure without checking `istioctl proxy-status` or the proxy's
+  own stats, and spending the first hour on application code that was never involved.
+- A `VirtualService` host that does not match, so the policy is silently never applied and
+  the team concludes the mesh "does not work".
+- Sidecar OOM: a proxy memory leak counts against the pod's limit and takes the application
+  with it, and the eviction reason says `OOMKilled` without indicating which container.
+- Conflating the mesh with the API gateway and putting business rules in mesh config, where
+  a pricing fix becomes a control-plane push.
+- Treating proxy-level telemetry as observability, and discovering that none of your
+  business-level questions are answerable.
+- Underestimating that a mesh is a migration with phases, and treating "adopt the mesh" as a
+  single binary decision.
+
+#### Interview Questions — Service Mesh & Sidecars
+
+**Q1. Should we get a service mesh?** `STAFF`
+
+The first question is how many services and how many teams, because that determines
+whether the mesh's value is available. The mesh's genuine value is *uniform enforcement* —
+mTLS and traffic policy that the application cannot bypass, applied fleet-wide. That value
+only exists at a scale where you cannot achieve uniformity by asking 200 teams to each
+remember. Below roughly ten services, a library-based mTLS is a day of work, you can still
+see all the traffic, and the mesh's roughly one-to-two engineer-months of platform cost plus
+permanent operational surface is not justified. Above that scale, or where you already have
+a platform team with the capacity to own a control plane, the argument gets strong —
+particularly for mTLS, because workload identity is genuinely better at the workload
+boundary. What I would not do is adopt it as a single decision: mTLS in `PERMISSIVE` first,
+then traffic policy for a few services, then outlier detection, then telemetry. The
+complicating factor is that a mesh also moves the debugging story out of the application,
+and that cost is paid by whoever is on call.
+
+**Q2. Is our retry policy survivable?** `STAFF`
+
+The question I would ask is not "what is our retry config" but "how many layers can
+compound". If retries exist at more than one layer, the multiplier is exponential in the
+depth of the call tree — three layers of 3× is 27× against the deepest dependency, six is
+729× — and that multiplier is applied exactly when the dependency is struggling. The policy
+is survivable if, and only if: retries exist at one layer (the edge), there is a retry
+budget capping the *fraction* of traffic that may retry, backoff is jittered, and the
+budget is measured against the service's own inbound traffic so a layer that is not
+retrying cannot exhaust another's. The mesh angle is real and worth raising: retries
+configured in a `VirtualService` are applied uniformly, which makes the *composition*
+auditable for the first time, because you can read the effective policy for a whole path
+instead of inferring it from six repos. That is the strongest argument for a mesh I would
+make. But I would also note the mesh makes a bad retry policy *uniform*, which turns a
+local problem into a fleet-wide one.
+
+**Q3. A readiness probe checks the database and we had a total outage. Explain and fix.**
+`STAFF`
+
+Readiness controls membership of the Service's endpoint set, so a readiness probe that fails
+whenever the database is unreachable removes every pod of every service that checks it
+simultaneously, the moment a shared dependency degrades. The database blip that should have
+cost us a few percent of requests cost us the entire service, and it was worse than a plain
+outage because the pods stayed running, holding their heaps and their failing connection
+pools, consuming cluster resources while serving nothing. The fix is to separate the three
+concepts: liveness checks only that the process can make progress — a thread-dump heartbeat
+or a local state check, never a network call — and readiness checks that the instance can
+serve a request in hand, ideally a shallow local check. Dependency health belongs in a
+separate human-facing health group. In Spring Boot that is health groups with explicit
+components, so the database can appear in the overall health endpoint and be excluded from
+liveness. If a readiness check genuinely needs a hard dependency, you have deliberately
+chosen this service's availability to be lower than the dependency's, and that should be a
+documented decision with a fallback — not an accident of copying a default endpoint.
+
+**Q4. Where should mTLS live, and what does the mesh's argument actually get right?** `ADVANCED`
+
+The mesh is right about *enforcement*. mTLS and traffic policy belong as close to the
+workload as possible because that is the only point every connection passes through, and
+because a library-based implementation is a policy that every team must remember to
+implement correctly — one omission and that service speaks plaintext on the internal
+network. But the mesh is misleading if you take it as "mTLS is solved", because terminating
+TLS at the proxy moves the *transport* problem down and leaves the *identity* problem up: the
+application can no longer see the client certificate, so authenticating the caller requires
+a separate signed-token mechanism propagated through the mesh, and if that is not built,
+services end up trusting a header that anything inside the boundary can forge. So a mesh
+that does mTLS but not identity has moved a security property rather than gained one. The
+realistic sequence is: transport mTLS in `PERMISSIVE` to observe, then workload identity, then
+`STRICT`, then traffic policy.
+
+**Q5. What breaks when the sidecar dies?** `TRICKY`
+
+Everything the pod's application does outbound, because the sidecar shares the pod's network
+namespace and proxies its calls — a dead sidecar is a pod that cannot make requests even
+though the application is perfectly healthy. Concretely: the sidecar is a second process
+sharing the container's memory limit, so a sidecar memory leak is a pod OOMKill and the
+eviction reason does not tell you which container caused it. Startup ordering means the
+application can begin serving before the proxy is ready, producing a short window of early
+failures. And the mesh's real hazard is not the sidecar process but the control plane's
+authority: a bad configuration is pushed to every proxy in seconds, with no per-team review
+gate, so the blast radius of a typo is the whole fleet rather than the pods that read the
+file. That concentration of authority is the trade — uniform enforcement in exchange for a
+single point of configuration blast radius — and it is the argument I would put in front of
+a team before they adopt one.
+
+**Q6. How is a service mesh different from an API gateway, and what goes wrong when people
+conflate them?** `TRICKY`
+
+A gateway is an ingress boundary: one entry point for external traffic, and a place where
+you own the code, so putting aggregation, coarse auth and request shaping there is
+legitimate. A mesh is an ambient layer around every workload, covering east-west traffic as
+well, configured by a control plane the platform team owns. The conflation is dangerous
+because teams write business rules into mesh config once they see it can route — and then a
+pricing bug becomes a control-plane push, reviewed by the platform team, to fix something a
+developer should be able to change in a repository. The rule I would state: if a thing
+needs a code change, a business rule, or a per-team review, it belongs at the gateway or in
+the service. The mesh is for properties that should be uniform and should not depend on
+whether a particular service remembered to implement them.
+
+**Q7. Our services are hard to debug with a mesh. What specifically changed?** `SCENARIO`
+
+The application's view of the network stopped being real. Outbound connections are now made
+by the proxy, so `tcpdump` on the pod shows the proxy's traffic, not the application's, and
+the client's own connection pool is not the one in play. When a call fails, the first
+question becomes whether the fault is the app or the sidecar, and answering it means
+`istioctl proxy-status` and the proxy's own stats endpoint — tools the on-call rotation may
+not know. Second, proxy configuration errors are silent: a `VirtualService` whose host does
+not match is simply never applied, so a team can conclude the mesh does not work when in
+fact their policy never took effect. The practical mitigations are to put the diagnostic
+commands in the runbook, to check the effective config (not the source YAML) when debugging,
+and to give the on-call rotation mesh training before the mesh is the thing standing between
+them and a fix.
+
+**Q8. Is a mesh worth it for mTLS alone at a company with 8 services and 3 teams?** `STAFF`
+
+Almost certainly not yet, and I would say so even if I were the one who had proposed it. At
+eight services, library-based mTLS is roughly a day of work with a shared library and a
+shared cert-management job, and — the part that does not scale down — you can still *see*
+all the traffic, so a misconfiguration is a single team's problem rather than a fleet-wide
+push. The mesh's value is uniform enforcement across a fleet you cannot reason about
+individually, and eight services is a fleet you can reason about. The roughly one-to-two
+engineer-months of platform work plus permanent operational surface is not justified at
+that size, and the operational cost lands on a small number of people permanently. What I
+would do instead is build the mTLS library properly now, so that the migration to a mesh
+later is a change of enforcement point rather than a change of security model — and I would
+revisit the question at fifteen or twenty services, or when the platform team has capacity
+to own a control plane.
+
+> **CHAPTER 5 SUMMARY**
+>
+> A mesh moves four things out of application code and into configuration — mTLS, traffic
+> policy, traffic splitting, and uniform telemetry — and its real argument is not speed but
+> **enforcement**: policy applied below the application cannot be bypassed by an application
+> bug, which a library every team must remember cannot guarantee. The costs are equally
+> real: a proxy on every request path, a second control plane to operate, a harder debugging
+> story where `tcpdump` no longer shows the app's traffic, a silent YAML layer where a
+> non-matching host means the policy is quietly never applied, and — the sharpest point —
+> the concentration of authority, where a typo is pushed fleet-wide in seconds with no
+> per-team review gate. Under roughly ten services the cost is not justified, because you
+> can still see all the traffic and a library does mTLS in a day; and it is a migration with
+> phases, not a purchase, with mTLS in `PERMISSIVE` first. The sidecar is a process that can
+> fail, OOM, and take the pod's application with it. And the mesh's mTLS argument is right
+> about transport and incomplete about identity: terminating TLS at the proxy means the
+> application can no longer see the client certificate, so identity needs a separate signed
+> token — a mesh that does transport but not identity has moved a security property rather
+> than gained one. Finally, a mesh is not a gateway: the gateway is an ingress boundary you
+> own and may put business logic in, and the mesh is an ambient platform-owned layer where
+> business rules do not belong.
+
+#### Further Reading
+
+- [Service Mesh](https://microservices.io/patterns/deployment/service-mesh.html) and [Sidecar](https://microservices.io/patterns/deployment/sidecar.html) — the pattern and its implementation, including the honest description of what the proxy is and where it sits relative to the application.
+- [Istio Concepts](https://istio.io/latest/docs/concepts/) — the data plane / control plane split and the resource model; read it before reading any YAML so the config errors in 5.2 make sense.
+- [Istio Traffic Management](https://istio.io/latest/docs/tasks/traffic-management/) — DestinationRules, VirtualServices and traffic splitting in practice; the subset-matching behaviour is the source of most of the silent config failures.
+- [Istio Security](https://istio.io/latest/docs/concepts/security/) — the mTLS modes and the identity model, including the separation between transport security and workload identity that the chapter above is arguing about.
+- [Service Deployment Platform](https://microservices.io/patterns/deployment/service-deployment-platform.html) — the platform as a product, which is the organisational frame for the "platform team as a bottleneck" discussion in Chapter 7.
+
+## Chapter 6 — Scaling, Load Testing & Capacity
+
+### 6.1 Horizontal vs Vertical, and Why Statelessness Is the Actual Requirement
+
+Scaling **vertically** makes a machine bigger. Scaling **horizontally** makes it more
+machines. In a monolith era vertical dominated because a big box was simpler. Distributed
+systems exist largely because vertical has a ceiling — the biggest machine available is a
+number, and a popular service eventually hits it — and because horizontal is the only way to
+survive a machine failing without downtime.
+
+The engineering cost of horizontal is the requirement it imposes: **anything in process
+memory must be disposable.** A `HttpSession` with a logged-in user, an in-memory cache, a
+scheduled job's state, a rate limiter counting in a `ConcurrentHashMap` — each of these
+makes a pod non-replaceable, and the mechanism by which non-replaceable pods demand
+replacement is the thing that blocks scaling:
+
+```text
+  SESSION STATE IN THE POD  →  the instance holding it is special
+        │
+        ├── must route the same user to the same instance  → STICKY SESSIONS
+        │       │
+        │       └── a hash of userId at the load balancer
+        │               │
+        │               └── instance dies → every one of its users is logged out,
+        │                   and their in-flight work is lost
+        │
+        ├── scaling out does not help: the new pods are empty, so
+        │   capacity is added where no session lives
+        │
+        └── rolling update is now an outage for a fraction of users:
+            some sessions land on a pod that is being terminated
+
+  THE CHAIN:  session state  →  sticky sessions  →  pods are not interchangeable
+             →  you cannot scale out usefully and cannot restart safely
+```
+
+**Sticky sessions are not a solution to the session problem; they are the problem, made
+permanent.** The correct order is: put the session in a shared store (Redis, or a signed
+token in the request, or just make the client stateless by carrying a JWT), *then* scale
+horizontally. Doing it the other way round is how services end up with 40% of capacity
+idle because the load balancer cannot send a request to an instance that does not hold the
+session, while simultaneously being fragile because the instances are now individually
+important.
+
+The same argument applies to the **local cache** and to the **local rate limiter**, and the
+second is the one people miss. A rate limit counted in a per-pod map is not a rate limit —
+it is *N times* your intended limit, because a client can rotate across instances. And
+because it is a per-pod map, the limit does not hold when the pod count changes, so the
+limit silently becomes traffic-dependent, which means the one time you most need the limit
+to hold (a flood) is the time it holds worst. Both of these are stateful things in a pod,
+so both are the same statelessness problem wearing a different hat.
+
+### 6.2 Percentiles, and Why the Mean Is Useless
+
+Load testing is where a lot of confident nonsense is produced, so start with the statistic
+that is quoted most often and is the least useful.
+
+The **mean** of a latency distribution is dominated by the mode and tells you nothing about
+the tail, because the tail is where the users are who are complaining. In a typical
+request-path distribution, the mean latency is 45ms while 1% of requests take more than
+2.4 seconds. Those users either abandon the flow or retry, and a retry is *more* load, so
+the mean is a number that is simultaneously wrong and actively misleading. Worse, the mean
+rises during an incident for a reason nobody believes: it only rises when enough of the
+fast requests have been converted into slow ones, by which point the user impact is total.
+
+```text
+  SAME SERVICE, SAME TEST, THREE NUMBERS
+
+    p50  =  45ms    "typical"          — the median user does not notice this
+    p95  = 180ms    "most users"        — a noticeable pause
+    p99  = 2400ms   "the bad day"       — 1 in 100 users is timing out
+    p99.9= 9000ms   "the incident"      — the users who file tickets
+
+    mean =  62ms    ← sits between p50 and p95 and describes NOBODY
+
+  and the shape that makes it worse: latency distributions are typically
+  MULTIMODAL. p50 is one mode (cache hit), p95 is another (cache miss → database).
+  A single percentile hides the second mode entirely, so a service that is
+  fine on cache hits and terrible on cache misses looks like it has a
+  "normal" p50 and a "slightly high" p99. Plot the histogram; the bimodality
+  is the finding.
+```
+
+The SLO framing from the Google SRE book is the way to make this operational: **an SLO is
+a statement about a percentile of a good event ratio** — "99% of requests to this endpoint
+return non-5xx in under 300ms" — and the number to track is the **error budget burn rate**,
+not the raw latency. "p99 is 2400ms" is a measurement; "we are burning the error budget at
+40× because 1% of requests are exceeding 300ms" is a decision. And the reason the SLO
+should be written against a *good-event ratio* rather than against a latency percentile is
+subtle but important: a request that returns 500 in 5ms is not slow, and a request that
+returns 200 after 8 seconds has technically met a "latency" SLO if you only measure
+latency. A combined good-event SLO counts both.
+
+### 6.3 Coordinated Omission — the Single Most Common Way a Load Test Lies
+
+This is the most valuable idea in the chapter and the one that most candidates have not
+heard of, so it earns a full treatment. The problem: **a load generator that stops sending
+when responses slow down systematically under-reports latency, and the direction of the
+error is always flattering.**
+
+The mechanism. You send N requests per second to the service. The service takes 50ms, so
+the generator's threads complete quickly and it maintains the rate. Now the service slows to
+2 seconds. If each generator thread is synchronous — send, wait for response, send again —
+then the generator's *send rate collapses* from N per second to N/40 per second, because every
+thread is parked waiting. The load test now reports "we sent 1,000 requests and the p99 was
+50ms" — because the requests that were never sent during the slow period were never
+measured. **The test hides the exact failure it was run to find.**
+
+```text
+  CLOSED-LOOP GENERATOR (the default, and it lies)
+
+    threads: ──send──▶ wait 50ms ──send──▶ wait 50ms ──▶   rate = 20,000 rps
+    service slows to 2s:
+    threads: ──send──▶ wait 2000ms ──send──▶ wait 2000ms ──▶ rate = 500 rps
+                                          ▲
+                              the test "reduced load" all by itself
+                              and now reports a healthy p99
+                              because only fast requests were recorded
+
+  THE FIX: keep the OFFERED LOAD CONSTANT, independent of response time.
+    an open-loop generator fires requests on a fixed schedule regardless of
+    whether the previous one has come back, and records the latency from the
+    INTENDED send time, not from when the request was actually written.
+
+    intended send:  0    50   100   150   200   250 ...  (fixed 50ms cadence)
+    actual response:  48   55  2100  2050  3000  ...     (service degrading)
+    measured latency = response_time - INTENDED_send_time
+                       48    105 2000  1900  2800  ...
+                       ↑ this is the honest number. The 2s responses are
+                         attributed to the time they were DUE, not when they
+                         were sent, which is what a real user's request
+                         experiences.
+```
+
+The number that makes this concrete: a service that degrades from 50ms to 2s under a
+sustained 20,000 rps load will typically be reported by a naive closed-loop tool as
+"p99 = 55ms, system healthy, capacity ≈ 20,000 rps". The honest measurement says the
+service could not sustain 20,000 rps and that its real saturation point is somewhere near
+2,000 rps. The tool did not make a mistake — the test design did. This is worth stating at
+interview because "we ran a load test and it said we could handle 5× the traffic" is
+exactly the kind of claim that turns into an outage six months later.
+
+### 6.4 Testing the Dependency's Failure, Not the Happy Path
+
+Most load tests measure a service in isolation with its dependencies stubbed or mocked, which
+answers the least useful question: the service's own throughput. The number that decides
+whether you survive your worst day is how the service behaves when its **dependencies are
+slow or down**, and those are different tests with different objectives.
+
+```text
+  THE FOUR TESTS, AND WHAT EACH ONE FINDS
+
+  1. HAPPY-PATH SATURATION
+     what: ramp until latency goes vertical
+     finds: your own throughput ceiling; whether the HPA and the connection
+            pool keep up; whether the load generator itself is the bottleneck
+     does NOT find: anything about dependency behaviour
+
+  2. SLOW DEPENDENCY  (inject 2s latency into the database, hold load)
+     finds: whether the timeout is set below 2s; whether a thread pool is
+            exhausted; how many in-flight requests pile up; whether your
+            timeout budget from Ch 2 is actually enforced anywhere
+     ⚠ run this at FULL offered load with an OPEN-LOOP generator, or the
+       generator will just reduce its own rate and you will see nothing
+
+  3. DEPENDENCY BLACKHOLE  (dependency returns 503 or times out entirely)
+     finds: whether the breaker opens and how fast; whether retries amplify
+            load on something already down; whether load shedding engages;
+            whether the service degrades or collapses
+     this is the test that validates Chapter 2, and it is almost never run
+
+  4. DEPENDENCY PARTIAL DEGRADATION  (dependency slow for 5% of calls)
+     finds: retry amplification (if 5% fail and you retry 3×, you have
+            turned a 5% failure rate into a 20% load increase at the
+            dependency); whether the p99 is dominated by timeout-driven
+            retries rather than by real work
+```
+
+Test 4 is the one that reveals retry budgets, and it is worth explaining why, because the
+mechanism is counter-intuitive: **a partial failure rate is more dangerous than a total one.**
+When a dependency is entirely down, the circuit breaker opens in seconds and the load stops.
+When 5% of calls fail, the breaker may never reach its threshold, the retry logic fires on
+every one of those 5%, and the *successful* 95% still flows at full rate. The dependency now
+receives 100% + 15% = 115% of its previous load precisely because it is slightly broken, and
+the slight breakage deepens. This is the mechanism from Chapter 2 reproduced at the capacity
+layer, and a load test that only tests 0% and 100% failure will never see it.
+
+### 6.5 Soak Testing — What Five Minutes Will Not Find
+
+A short load test finds the *immediate* failure: the knee, the saturation point, the
+resource that runs out first. A **soak test** — hours, often 12–24, at a realistic but
+sub-saturation load — finds the failures that are time-dependent, and there is a category
+that only these find:
+
+- **Memory leaks and unbounded growth.** Heap that grows slowly and linearly, plateauing
+  after 3 hours, looks perfectly healthy in a 5-minute test. The finding is a slope, and a
+  slope is invisible in a short run. 24 hours at 60% of saturation is the standard because
+  a typical daily traffic cycle is 24 hours and the leak that matters is the one that
+  makes the pod unable to survive a working day without a restart.
+- **Connection and file-descriptor exhaustion.** Every pod that leaks one connection per
+  request reaches the pool limit in a few hours at low volume and never in a five-minute
+  test. The pool looks fine when you check it right after the test.
+- **Log and metric cardinality growth.** Series accumulate as new label values occur — a
+  new endpoint, a new tenant, a new exception type. A metric backend that is healthy at
+  10,000 series is dying at 400,000, and the rate of accumulation is what the soak test
+  measures.
+- **Cache behaviour that only misbehaves on a hit-rate cycle.** A TTL-based cache with
+  jitter can enter a state where the whole keyspace expires simultaneously every N minutes
+  and the database takes the full hit-rate load. A 5-minute test at 60% load may never
+  reach the expiry cliff; a 12-hour test hits it every cycle and you watch the database
+  oscillate. The fix is TTL jitter, and you only find the need for it by looking for the
+  cliff.
+- **Cron and scheduled work colliding with peak.** A job at 02:00 that is safe at 60%
+  saturation may collide with the morning peak depending on the day of the week. Only a
+  long test that includes the real schedule finds it.
+
+The rule of thumb to state: **a 5-minute test tells you where the knee is; only an
+overnight test tells you whether you can run unattended, and running unattended is the
+actual production requirement.**
+
+### 6.6 Capacity Planning as Arithmetic
+
+Capacity planning is not a spreadsheet exercise, it is three multiplications and one
+decision. Given a target throughput, a target p99, and a per-instance sustainable
+concurrency, the number of instances is a division — but the number you actually need is
+that division **plus enough to survive losing the worst one**, which is where the SLO comes
+in.
+
+```text
+  GIVEN
+    peak requests per second            R  = 4,000 rps
+    average service time per request   t  = 40ms  (0.040s)  — the MEAN, fine here
+    → required concurrency                   C = R × t = 4,000 × 0.040 = 160
+    sustainable concurrency per instance  c  = 200  (200 Tomcat threads, but see below)
+    → instances to MEET peak load          N = C / c = 160/200 = 1
+                                             ↑ 1 instance. Really. Because mean
+                                               service time is small. The p99 is
+                                               where this goes wrong.
+
+  BUT: N+1 IS NOT THE REQUIREMENT. The requirement is SURVIVING A LOSS.
+
+    lose one instance (deploy, node drain, OOM, spot reclaim):
+      remaining capacity = N × c  must still cover C during the loss
+      N × c ≥ C  AND  the SLO must hold while it is degraded
+      N = 1 → losing it means 0% capacity. N = 3 → losing one still gives 2c = 400
+      concurrency, 2.5× peak, so latency holds.
+
+    a commonly-cited rule: size for peak × 2, with the multiplier covering
+    one instance lost AND the next instance's cold start (JIT, empty caches,
+    empty connection pool, cold buffers — 30–90s for a JVM).
+
+  AND THE CONCURRENCY NUMBER IS NOT YOUR THREAD COUNT
+    200 Tomcat threads sounds like c=200, but each thread may hold a JDBC
+    connection, so sustainable concurrency is min(threads, pool size) and the
+    pool is the scarcer resource. A service with 200 threads and a 50-connection
+    pool sustains 50, not 200, and the other 150 threads are blocked waiting
+    for a connection — which is exactly the shape of the OOMKill-adjacent
+    failure in Chapter 4.
+```
+
+The second half of capacity planning is the part that is genuinely a staff-level
+conversation: **the instance count that survives peak is not the instance count you
+should run.** Between the peak and the trough there is a gap, and how you handle it is a
+cost decision, not a technical one. Options, in increasing order of cost-efficiency:
+
+1. **Over-provision** and accept paying for the peak all day. Simplest, most expensive, and
+   for many services entirely defensible if the absolute number is small.
+2. **Scale on a schedule** — HPA behaviour driven by a known daily curve rather than a
+   reactive metric. Cheap, and it fails exactly when the curve is wrong, which is during an
+   incident or a marketing spike.
+3. **HPA with a long stabilisation window and a floor** — scale up reactively, scale down
+   slowly (the Kubernetes default of 300s), and set `minReplicas` to the trough. Good
+   default.
+4. **Scale to zero, or near it**, with a cold-start penalty. Only viable if the cold start
+   is genuinely acceptable — and for a JVM that means accepting a 30–90s slow-start
+   window, which is why it suits batch and internal services, not customer-facing APIs.
+
+### 6.7 The Graceful Degradation Ladder
+
+The single most valuable design artefact in this chapter, and the one that separates a
+system that degrades from a system that collapses. A ladder is an ordered list of what the
+service does as load passes each threshold, **designed in advance and tested under
+load**, not discovered during the incident.
+
+```text
+  THE LADDER — ordered by increasing load, decreasing value delivered
+
+  1. FULL SERVICE
+     everything live, every dependency called, cache fresh
+     │
+  2. CACHE-HIT PATH ONLY
+     stop calling anything optional; serve from cache; recompute in background
+     │
+  3. STALE CACHE
+     serve yesterday's answer rather than none. Correct for many read paths
+     (prices, product descriptions, dashboards) and obviously wrong for
+     (balance, availability, anything the user will act on)
+     │
+  4. DEGRADED FEATURES
+     drop the expensive enrichment: recommendations, fraud scoring, personalisation,
+     the "related items" panel. The core transaction still works.
+     │
+  5. REJECT NON-CRITICAL WORK
+     queue writes, background jobs and non-essential consumers instead of
+     doing them. This is the rung most often missing, and it is the one that
+     protects the read path: a flood of writes is a common cause of the
+     read outage it also creates.
+     │
+  6. SHED LOAD
+     refuse a fraction of requests immediately, randomly, returning a
+     cheap correct error the client can retry. Bounded by Ch 2's mechanisms.
+     │
+  7. BACKPRESSURE / QUEUE BUNCHING
+     the last resort: a bounded queue that rejects rather than an unbounded one
+     that absorbs. Absorbing is not surviving — see the production scenario below.
+```
+
+The design discipline in building it is that **each rung must be independently testable and
+independently observable.** You cannot verify a degradation ladder you cannot trigger, which
+is why load tests that stop at the knee (6.5) leave the entire ladder untested. The
+verification for each rung is a specific test: kill the cache and assert the response is
+served stale rather than failing; saturate the queue and assert the write is queued rather
+than dropped; and assert the shed counter increments and that the shed *rate* is a metric
+with a dashboard, because a service silently shedding 40% of traffic is the failure mode
+from Chapter 2 recurring here.
+
+> **PRODUCTION SCENARIO**
+>
+> Problem: `checkout` became unusable at 09:40 on a Monday. The page spinner was the
+> symptom. There was no error spike for the first eleven minutes.
+> Investigation: latency rose gradually from 09:38, in-flight requests climbed from 200 to
+> 2,400 over four minutes, and the database's active connections hit its limit at 09:40 —
+> which is when the 5xx finally appeared. The service had no shed path and no bounded queue.
+> Root cause: a marketing email drove 6× normal traffic to `checkout` at 09:35, and each
+> request held its JDBC connection for the duration of a 900ms call to `inventory`. The
+> connection pool was 50 per pod; 2,400 in-flight requests across 12 pods is 200 per pod, so
+> the pool was the hard ceiling and everything above it queued in Tomcat. The queue was
+> unbounded, so requests waited rather than failing, and each waiting request held a thread.
+> The result: 11 minutes in which no request completed, followed by mass timeouts.
+> Solution: a load-shed path above 150 in-flight per pod returning a retryable error with a
+> short `Retry-After`; a `maxSurge`-bounded connection pool with a timeout on checkout; and
+> `inventory` calls moved to a circuit breaker with a 200ms budget and a cached fallback.
+> Time to full recovery: 3 minutes, with a 60% shed rate accepted and visible.
+> Prevention: a load test that runs *past* saturation to characterise the failure, not just
+> locate the knee; a ladder with a rung per box above; and a dashboard panel for in-flight
+> requests per pod, which would have shown the problem 3 minutes before the errors did.
+
+> **MUST REMEMBER**
+> >
+> > **A queue absorbs load; it does not survive it.** The instinct to add a queue between
+> > two components is almost always wrong for a synchronous request path: it converts
+> > *fast failures* (which cost the client one error) into *slow failures* (which cost the
+> > client a timeout, hold a thread and a connection for the whole wait, and consume the
+> > capacity that a request that would have succeeded could have used). Queues belong
+> > **asynchronously**, between decoupled components, where a slow consumer legitimately
+> > should not block a producer. On a synchronous path, the bound you want is a bulkhead
+> > and a shed, not a buffer.
+
+#### Common Mistakes
+
+- Session state in the pod, which forces sticky sessions, which makes the pods
+  non-interchangeable — so scaling out adds empty instances and restarting logs users out.
+- A per-pod rate limiter, which is N times the intended limit and stops holding precisely
+  when the limit matters most.
+- Quoting the mean latency, which describes nobody and hides the multimodal distribution
+  where the second mode is a cache miss.
+- A closed-loop load generator, which reduces its own offered rate when the service slows
+  and therefore reports a healthy p99 for a service that is failing — the coordinated
+  omission problem, and the single most common way a load test lies.
+- Testing only the happy path with dependencies stubbed, which measures the service's own
+  throughput and nothing about how it behaves on the day it matters.
+- Testing 0% and 100% dependency failure but not the 5% partial case, which is where retry
+  amplification turns a slight degradation into 115% of offered load on the dependency.
+- A 5-minute test and no soak, so memory leaks, connection exhaustion and cardinality growth
+  are all invisible — a slope cannot be seen in a short run.
+- Sizing capacity off the mean service time and getting N=1, then discovering that losing one
+  instance is a total outage.
+- A concurrency number set to the thread count rather than the connection pool size, when
+  the pool is the scarcer resource.
+- Building a degradation ladder and never triggering it, so every rung above the first is
+  untested code.
+- Buffering the synchronous request path with a queue, converting fast failures into slow
+  ones and making the collapse last longer.
+- Accepting 3× over-provisioning without ever putting the cost in front of anyone, which is
+  how a service nobody owns quietly becomes 40% of a cloud bill.
+
+#### Interview Questions — Scaling, Load Testing & Capacity
+
+**Q1. Our load test says we can handle 5× current peak. What are you suspicious of?** `SCENARIO`
+
+Three things, in this order. First, coordinated omission: if the generator is closed-loop —
+each thread sends, waits for the response, sends again — then when the service slows, the
+generator reduces its own offered rate, so the slow requests that were never sent are never
+measured, and the reported p99 describes a system that was not under the load the test
+claims. That alone can be a 5× error. The fix is an open-loop generator that fires on a
+fixed schedule and measures latency from the *intended* send time, not from when the request
+was written. Second, the dependencies: was the test run with the database, cache and
+downstream services real, or stubbed? A stubbed dependency means the test measured the
+service's own overhead, not its behaviour, and the real path is dominated by waits. Third,
+duration: a 5-minute test cannot find a memory leak, connection-pool exhaustion or a
+cardinality leak, because those are slopes and slopes are invisible in short runs. I would
+rerun it open-loop, at full offered load, with a real slow-dependency scenario, overnight,
+before believing the number.
+
+**Q2. How many instances do we need?** `ADVANCED`
+
+Three multiplications and then the part people forget. Concurrency required is peak rps ×
+mean service time — 4,000 rps at 40ms is 160 concurrent requests. Divided by sustainable
+concurrency per instance that gives the number to meet peak, which for those figures is
+around one instance, and that is exactly why the naive answer is wrong. The real requirement
+is surviving a loss: you must be able to lose one instance (deploy, drain, OOMKill, spot
+reclaim) and still hold the SLO, so you want N such that (N−1) × per-instance concurrency
+still covers peak with margin for the next instance's cold start — 30–90 seconds for a JVM
+warming up. And the per-instance concurrency is not the thread count; it is the smaller of
+your thread pool and your connection pool, because a thread blocked on a connection is not
+capacity. Then the cost question, which is the part a staff engineer should raise: that N is
+a number to *meet peak*, not a number to *run all day*, and the gap between the peak and
+the trough is a cost decision.
+
+**Q3. What is coordinated omission and how do you avoid it?** `ADVANCED`
+
+It is the systematic under-reporting of latency caused by a load generator that stops
+sending when the service slows. A closed-loop generator has a fixed number of threads, each
+of which sends, waits for the response, and sends again. When the service's latency rises
+from 50ms to 2s, each thread's cycle time rises with it, so the generator's *offered load*
+silently falls by 40× — and the requests it did not send during the degraded period are not
+recorded anywhere. The test reports a healthy p99 for a service that was saturated, and the
+capacity number it produces is wrong by an order of magnitude. The fix is an open-loop
+generator: fire requests on a fixed schedule regardless of whether earlier ones have
+returned, and compute latency from the *intended* send time, so a request that took 2s is
+attributed the 2s a real user's request would have experienced rather than the 50ms it
+actually waited in the queue to be written.
+
+**Q4. Is a queue the right thing to put between two services?** `STAFF`
+
+On a synchronous request path, almost never. A queue converts a fast failure — the client
+gets one error immediately and can retry — into a slow failure, where the request waits,
+and while it waits it holds a thread and usually a connection. That is the worst possible
+use of the resource under pressure, and it makes the collapse last longer rather than
+shorter: the load test in 6.7 showed eleven minutes of unavailability where fast shedding
+gave three. Queues belong *asynchronously*, between decoupled components, where a slow
+consumer legitimately should not block a producer and where buffering is the point. If you
+want a bound on what a dependency can take from you on a synchronous path, the mechanisms
+are a bulkhead and a load shed, both of which fail fast and visibly — and if you do put a
+queue there, it must be bounded with an explicit rejection handler, or it is not a
+mitigation.
+
+**Q5. A 5% failure rate from a dependency caused a full outage. How?** `SCENARIO`
+
+Retry amplification, and the reason partial failure is more dangerous than total failure. At
+0% failure the circuit breaker never opens, all traffic flows normally. At 5% failure it may
+still never reach its threshold, and the retry logic fires on every one of those 5% — so the
+dependency receives its normal 100% of traffic plus roughly 15% of retries, precisely
+because it is slightly broken. The extra load deepens the degradation, more calls fail, more
+retries fire, and the failure rate climbs. The mechanism is identical to the Chapter 2
+multiplier, reproduced at the capacity layer. A total outage would actually have been safer,
+because the breaker would have opened and stopped the load entirely. This is also why a
+load test that only exercises 0% and 100% dependency failure will never find it, and why a
+retry budget is the control that actually bounds it.
+
+**Q6. What does a soak test find that a 5-minute test cannot?** `TRICKY`
+
+Anything whose failure is a function of time rather than of load. Memory leaks and
+unbounded growth, because a leak is a slope and a slope is invisible in a short run — the
+standard is 12–24 hours, often matching a full daily traffic cycle, because the failure that
+matters is the pod that cannot survive a working day. Connection and file-descriptor
+exhaustion, which accrues per request and takes hours to reach a pool limit at realistic
+volume. Metric cardinality accumulation, which is a rate of new series over time. Cache TTL
+cliffs, where a keyspace without jitter expires simultaneously and dumps the full hit-rate
+load onto the database every N minutes — a 5-minute test at 60% load may never reach the
+cliff, and a 12-hour test hits it repeatedly. And scheduled jobs colliding with peak traffic,
+which depends on the day of the week. The short version: a 5-minute test tells you where
+the knee is; only a soak test tells you whether you can run unattended, and running
+unattended is the actual production requirement.
+
+**Q7. What is a graceful degradation ladder and how do you build one you can trust?** `STAFF`
+
+An ordered list, designed in advance, of what the service does as load passes each
+threshold: full service, then cache-only, then stale cache, then degraded features (drop
+enrichment, keep the core transaction), then reject non-critical and background work, then
+shed load with a fast retryable error, then bounded-queue backpressure. The trust part is
+the important half: every rung has to be independently triggerable and independently
+observable, because a ladder you cannot trigger is untested code, and that is the normal
+state of most ladders — the load test stops at the knee, and everything above the knee has
+never been executed. So the verification is specific per rung: kill the cache and assert a
+stale answer rather than a failure, saturate the queue and assert writes are queued rather
+than dropped, and assert the shed counter increments. And the shed *rate* has to be a
+dashboarded, alertable metric, because a service silently shedding 40% of its traffic is
+the failure you built the ladder to avoid.
+
+**Q8. Our service needs 40× the provisioned capacity at peak. Is that acceptable?** `D` `STAFF`
+
+Only if someone has said so deliberately, which usually nobody has. Peak provisioning at
+40× is fine for a small number in absolute terms and ruinous at fleet scale, and the
+question to raise is the marginal one: what does the marginal instance cost per month at
+peak, and what utilisation are you paying for at the 95th percentile? The honest answer for
+most services is that a large fraction of provisioned capacity is idle by design, because
+you are sizing for a peak that lasts minutes. The options are better than brute-force
+over-provisioning: scale on a known daily curve rather than reactively, use the HPA with a
+long scale-down stabilisation window and a `minReplicas` floor at the trough, and reserve
+scale-to-zero for batch and internal services where a 30–90 second JVM cold start is
+acceptable. What I would not do is quietly accept it — 3× over-provisioning that has never
+been costed is how a service nobody owns becomes 40% of a cloud bill.
+
+> **CHAPTER 6 SUMMARY**
+>
+> Horizontal scaling imposes the statelessness requirement, and the mechanism is specific:
+> session state in a pod forces sticky sessions, which makes pods non-interchangeable, which
+> means scaling out adds empty capacity and restarting logs users out. Per-pod rate limiters
+> are the same problem wearing a different hat. Latency is quoted as percentiles because the
+> mean describes nobody and hides the bimodal distribution where the second mode is a cache
+> miss. **Coordinated omission is the single most important idea here**: a closed-loop load
+> generator reduces its own offered rate when the service slows, so it never records the
+> slow requests, and a test that reports "5× headroom" can be an order of magnitude wrong —
+> the fix is an open-loop generator measuring from the intended send time. Load tests must
+> exercise the *dependency's* failure, and a 5% partial failure is more dangerous than 100%
+> because the breaker never opens while the retries add 15% of load to a component that is
+> already degrading. Only a soak test finds what is time-dependent: leaks, pool exhaustion,
+> cardinality growth, TTL cliffs. Capacity is peak concurrency plus the ability to lose one
+> instance, where per-instance concurrency is the connection pool and not the thread count.
+> And the ladder is what turns collapse into degradation — provided every rung is triggerable
+> and the shed rate is a metric somebody alerts on. A queue on a synchronous path is the
+> opposite of a bulkhead: it converts fast failures into slow ones and makes the outage last
+> longer.
+
+#### Further Reading
+
+- [Handling Overload](https://sre.google/workbook/overload/) — queues, load shedding and why the queue is the thing that turns a slowdown into an outage.
+- [Implementing SLOs](https://sre.google/workbook/implementing-slos/) — turning a latency measurement into a good-event-ratio SLO, which is the framing that makes percentiles actionable.
+- [Service Level Objectives](https://sre.google/sre-book/service-level-objectives/) — the SLO chapter, including why an SLO is a statement about a percentile of a good event ratio rather than about a raw latency number.
+- [Horizontal Pod Autoscaling](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/) — the scaling rules, the asymmetric stabilisation windows, and the custom-metric options that the CPU-default argument in Chapter 4 depends on.
+- [k6 Metrics](https://grafana.com/docs/k6/latest/using-k6/metrics/) — what a real load-testing tool measures and how it thresholds; useful for grounding the coordinated-omission discussion in a specific tool.
+
+## Chapter 7 — Cost, Team Antipatterns & the Org Causes Behind Them
+
+The Spring volume's Chapter 8 covered the antipatterns from the framework side. This
+chapter covers the same catalogue with a different emphasis: **not what the antipattern
+does, but what causes it, and what it costs.** The causes are the useful part, because a
+team that recognises the symptom but not the cause will fix the symptom, and the antipattern
+will return under a different name.
+
+### 7.1 Synchronous Call Chains
+
+**What it looks like.** The request fans out serially. Six dependencies in sequence, each
+waiting for the last, because the API "must return everything".
+
+```text
+  /api/checkout → orders(20ms) → inventory(20ms) → pricing(20ms)
+                                       → fraud(20ms) → email(20ms) → ledger(20ms)
+
+  p50 = 120ms    p99 = 600ms+     and ONE slow service owns your availability
+```
+
+**What it costs in production.** The p99 is the sum of the p99s, so the chain's tail is the
+sum of six tails — 600ms+ against a 120ms median, and the tail is what users experience as
+"the site is down". Worse than latency: **one slow dependency now owns the availability of
+the whole path.** If `fraud` is down, checkout returns 5xx for every user even though four of
+the five other steps succeeded — and those four may have committed partial state, which is a
+correctness problem the latency was merely the symptom of. The chain also makes degradation
+impossible: you cannot return a partial order because the chain did not produce one.
+
+**The organisational cause.** *"The API must return everything."* The endpoint's contract
+was specified as a complete aggregate, and nobody asked which parts of it are required to
+render the page. The cause is a product decision that nobody recognised as an architecture
+decision. The fix is usually not distributed-systems work — it is declaring a degraded
+response: return the order with a `PENDING` status and let the downstream results arrive by
+event, which makes the endpoint fast, the failure isolated, and the partial state explicit.
+
+### 7.2 The Distributed Monolith
+
+**What it looks like.** Services that cannot be deployed independently, share a database, and
+ship in lockstep. Different artifacts, one release train.
+
+**What it costs.** Every benefit of splitting is absent while every cost is present: the
+network latency, the partial-failure surface, and the observability bill of microservices,
+with none of the deployment independence. The specific incident to have in mind: a change to
+service A breaks service B at 2am and neither team expected it, which destroys trust in the
+architecture faster than the latency does.
+
+**The organisational cause.** Two, and they compound.
+
+1. **A split by technical layer rather than by business capability.** Splitting into
+   `api-service`, `service-service` and `worker-service` produces services that cannot be
+   deployed independently *by construction* — every feature change touches all three. This
+   is the most common microservice mistake and it is visible in the first diagram anyone
+   draws.
+2. **One team owning all of them.** Even a correctly split set of services ships in lockstep
+   if one team owns all of them, because Conway's law re-merges the deployment process within
+   a quarter. The service boundary is code; the **team boundary** is what produces
+   independence. This is the Team Topologies insight, and it is worth stating precisely: the
+   architecture diagram should be predictable from the org chart. If it is not, the org chart
+   is the architecture and the services are decoration.
+
+> **MUST REMEMBER**
+> >
+> > **A split by technical layer is not a microservice architecture — it is a monolith that
+> > pays the network bill.** The test: take any single feature request and count how many
+> > services must change. If the answer is "all of them", you have a distributed monolith,
+> > and the fix is a redraw, not a refactor.
+
+### 7.3 Shared Database
+
+**What it looks like.** Several services read and write the same tables. The schema is the
+API whether anyone said so or not.
+
+**What it costs.** A column rename becomes a coordinated multi-team deploy *in the strict
+sense* — every service selecting that column must ship in the same window, in a known order,
+or the fleet breaks. The same applies to a new `NOT NULL` column, an index that changes a
+query plan, or a constraint that reveals a data assumption somebody was silently violating.
+The cost is not the migration; it is that **the migration cannot be done without
+coordinating, ever**, which means independent deployment is a claim the architecture cannot
+support. This is the antipattern that most often turns a working microservice estate into a
+distributed monolith, and it does so quietly: the first shared read is expediency, and the
+twentieth is a schema nobody owns.
+
+**The organisational cause.** Two, both about ownership. **Expediency** — the first version
+of "service B needs the customer name" was a `JOIN` or a direct read of A's table, and it
+was the right call at the time; nothing revisited it because it works. And **no owner for the
+schema** — shared schemas are unowned by construction, so nobody is accountable for whether
+a column is still needed, columns accumulate, and every column is a constraint on every
+future change. The fix is not a technical control; it is naming a schema owner, which is an
+org decision and the one most often deferred.
+
+### 7.4 Retries Without Budgets
+
+**What it looks like.** Every team added retries because their dependency was flaky once.
+Nobody coordinated.
+
+**What it costs.** A retry storm: 3 layers × 3 attempts is 27 downstream calls per user
+request, applied to a component that was already struggling, which is how a slowdown becomes
+an outage. And retries without jitter resynchronise every client that failed at the same
+instant, so the recovery is a stampede rather than a recovery. This is the clearest example
+in the whole catalogue of a problem that **only exists at the level of the organisation**:
+each decision is defensible and the sum is an outage.
+
+**The organisational cause.** **Resilience added per-team with no central policy on who owns
+the resilience policy.** No individual team can see the multiplication, and each team's
+decision is locally correct. The fix is a central policy — a retry budget as a percentage of
+traffic, a documented owner for the timeout/retry/breaker configuration of inbound calls, and
+the rule that retries live at one layer. Note that this is precisely the thing a service mesh
+is genuinely good at: moving retries into uniform configuration makes the *composition*
+auditable for the first time, because you can read the effective policy for a whole call
+path rather than inferring it from six repositories.
+
+### 7.5 No Timeouts, or Timeouts Larger Than the Caller's
+
+**What it looks like.** A client call with the library default — often no timeout at all, or
+30s connect plus 30s read.
+
+**What it costs.** An unbounded call is a resource leak with a timer: it holds a connection
+and a thread for the duration. In a servlet stack, 200 Tomcat threads × a call that never
+returns is a completely unavailable service in about the time it takes for enough traffic to
+arrive. And a timeout larger than the caller's is strictly worse than none: the caller has
+already given up and your thread is still waiting, so you are spending capacity on a
+response nobody will read.
+
+**The organisational cause.** **Defaults, plus nobody owning the latency budget.** The
+default is invisible, so nobody chose it. The harder half is that **a timeout is a contract
+between a caller and a callee**, and contracts need an owner. The concrete fix is that every
+service publishes its own budget and callers set their timeouts below it — which means
+someone maintains that number, and that number is a design decision, not a config value.
+
+### 7.6 Chatty Interfaces
+
+**What it looks like.** Twenty calls to fetch one screen. The mobile client calls one
+endpoint that fans out to a dozen services, each returning a handful of records.
+
+**What it costs.** Latency you cannot fix by making any one service faster — it is the sum
+over twenty calls. Connection-pool pressure: twenty calls per screen means twenty connections
+per active user. And the failure rate is the **product** of twenty independent things going
+right: twenty services at 99.9% each is 98% for the screen, and nobody notices because no
+individual service looks bad. That last number is the one to memorise, because it is how
+composite failures hide: the components are all healthy and the thing users experience is
+not.
+
+**The organisational cause.** **No consumer contract, so nobody is counting the calls.** The
+client's design is reviewed in the context of one screen, and the fan-out is a diagram
+nobody draws because the endpoint "returns what the screen needs". The fix is API
+composition — one aggregated endpoint built server-side, so the twenty calls become one call
+and one round trip — plus the discipline of counting calls per user action as a metric
+rather than an intuition.
+
+### 7.7 Cache as an Unowned Layer
+
+**What it looks like.** Caching added opportunistically, with no owner, no invalidation
+strategy and no documented consistency model.
+
+**What it costs.** A cache with no owner does not have a *consistency model*; it has a
+*consistency accident*, and the accident differs per entry. The failure modes are
+well-known and all of them are permanent: stale data with no way to invalidate it, a
+thundering herd when a popular key expires across instances simultaneously, cache
+stampedes on a hot key, and — the expensive one — a cache that is a *correctness
+dependency*, so when it is cold or evicted the service cannot answer and the dependency
+that was supposed to be an optimisation has become mandatory. The cost of the last one is
+that you have made your availability strictly worse in exchange for latency, and nobody
+made that trade knowingly.
+
+**The organisational cause.** **Nobody owns invalidation, so nobody owns correctness.**
+Caching is usually added by whoever is nearest a performance problem, under a deadline, and
+the person who knows the consistency rules is not involved. The fix is a written
+invalidation contract per cached entity, an owner for the cache layer, and the honest
+admission that a cache is a new source of truth and therefore needs the same governance one.
+
+### 7.8 Deploying on Fridays, and Manual Release Processes
+
+**What it looks like.** A change-management rule that forbids production changes outside
+business hours — the most sincere and most counterproductive practice in this list.
+
+**What it costs.** It does not prevent incidents. **Incidents are not caused by Friday; they
+are merely *discovered* on Friday.** A change deployed Thursday evening is discovered in
+production whenever its failure takes 4–24 hours to manifest — which for the majority of
+failure modes (memory exhaustion, connection exhaustion, cache expiry cliffs, data drift) is
+exactly the case. So the rule converts a Tuesday 10am incident, attended by a rested
+on-call engineer with the whole team reachable, into a Saturday 03:00 incident attended by
+one person. The blast radius of a mistake grows because the people who could fix it fast
+are asleep. And the second cost is the incentive effect: a rule against Friday deploys pushes
+teams to batch changes toward Thursday evening, which is exactly when a rollback is least
+likely to be clean.
+
+**The organisational cause.** **Fear, and a measured response to how releases feel.**
+Somebody had a bad release experience, the response was a blanket rule, and the rule is now
+maintained by ritual. The underlying need is real — a safe, small, reversible release — and
+the answer to it is the Chapter 3 machinery: immutable artifacts, automated rollback,
+canary with a metric-based abort, and a deploy that anyone can do without permission. A
+mature team does not need a Friday rule because the release is not a scary event; an
+immature team needs the rule precisely because it is.
+
+### 7.9 The Two Hardest: Premature Distribution
+
+**What it looks like.** Splitting into services before there is a reason to. A 40-person
+company with three teams and four services; a startup that "went microservices" because the
+architecture diagram in the conference talk looked impressive.
+
+**What it costs.** Everything in the cost column of 7.1–7.8, and none of the benefit. The
+concrete losses: the build becomes 4 pipelines instead of 1, so a change that took 20 minutes
+now takes an hour of orchestration; the local development story degrades from "run it
+locally" to "run four things with a mesh, or use remote staging"; the observability surface
+is 4×; the incident surface is 4× because there are now 4 services to be on call for; and —
+the one people forget — **the refactoring that a boundary would have enabled is now 4× more
+expensive**, because moving code across a service boundary is a data migration, and doing it
+four times is four data migrations. Premature distribution is the one antipattern that makes
+its own stated goal harder to achieve.
+
+**The organisational cause.** **Architecture as identity, and the conference talk.** Two
+drivers, both real and both worth naming. First, seniority: "we do microservices" is a
+statement about the engineering org, and a monolith is read as immaturity. This is a
+completely legitimate career incentive operating on a completely irrational technical one.
+Second, the genuine confusion of *code* boundaries with *runtime* boundaries: a well-modularised
+monolith delivers the reasoning benefits of service boundaries — independent change,
+independent testing, enforced module dependencies — without any of the distributed-systems
+cost, and teams routinely confuse the two and conclude they must split.
+
+**The tell, and the honest counter-argument.** The tell is that nobody can name the
+coordination problem the split solved. If the answer is "we want to scale the two parts
+differently" or "two teams need to ship independently", the split is justified. If the
+answer is "it's more scalable" or "it's modern", it is not — a monolith with a modular
+structure scales to the same place at a fraction of the cost, and the argument that
+"microservices are more scalable" is backwards, because a distributed monolith is *harder* to
+scale than either, since you now have the network without the independence.
+
+The counter-argument, stated fairly, because it is the strongest case for splitting early:
+**boundaries discovered early are cheap; boundaries discovered late are expensive.** If you
+know the seam is coming, structuring the code as independent modules from day one is
+cheaper than extracting later. But that argument is for *modular* separation, not for
+*distributed* separation — a modular monolith with enforced boundaries (Spring Modulith,
+ArchUnit) gets the entire benefit at none of the cost, and it remains extractable later.
+The genuine case for going distributed early is only one thing: the team count. Below about
+five independent teams, splitting produces coordination rather than autonomy.
+
+### 7.10 The Two Hardest: the Platform Team as a Bottleneck
+
+**What it looks like.** A platform team exists, and every deploy, every new service, every
+cluster change and every CI configuration goes through them as a ticket.
+
+**What it costs.** The platform has made the organisation **slower and more centralised**,
+which is the exact opposite of what centralised platform capability is supposed to achieve.
+The mechanism is specific: the platform team's queue becomes the critical path for every
+team's delivery, so a team with 2-minute deploys now waits three days for a ticket, and
+because the platform team now has a queue, the teams escalate, which lengthens the queue.
+The second cost is that **the platform team learns which problems are actually common only
+from tickets, which are the problems people thought to ask about** — so the platform
+invests in the wrong things while the real bottleneck stays untouched. And the third is
+erosion of the autonomy that motivated the split in the first place: you now have the
+latency of a distributed system and the centralisation of a monolith.
+
+**The organisational cause.** **The platform was built as a support function rather than as
+a product.** The tell is whether the platform has a roadmap, a published API, a version
+policy, and a set of users who chose it — versus a set of internal customers who request
+things through a channel. A platform team becomes a bottleneck when it optimises for
+*handling requests well* rather than for *eliminating requests*: a team that answers 200
+tickets a week is doing support work, and support work does not scale and does not improve
+the platform. The fix is the product framing: a paved road with a self-service default, so
+the 80% case is "click the button in the internal developer portal" and the platform team's
+job becomes to make that path so good nobody files a ticket. The remaining 20% — genuinely
+novel infrastructure — is what the team should be spending its time on, and it is only
+20% if the road is good.
+
+> **STAFF-LEVEL CONSIDERATION**
+> >
+> > The measurable test of a platform team is not ticket throughput or cluster count. It is
+> > **the median time from "a developer decides to ship something" to "it is running in
+> > production, without asking anyone for permission."** If that number is minutes, the
+> > platform is a product. If it is days, the platform is a ticket queue, and the
+> > organisation has traded distributed latency for centralised coordination — which is the
+> > distributed monolith's organisational form, arrived at by a different route.
+
+### 7.11 The Questions That Predict Whether a Distributed System Is Operable
+
+This is the section to memorise. Six questions, each of which has exposed more
+architectural problems than any diagram review:
+
+1. **Who owns the retry policy for calls into this service?** If the answer is "each calling
+   team configures their own client", the composition is unaudited and Chapter 2's
+   amplification is guaranteed. There must be a published, owned policy — and it must be
+   *readable from the inside*, not inferred from six repositories.
+2. **Who owns the schema, and what is the migration process?** If the answer involves a
+   multi-team coordinated deploy, the services are not independent no matter what the
+   diagram says.
+3. **What is the latency budget for this endpoint, and where is it written down?** A budget
+   that lives only in someone's head cannot be enforced by a timeout, and a timeout nobody
+   can justify is a timeout nobody will maintain.
+4. **What happens when this one service is entirely down?** Not "we restart it" — what the
+   *callers* do. Do they fail, degrade, queue, retry into a storm, or return a wrong
+   answer? If the answer is not written down, the answer at 3am is whatever the code does by
+   accident.
+5. **Can you deploy one service without the others?** If the honest answer is "usually, but
+   the schema change needs coordination", that is a distributed monolith with one exception
+   carved out.
+6. **What is the rollback story if the schema is already migrated?** The honest answer is
+   usually "there isn't one, which is why expand-and-contract is mandatory" — and a team
+   that cannot answer this does not have a rollback story for the code either.
+
+### 7.12 When to Stop — and the Number Nobody Expects
+
+The closing question, and the one that gets the least attention because it is not a
+technical question. **There is a number of services a team can operate, and it is almost
+always much smaller than the number they can build.**
+
+The capacity that constrains it is not engineering skill, it is **attention**. Each service
+consumes a fixed amount of operational attention that does not scale down: its dashboards
+have to be read, its alerts have to be tuned, its runbook has to exist and be current, its
+dependencies have to be tracked, its failure modes have to be known by someone. A team can
+build 30 services; a team of five engineers can *operate* perhaps five to eight well,
+because on-call attention is the scarce resource and it is consumed at roughly a constant
+rate per service regardless of how simple the service is.
+
+The signals that you have passed the number are not "we are short-staffed" — they are:
+
+- **The on-call rotation has more services per person than an engineer can hold in their
+  head.** When a rotation covers 20 services, nobody can know any of them, and every incident
+  starts with 30 minutes of reading code.
+- **Dashboards are paged and ignored.** When the alert-to-action ratio drops, the rotation
+  starts treating pages as noise, and the first real signal is lost in the habit of
+  ignoring the channel.
+- **The runbooks are stale.** A runbook that is out of date is worse than none, because it
+  confidently sends someone down the wrong path.
+- **New services are being added faster than any are being retired.** Net service count
+  growing monotonically is the clearest single signal, and the one worth building a metric
+  for.
+
+The conclusion is not "don't build services" — it is **the cost of a service is a recurring
+operational cost, and it should be weighed against its benefit the way a recurring cost
+should be.** A service that exists because of a genuine boundary — independent team,
+independent scaling need, independent change rate — is worth its cost. A service that exists
+because the last one was split for a reason that has since changed is pure cost, and
+retiring services is a legitimate, underused activity. The most valuable staff-level question
+about a microservice estate is not "how should we split this" but **"which of our services
+would we stop building if we were starting again, and what is the cost of stopping them?"**
+
+#### Common Mistakes
+
+- A split by technical layer, which cannot be independently deployed by construction.
+- Reading a release-freeze rule as incident prevention when incidents are caused by changes,
+  not by the day of the week.
+- Retrying the symptom — adding another breaker to a chain — instead of the cause, which is
+  that retries live at every layer.
+- A shared database treated as a temporary state, when it is the permanent state and the
+  defining feature of a distributed monolith.
+- Fixing a cache's latency without ever writing down its consistency model, which converts an
+  optimisation into a correctness dependency.
+- Treating the platform team as a support function and measuring it by ticket throughput,
+  which guarantees the queue grows and the road never gets built.
+- Counting services as a proxy for progress, when the number that matters is the number a
+  team can *operate*, which is far smaller.
+- Never retiring a service whose reason for existing has expired, so the operational cost
+  compounds monotonically while the benefit does not.
+
+#### Interview Questions — Antipatterns, Cost and Org Causes
+
+**Q1. When should we stop splitting?** `STAFF`
+
+The honest answer is bounded by operational attention, not by engineering ability — a team
+can build 30 services and operate five to eight well, because each service consumes a
+roughly constant amount of on-call attention (dashboards, alerts, runbooks, known failure
+modes, dependency tracking) that does not scale down with simplicity. So the test is not
+"can we build another one" but "is there a boundary here that pays for itself". A split is
+justified by independent team ownership, an independent scaling need, or an independent
+change rate. It is not justified by the service being "more scalable" — a distributed
+monolith is *harder* to scale than either a monolith or a properly split set, because you
+have the network without the independence. The specific signals that you are past the
+number are: more services per on-call engineer than anyone can hold in their head, a
+declining alert-to-action ratio, stale runbooks, and — the clearest metric to build — a net
+service count that only goes up. The question I would put to a leadership team is which
+services we would stop building if we started again, and what retiring each would cost,
+because retirement is a legitimate and badly underused activity.
+
+**Q2. Our service is a distributed monolith. How do we get out?** `STAFF`
+
+Diagnose first, because the two causes need different fixes. If the services share a
+database, the boundary is not real, and the first piece of work is data ownership: pick the
+service that should own each table, and get the others reading through its API or a
+denormalised copy. That is a data-migration project, budget it in months. If the services
+are correctly split but ship in lockstep, the cause is almost always that one team owns all
+of them, and the fix is organisational rather than technical — the services are code, and
+only the team boundary produces independent deployment. The test is the one from the Spring
+volume: take a single feature request and count how many services must change. If the answer
+is "all of them", the split was by technical layer and needs redrawing, not refactoring. The
+intermediate state to be honest about: consolidation back into a modular monolith is a
+legitimate and often cheaper answer than untangling, particularly below five teams.
+
+**Q3. A platform team has become a bottleneck. What do you do?** `STAFF`
+
+Diagnose the cause, which is usually that the platform is organised as a support function
+rather than a product. The symptom is a queue on every delivery path, and the mechanism is
+that the platform optimises for *handling requests well* instead of for *eliminating
+requests*. The fix is the product framing: publish a paved road with a self-service default
+— a deployment template, a golden CI pipeline, a service template with sensible defaults for
+probes and resources — so the 80% case becomes "click a button in the internal portal" with
+no human in the loop. Then measure the platform by the median time from a developer deciding
+to ship to it running in production without asking permission, not by ticket throughput. If
+that number is minutes, the platform is a product; if it is days, it is a ticket queue. The
+remaining 20% of genuinely novel infrastructure is what the team should spend its time on,
+and it is only 20% if the road is good.
+
+**Q4. A schema change requires four teams to deploy in a specific order. What does that
+tell you?** `TRICKY`
+
+That the services are not independent, and the shared schema is the mechanism. A coordinated
+multi-team deploy in a specific order is the *definition* of a distributed monolith: the
+services are separate artifacts but one release unit, which means every benefit of splitting
+is absent while every cost is present. The cause is almost always that nobody owns the
+schema — shared schemas are unowned by construction, so the first direct read was expediency
+and nothing revisited it because it works. The fix is naming a schema owner (an org
+decision, and the one most often deferred) and then separating the phases: expand in one
+release, contract in a later one, drop in a release after that, so the gap between phases
+is what makes the migration reversible. A team that cannot deploy a column rename without
+coordinating four teams also cannot deploy a feature without coordinating four teams, and
+neither can it debug a change to service A breaking service B.
+
+**Q5. Two teams each added retries to the same dependency. Who is wrong?** `STAFF`
+
+Neither, individually, and that is the point — this is the clearest example in the catalogue
+of a failure that only exists at the level of the organisation. Each team's decision is
+locally correct: their dependency was flaky once, and retrying is the right local response.
+Neither team can see that the composition multiplies the offered load on the shared
+dependency by the product of the attempts at each layer, and that the multiplier is applied
+precisely when the dependency can least afford it. The correct answer to "who is wrong" is
+"nobody, because there is no owner for the resilience policy" — which is a policy gap, not
+a people gap. The fix is a central policy: a retry budget as a fraction of inbound traffic, a
+documented owner for the timeout/retry/breaker configuration of inbound calls, and the rule
+that retries live at one layer rather than all of them. Notably, this is the failure a
+service mesh is genuinely good at fixing, because moving retries into uniform configuration
+makes the composition auditable for the first time.
+
+**Q6. A deploy on Friday caused a Saturday 3am incident. What is the real problem?** `SCENARIO`
+
+The rule, not the deploy. A change deployed Thursday evening is discovered whenever its
+failure takes hours to manifest — memory exhaustion, connection exhaustion, cache expiry
+cliffs, data drift — which is the majority of failure modes. A Friday rule does not prevent
+incidents; it converts a Tuesday 10am incident, attended by a rested engineer with the whole
+team reachable, into a Saturday 03:00 incident attended by one person. It also has an
+incentive effect: the rule pushes teams to batch changes toward Thursday evening, which is
+the worst moment for a clean rollback. The underlying need is real — a small, safe,
+reversible release — and the answer is the machinery in Chapter 3: immutable artifacts,
+automated rollback, canary with a metric-based abort, and a deploy anyone can do without
+permission. A mature team does not need the Friday rule because the release is not a scary
+event. An immature team needs the rule precisely because it is.
+
+**Q7. Is the cache a dependency or an optimisation? Who decides?** `ADVANCED`
+
+Whichever you have actually built, which is usually neither deliberately. A cache is an
+optimisation only while the service can answer without it. The moment a miss is an error
+rather than a slow path — because the miss path has a bug, or the cache is down, or the
+first request after a deploy cannot populate it — the cache has become a correctness
+dependency and your availability is now strictly worse than before you added it. That trade
+is legitimate in some cases and catastrophic in others, and nobody makes it explicitly,
+because caching gets added by whoever is nearest a performance problem under a deadline. The
+missing artefacts are: a written consistency model per cached entity, a named owner for
+invalidation, and the requirement that the miss path is a first-class tested path. The other
+thing to write down is the failure mode — a popular key expiring across all instances at
+once is a thundering herd, and the fix is TTL jitter, which you only find by looking for the
+cliff in a soak test.
+
+**Q8. How do you know whether your microservice estate is operable?** `STAFF`
+
+Six questions, and I would want answers to all of them before I would call it operable. Who
+owns the retry policy for calls into this service — if the answer is "each caller configures
+their own client", the composition is unaudited. Who owns the schema, and what is the
+migration process — if the answer involves a coordinated multi-team deploy, the services are
+not independent. What is the latency budget for the endpoint, and where is it written down —
+a budget that lives in someone's head cannot be enforced by a timeout. What happens to the
+*callers* when this service is entirely down — fail, degrade, queue, retry into a storm, or
+return a wrong answer. Can you deploy one service without the others, honestly, including
+schema changes. And what is the rollback story if the schema is already migrated. Beyond
+those, the operational signals: services per on-call engineer, the alert-to-action ratio,
+runbook freshness, and — the one worth building a dashboard for — the net service count,
+because a count that only goes up is the clearest single indicator that the estate has passed
+the number the team can operate.
+
+> **CHAPTER 7 SUMMARY**
+>
+> The antipatterns are worth naming, but the **causes** are the useful part, because a team
+> that recognises the symptom and not the cause will fix the symptom and get the same
+> antipattern back under a new name. Synchronous call chains are caused by a product
+> decision ("the API must return everything") that nobody recognised as an architecture
+> decision. The distributed monolith is caused by a split by technical layer plus one team
+> owning everything — and the test is that the architecture should be predictable from the
+> org chart. Shared databases are caused by expediency plus a schema nobody owns, and the
+> cost is not the migration but that a coordinated deploy becomes permanent. Retries without
+> budgets are caused by resilience added per-team with no central policy — the clearest case
+> of a failure that only exists at the organisation level, and the one a mesh genuinely
+> fixes. Timeouts are missing because defaults are invisible and because a timeout is a
+> contract that needs an owner. Chatty interfaces exist because no consumer contract means
+> nobody counts the calls, and the failure rate of a composite is the *product* of its parts
+> (20 services at 99.9% is 98%). A cache becomes an unowned layer the moment nobody writes
+> down its consistency model, at which point it is a correctness dependency rather than an
+> optimisation. Friday deploys are not incident prevention — they only relocate when
+> failures are discovered, from a Tuesday morning to a Saturday 3am. And the two hardest:
+> **premature distribution**, where the cost is all of the above with none of the benefit and
+> the boundary refactor becomes N data migrations instead of one, driven by architecture as
+> identity; and **the platform team as a bottleneck**, where the mechanism is optimising for
+> handling requests rather than eliminating them, measured not by ticket throughput but by
+> the time from "developer decides to ship" to "running in production without asking anyone".
+> The closing number: the number of services a team can *operate* is much smaller than the
+> number it can build, because on-call attention is consumed at a roughly constant rate per
+> service — and the clearest signal that the estate has passed it is a net service count that
+> only goes up.
+
+#### Further Reading
+
+- [Microservices](https://martinfowler.com/articles/microservices.html) — the deployment-independence and bounded-context sections; every antipattern in this chapter is a failure of one of those two properties.
+- [MonolithFirst](https://martinfowler.com/bliki/MonolithFirst.html) — the canonical argument for the modular monolith, and the specific claim that extracting one boundary properly beats starting distributed.
+- [Service Mesh](https://microservices.io/patterns/deployment/service-mesh.html) — the platform-as-a-layer framing that the "platform as a bottleneck" discussion is really about, read alongside the Team Topologies product framing.
+- [Team Topologies Key Concepts](https://teamtopologies.com/key-concepts) — stream-aligned teams and the platform-as-product framing; the missing organisational half of every architecture diagram in this volume.
+- [SRE Book — Addressing Cascading Failures](https://sre.google/sre-book/addressing-cascading-failures/) — the retry amplification analysis that 7.4 is an organisational restatement of; the org causes are the part a book cannot give you.
+
+---
+
+### End of Volume 3
+
+That is the series. There is no Volume 4, so this is the consolidation rather than a
+pointer — the point where the three volumes resolve into one thing, which is that **a
+distributed system is a set of independently deployable services connected by an
+operational substrate that somebody has to own, tune, and pay for, and almost every
+production failure is a mechanism operating correctly in a context nobody examined.**
+
+Read across all three volumes and the same four questions appear every time. They are the
+four questions to be able to answer cold.
+
+**1. What is actually on the call path?** Nearly every silent failure across the series is a
+mechanism that is *not* in the path. A `@CircuitBreaker` on a class Spring never proxied. A
+`@Retry` on a method invoked internally, so the advice never runs. A readiness probe on an
+endpoint path that includes a database, so a DB blip removes every pod. A sidecar that
+terminates mTLS while the app trusts a forgeable header. A blue/green cutover gated on a
+liveness probe. Before you debug a mechanism, confirm it is *engaged* — that is the first
+question, and it answers a surprising number of "why isn't this working" incidents.
+
+**2. Who owns the resource?** Every volume converges on ownership, and ownership is the
+through-line. The team that owns a table owns the schema and its migrations. The team that
+owns a service owns the retry, timeout and breaker policy for calls *into* it, and nobody
+else. The team that owns a cache owns its invalidation and its consistency model. The team
+that owns a service owns its SLO, its dashboard, and its runbook. The team that owns the
+platform owns the deploy path — and if the platform is a ticket queue, the organisation
+discovered it did not own its own delivery. Unowned resources are unmonitored, un-tuned and
+un-migrated, and the incident is always the first person to notice. The SRE book's
+ownership sections and this volume's Chapter 7 are the same argument at different altitudes.
+
+**3. What is the number, and when does it stop holding?** Volume 1's decomposition tests.
+Volume 2's event ordering guarantees and idempotency windows. This volume's: six serial hops
+at 20ms giving a p99 over 600ms; three layers of retries giving 27× the load on the deepest
+dependency; a few hundred label values per metric before the backend drops series; 1% of
+traffic at 10 rps giving 30 requests in a canary window, which is not a measurement; 3
+retries per layer compounding in a six-hop chain; concurrency bounded by the connection pool
+and not the thread count; the number of services a team can operate being far smaller than
+the number it can build. Every one of these is correct guidance with a stated boundary, and
+a candidate who says only the rule without the boundary has memorised a rule rather than a
+mechanism. **The habit to build: say the number, then say the condition under which it no
+longer holds.**
+
+**4. What is the failure mode, and does anything detect it?** Every mechanism in the series
+has one, and a distributed system adds a whole category on top: **mechanisms that work
+perfectly and whose composition is catastrophic.** Three layers of retries, each team's
+decision locally correct. A readiness probe that turns a partial outage into a total one. A
+circuit breaker with a success-shaped fallback, so a 100%-degraded service reports a 0%
+error rate. A load shedder that is working exactly as designed and nobody is alerting on the
+shed rate. A closed-loop load test that reports 5× headroom for a service that cannot
+sustain its current load. A blue/green flip whose gate was a health check. The staff-level
+question is never "is this pattern implemented correctly" but **"when this pattern
+misbehaves, who finds out, and how quickly?"**
+
+So, the whole series in one paragraph: **the boundary, the transaction, the outbox, the
+consistency window, the metric label, the timeout budget, the retry multiplier, the readiness
+probe, the JVM heap in a cgroup, the sidecar proxy, the schema migration, the canary window
+and the shed rate are all the same kind of thing — a mechanism that is correct in isolation,
+that somebody must own, that has a number attached to it, and that fails in a specific,
+nameable way.** The interview question is never "what does this do". It is "who owns this,
+what is the number, and what does the failure look like at 3am".
+
+**And the cost question, which is the one that most separates a senior from a staff
+engineer.** Every mechanism in the series has a running cost, and none of them is visible in
+a code review: the observability bill (which grows with series count and trace volume), the
+double capacity blue/green demands permanently, the idle provisioned capacity that sizing
+for peak implies, the engineer-months of platform work a mesh requires, and — the recurring
+one — the operational attention each service consumes at a roughly constant rate. The
+question to bring to a design review is not "does this work" but **"what does this cost per
+month, who pays it, and is that cheaper than the alternative?"** A system that is correct
+and unaffordable will be simplified by someone under time pressure, and the thing that gets
+removed will be the load shedder.
+
+### The Questions That Connect the Whole Series
+
+Worth being able to answer cold, because they are asked in almost every senior loop and they
+reveal whether the candidate has operated anything:
+
+- **"Walk me through what happens between a user clicking checkout and a row being written
+  in the orders database."** Across the volumes: the gateway (Vol 2) authenticates and routes;
+  the orders service's thread pool accepts the request; the correlation ID is extracted and
+  the trace context propagated; the timeout budget is checked against the published number;
+  the breaker is consulted; the JDBC pool is acquired; the call to inventory is made under a
+  bulkhead with its own shrinking budget; the outbox row is written in the same transaction
+  (Vol 2); the transaction commits; the response is assembled with any degraded fields. Then
+  the deployment questions: which of those steps is a network call, which is skipped if the
+  method is called internally rather than through the proxy, and which of them degrades
+  gracefully if the inventory call times out.
+- **"A service works in every test and fails in production. What is the class of bug?"**
+  Almost always a mechanism that is present in a context the test does not reproduce: a
+  probe or an advice that is not engaged, a profile that is not active, a bounded pool that
+  test load never fills, a timeout no test ever waits for, a JVM that sizes its heap from
+  the host rather than the cgroup, or a retry multiplier that only appears when three
+  services are in the chain at once.
+- **"What would you monitor on this service, and what would you alert on?"** The RED
+  metrics for the service, the USE metrics for the constrained resources, the *rejected* and
+  *shed* counters that are not errors but are failures, a cardinality budget on every metric
+  tag, and — the point of the exercise — the distinction between a metric worth a dashboard,
+  a metric worth an alert, and a metric that is a memory leak if you emit it.
+- **"How do you know a change is safe to ship?"** The canary window and abort threshold, the
+  state of the schema migration (expand or contract?), whether the rollout parameters fight
+  the HPA, and the rollback story for both the code and the data. The honest answer ends
+  with the sentence that Chapter 3 is about: if the rollback is not a digest change, there
+  is no safe release process, only a lucky one.
+- **"This service is our largest cost line. What would you do?"** Start by separating the
+  three components: the observability bill, the capacity provision for peak, and the
+  operational surface. Then the question that actually moves the number — what utilisation
+  are we paying for at the 95th percentile, and what is the marginal cost of the instance we
+  added for a spike that lasted four minutes. The answer is rarely "scale less"; it is
+  usually "stop paying for the same idle capacity twice", and occasionally "this service
+  should not exist as a service", which is the Chapter 7 question and the one nobody asks.
+
+## Chapter 8 — Interview Scenario Bank
+
+Production situations (**P**), predicted behaviour (**T**), code-review questions (**S**), and
+design trade-off challenges (**D**). This bank is deliberately **D-weighted**: the design
+questions are what separate a candidate who has configured these patterns from one who has
+operated them, because operating them is what produces the judgement to decline them. The
+four D-questions in the first two sections — should we get a service mesh, is our retry
+policy survivable, is a readiness probe on a dependency a bug, when should we stop splitting
+— are the ones to have answered in the strongest form.
+
+### Observability
+
+**D1. Our dashboards are excellent and we still could not diagnose last night's outage. What
+is actually missing?** `STAFF`
+
+Monitoring, not observability. A dashboard is a pre-written question, and last night's
+incident was a question nobody pre-wrote. The three things missing are almost always: the
+causal chain across services, which means traces; a durable correlation identifier a human
+can produce, which means the customer's report cannot be joined to the system's data; and
+retention long enough to cover the reporting lag, because a user who reports on day three
+needs three days of evidence. I would not start by buying a tool. I would start by taking the
+most recent incident and asking, for each question someone asked during it, whether the
+answering evidence still exists — and for the ones where it does not, what dropped it. In my
+experience it is usually head sampling discarding the erroring traces, and a log retention
+window shorter than the reporting lag.
+
+**D2. We want to sample traces to control cost. Where do you sample and on what?** `STAFF`
+
+My default answer is that most teams should not sample at the client at all, and the SRE
+book's own guidance is to collect 100% and let the storage tier apply retention policy,
+because that decision is reversible and a client-side rate is not. If you must sample at the
+client, sample on a rule, not a probability: always keep non-2xx, always keep anything over
+a latency threshold, keep a couple of percent of the rest. That gets most of the benefit of
+tail sampling without the buffering cost. The reason probability sampling is wrong is
+structural: the decision is made before the outcome is known, so the sample is unbiased with
+respect to outcomes and therefore blind to the only two things traces are collected for. And
+the cost that tail sampling incurs honestly is that the collector must hold in-flight spans
+in memory — roughly in-flight rps × average trace duration × spans per trace, which for 5,000
+rps and 300ms traces is tens of thousands of spans resident at once — so a collector sized
+for ingest rate but not working set OOMs exactly when you need the traces.
+
+**D3. A team wants a metric per customer so support can look up a customer's latency. Do you
+allow it?** `STAFF`
+
+Not on the metric, yes on the trace and the log. The mechanism matters more than the rule:
+the metrics backend holds one series per unique label combination for the whole retention
+window, whether or not data is still arriving, so a `customerId` label is a permanent series
+per customer, ever, multiplied by every other label on that metric. At 250,000 customers
+that is hundreds of millions of series for one metric name, and the failure is not an error —
+the backend gets slow, then starts dropping series, so the metric that mattered most is
+silently absent. Cardinality is bounded by the values that *ever* occur, not the ones
+currently active, which is why it grows monotonically with business traffic rather than with
+load. What I would offer instead is the same capability via exemplars: a bounded metric by
+channel or endpoint, with an exemplar pointing at a trace ID, so support can go from the
+customer's slow graph to the exact trace in two clicks — provided someone can actually
+produce the customer's ID as a search term and retention outlasts the support ticket.
+
+**T4. You add a `userId` tag to an existing counter used by 40 dashboards. What happens
+over the next month?** `ADVANCED`
+
+The metric name's series count multiplies by the number of distinct users that ever touch the
+code path, and those series persist for the retention period even after the user churns. So
+the backend's memory grows monotonically with cumulative business volume rather than with
+current traffic, the query latency behind all 40 dashboards degrades as the series count
+grows, and eventually the backend starts dropping series — which produces no error, just
+missing data on the dashboards that matter most. The two things I would check first are
+whether the backend has hit a series limit and whether the query p99 behind those dashboards
+has moved. The fix is to remove the tag and put the identifier on the span and the log line,
+where it is searchable and costs nothing per series.
+
+**P5. A PR adds `registry.counter("payment.latency", "provider", provider, "userId", uid)`.
+What is your review comment?** `S`
+
+The `userId` label is a permanent series per user in the metrics backend — cardinality is
+bounded by the values that ever occur, not the ones concurrently active, so this grows
+monotonically and eventually gets the backend to drop series, silently, which means the
+payment dashboard we rely on for paging just stops having data. I would keep the `provider`
+label, which is bounded and is genuinely the dimension you aggregate over, and move the
+user ID to a span attribute and a log field, where it is searchable at no series cost. If
+the goal behind the PR is "support should be able to look up a customer's payment latency",
+exemplars on the bounded metric give us that in two clicks without the series explosion.
+
+**T6. Your tail sampler is configured to keep every erroring trace and 1% of the rest. You
+compute a p99 from retained traces and it is 3× your metrics p99. Why?** `ADVANCED`
+
+Because tail sampling is deliberately biased, and the bias runs directly at the number being
+measured. The retained set is enriched with exactly the slow and erroring requests that
+dominate the tail of the true distribution, so a percentile computed over it is higher by
+construction. Under head sampling the same comparison fails differently — a uniform random
+sample of requests is unbiased for the median but has enormous variance in the tail, so you
+do not have enough slow samples to estimate a p99 at all. Traces answer "where did the time
+go for this request"; the metric answers "how often is it slow". Neither is a substitute for
+the other and comparing them is a category error.
+
+**D7. We have all three pillars and a new engineer still cannot debug an issue. What is
+missing?** `STAFF`
+
+Almost never a fourth signal — the thing missing is the *path from a human's knowledge to a
+query*. A new engineer does not know which service, which trace ID, or which message pattern
+to search for, and all three pillars require you to already know what you are looking for.
+Metrics need a service name, logs need a message, traces need a trace ID — and the only
+identifier a support ticket hands you is an order ID or an email address. So the fix is
+usually making one identifier flow end-to-end: the same correlation ID in the log line, the
+trace and the domain record, plus a documented search path from the business identifier to
+the technical one. The second thing usually missing is *baseline* — what normal looked like
+for this metric before the change, recorded somewhere other than the engineer's memory. The
+third is a written map of which service calls which, because most "I cannot debug this" is
+really "I did not know these two were connected".
+
+**P8. An engineer opens a production trace and sees one service. Everything downstream is
+missing. Likely causes, in order?** `SCENARIO`
+
+In order. First, the context is not propagating at all, so the trace was never continued —
+most often a hand-rolled `RestTemplate` or `WebClient` call rather than an instrumented
+client, or a message consumer that does not extract the context from the message headers.
+Second, the context propagates but the downstream service is not instrumented: the SDK is on
+some services and not others, so traces end at the boundary of coverage. Third, sampling —
+under head sampling the caller dropped this trace, so the child spans were never created and
+the parent is absent too. Fourth and least likely, the trace really is one hop, because the
+call was inlined or crossed a mechanism that does not carry headers. The diagnostic that
+separates the first two from the rest: check whether *any* multi-service trace exists in the
+system. If none do, it is propagation. If some do, it is partial coverage, and the question
+becomes which boundary.
+
+### Resilience
+
+**D9. Is our retry policy survivable?** `STAFF`
+
+I would not answer this by looking at any single service's config, because the policy that
+matters is the composition and nobody can see it from inside one service. I would build the
+effective retry multiplier for each critical call path: attempts at each layer, multiplied,
+against the deepest dependency. Three layers of 3× is 27× and six is 729×, and crucially
+that multiplier is applied in the *failure* case, which is exactly when the dependency
+cannot afford it — that is the mechanism by which a slowdown becomes an outage. The policy
+is survivable if, and only if, retries exist at one layer (the edge, where a failure is one
+user's 500), there is a **retry budget** capping the fraction of traffic that may retry,
+backoff is jittered rather than fixed, and the budget is measured against each layer's own
+inbound traffic so a layer that is not retrying cannot exhaust another's. A retry budget
+self-regulates in the right direction: healthy traffic barely touches it, degraded traffic
+exhausts it and the excess retries are dropped, so the multiplier stays bounded while the
+dependency recovers. If the answer is "we have a breaker and a timeout and we retry on 5xx",
+that is three mechanisms and not a policy, and the composition is still unaudited.
+
+**D10. A canary has no automated rollback trigger — the team watches a dashboard. Is that
+acceptable?** `STAFF`
+
+No, and a canary without an automated abort is a slower way to cause an outage than a plain
+deploy, because it converts a two-minute detection into a five-to-ten-minute one while
+exposing real users throughout, and the human watcher is not reliably looking — the whole
+value of a canary is continuous comparison, and a person cannot be continuously present.
+The design needs three numbers. The **analysis window** has to be long enough to observe the
+failure mode, which means at least five times the p99 of the new version, with five to ten
+minutes per step as a practical floor — a canary judged at 30 seconds against a 2-second p99
+has measured the fast path and called it healthy. The **comparison** has to be against the
+live baseline rather than an absolute threshold, because a regression is a relative
+degradation and an absolute threshold fires on your traffic shifts. And the **sample** has to
+be big enough to mean anything: at 1% of 10 rps you see 30 requests in a five-minute window,
+and no percentage computed from 30 requests is a measurement. The honest caveat is what a
+canary cannot catch — a defect tied to one tenant or one data shape, which is why a synthetic
+transaction exercising the new feature belongs in the gate.
+
+**D11. Our circuit breakers have `failureRateThreshold: 50` and `minimumNumberOfCalls: 5`.
+Is that a problem?** `ADVANCED`
+
+It is the single most common circuit-breaker misconfiguration, and the problem is that the
+threshold is meaningless at that sample size. A failure rate is a ratio, and a ratio
+computed over five calls is noise: 1 failure out of 5 is 20%, 2 is 40%, 3 is 60%. So ordinary
+variance trips the breaker, every call then fails fast with `CallNotPermitted`, and you have
+manufactured an outage that is indistinguishable from a real one. The two settings have to be
+chosen together against the actual traffic rate — a 100-call window at 20 rps is five
+seconds, which is itself too short to distinguish a blip from a failure, and the common case
+of `minimumNumberOfCalls: 1000` has the opposite bug, where the window never fills and the
+breaker silently does nothing for the entire incident it was installed for. At low traffic
+the honest mechanism is a consecutive-failure counter rather than a rate, because the rate
+never becomes significant.
+
+**D12. Should this call be isolated with a thread pool or a semaphore?** `ADVANCED`
+
+It depends on the failure I am insuring against, and the asymmetry is the whole answer. Pool
+isolation contains a **hang**: a dependency that accepts the connection and never responds
+consumes the bulkhead's threads, not the request-handling threads, so the wall between them
+is real. Semaphore isolation bounds **concurrency** and nothing else — the threads doing
+those calls are still my threads, so a hung dependency still eats a Tomcat thread for the
+permit it holds, and the semaphore does not stop that. So: pool when the risk is a hang,
+semaphore when the risk is saturation and I want fast, visible failure. The cost of pools is
+an extra executor and a context switch per call. Either way the queue must be bounded and
+the rejection path must produce a real outcome, because an unbounded queue converts the fast
+failure a bulkhead exists to provide into a ten-second wait with a 0% error rate, and a
+bulkhead with no rejection handler silently drops the work while returning success-shaped
+responses to the caller.
+
+**T13. Load shedding is configured. What must be true for it to be an improvement rather
+than a new failure mode?** `ADVANCED`
+
+Four things. The threshold has to be measured on a **saturation** signal — in-flight
+requests, queue depth, or the service's own p99 against budget — because a CPU threshold
+sheds during a retry storm and adds load to whatever caused the storm. The rejection has to
+be **fast and cheap**, which is the entire point: a shed request costs microseconds, while an
+admitted request into a saturated system costs seconds and usually times out anyway, so
+shedding *increases* total successful work. The selection has to be **fair**, which in
+practice means randomising per request — rejecting the newest or the oldest is a systematic
+bias that a user will notice and report as "your service is broken for me". And the shed rate
+must be exported as a **first-class metric with an alert**, because a service shedding 40% of
+its traffic while reporting a 0% error rate is a silent outage and "we are protecting
+ourselves" is only good news if the humans find out.
+
+**S14. A reviewer finds `@CircuitBreaker(failureRateThreshold = 50)` on a new client with
+default `minimumNumberOfCalls = 100`. What do you say?** `S`
+
+The default is 100 calls, so the breaker needs 100 calls in the rolling window before it can
+trip — which at 20 rps is five seconds, and at 2 rps is nearly a minute. Combined with a 50%
+threshold that is two things to name. First, at low traffic the breaker may never open during
+the incident it exists for, so it is a mechanism that appears configured and does nothing;
+at higher traffic five seconds is too short to distinguish a blip from a real failure, so it
+will flap. Second, and regardless of rate, the number has to be chosen against the traffic
+rather than inherited from a default. I would want to see the traffic rate for this client
+and a deliberate choice of window; at low rps I would argue for a consecutive-failure counter
+instead, because the rate never becomes significant.
+
+**D15. A dependency we call has a published p99 of 80ms. What timeout do we set?** `STAFF`
+
+Not 80ms, and this is where the arithmetic in Chapter 2 does the work. A timeout must be set
+from *your* latency budget for the whole operation, not copied from the callee's own
+measurement, because the caller's experience includes the network, the connection pool wait,
+and everything else you do around it. If the endpoint's SLO is 300ms at p99 and this
+dependency is one of several calls, then 80ms is the callee's internal processing time and
+the caller's budget for it is what is left after the other calls. The second rule is to set
+it *tightly but survivably*: a timeout that is comfortably below the dependency's normal
+latency will fire during ordinary tail events and turn a slow-but-correct response into an
+error, which is a self-inflicted outage. So I would set it slightly above the dependency's
+p99 — not its p50, not its mean — and explicitly below the caller's own budget, and I would
+put the number in a shared place rather than in each caller's config so the chain is
+readable. And the third thing, which is the one people skip: a timeout is a contract, so it
+needs an owner on both sides and a reason recorded. A timeout nobody can justify is a
+timeout nobody will maintain, and the first person to "temporarily" raise it will not
+remember to lower it.
+
+**D16. Where should the retry live for a call that goes through a gateway, a service mesh and
+a library client?** `D` `STAFF`
+
+Exactly one of them, and choosing is a design decision rather than a default. My preference is
+the layer closest to the *user's* failure — the edge, where a retry is cheap for the
+infrastructure and visible as one user-visible attempt — with everything behind it
+non-retrying. The reason is that a retry at the innermost layer is the one that lands on the
+component that is already struggling, and the reason against retrying at both the edge and
+the mesh is the multiplication: three layers of 2 attempts is 8 downstream calls for one user
+request, and it is applied in the failure case, which is exactly when the dependency cannot
+afford it. The exception I would make is a non-idempotent operation, where retrying is
+simply wrong and the answer is an idempotency key from Volume 2 rather than a placement
+decision. And whatever is chosen, the multiplier needs to be written down and reviewable as
+a whole, because a policy that only exists in three separate configuration files cannot be
+audited — which is the one thing a mesh genuinely fixes.
+
+**P17. A service is degraded. The breaker is open, so calls fail in 2ms. The error rate is
+high and the p99 is excellent. What does this tell you, and what is the risk?** `SCENARIO`
+
+That the p99 has stopped measuring anything useful, because the fastest requests in the
+distribution are now the failures. A p99 computed over a distribution where the worst
+outcomes were removed by a breaker is not a latency measurement, it is a measurement of how
+fast you can reject work — and it will look like an improvement on the latency dashboard
+precisely when things are worst. Any SLO or alert built on a latency percentile is
+therefore unreliable in exactly the state where you most need it, which is why the SLO
+should be a good-event ratio rather than a latency number. The second risk is behavioural: a
+team watching latency dashboards during a breaker-open period concludes the system is fine
+and does not escalate, while the user-facing error rate climbs. The third is the recovery —
+the breaker's half-open probe is the first real traffic the dependency sees after the
+outage, and if the dependency has not actually recovered, each probe fails and re-opens the
+breaker, so the recovery is a slow oscillation rather than a clean return. Which is why the
+half-open probe count and the breaker's state should both be on a dashboard, and why the
+error budget is the signal you page on.
+
+### Deployment & Progressive Delivery
+
+**D18. Our schema migrations run in the deploy pipeline. A migration locked a 180M-row
+table and took the service down. What is the design change?** `STAFF`
+
+Migrations should not run in the deploy path at all without an explicit human gate, and the
+batched work should be a resumable job rather than a pipeline step. The specific failure has
+three causes and each needs its own fix. The **exclusive lock**: adding a column *with a
+non-volatile default* can rewrite the whole table while holding `ACCESS EXCLUSIVE`, which
+blocks every reader and writer for the duration — so the column is added as nullable metadata
+only, with no default. The **replication lag**: a single 200M-row `UPDATE` is one enormous
+transaction that generates a WAL stream taking replicas minutes to apply, so read-after-write
+breaks fleet-wide and read traffic from the replica stalls — so the backfill runs in batches
+of a few thousand rows, each its own transaction, throttled by observed replication lag. And
+the **long transaction**: one huge `UPDATE` holds locks and bloats WAL for its whole duration
+— so the backfill is a job that can be stopped, resumed, and rate-limited. And then the
+release discipline: expand in one release, contract in a later one, drop in a release after
+that, so the gap between the phases is what makes the migration reversible.
+
+**D19. We deploy manually on Tuesdays with a change ticket. Is this a problem?** `STAFF`
+
+The ticket is the least of it. The real question is what the process is compensating for,
+because a manual Tuesday deploy with a change ticket usually means the release is scary —
+nobody knows what is running, nobody trusts the rollback, or the test suite is not trusted.
+A human-performed deploy is itself the largest single contributor to deployment errors
+because it is a non-repeatable, non-auditable process, and it makes the release batch large,
+which makes it slower and more dangerous. The fix is not "automate the button" — it is the
+Chapter 3 chain: immutable artifacts deployed by digest so "what is running" is answerable, a
+rollback that is a digest change, a canary with a metric-based abort, and config in versioned
+ConfigMaps rather than on servers. Once those exist, the ticket is unnecessary because
+nothing about the release is a risk any more. The tell that this is understood rather than
+resisted: teams who reach this point stop needing change-ticket approval, and the teams who
+do not usually cannot say what is deployed in production right now.
+
+**T20. A blue/green cutover routes 100% of traffic to the new version. What can still go
+wrong that a canary would have caught?** `SCENARIO`
+
+Anything that is a *rate* problem rather than a *correctness* problem, because a cliff gives
+you no partial exposure to observe. A 4% error rate on 5% of traffic is 0.2% overall — a
+number you might not notice and would certainly catch at a 5% canary step. Latency
+regressions under real load are similar: a change that is fine at 5% because the cache is
+warm and degrades at 100% because it is not. Anything involving a data-dependent path —
+a specific tenant, a row size, a code path only 2% of traffic exercises — is invisible at
+the cliff. And the rollback is available but not automatic, so the detection latency is
+however long a human takes. This is the real trade: blue/green's rollback is more robust
+(it does not depend on the new version reporting health) but its failure detection is
+entirely manual, and for a *latent* defect it will find out from customers.
+
+**P21. A deploy at 14:02 correlates with a latency spike at 14:07. What is the very first
+thing you do?** `S`
+
+Open the deploy or config-change markers on the dashboard, because that correlation is a
+hypothesis and the marker either confirms it in one glance or eliminates the most likely
+cause entirely. If the spike starts at 14:07, the gap is five minutes, and a five-minute gap
+between a deploy and a latency regression is the signature of a cold-start or a cache-warming
+effect rather than a code defect: the first requests after a deploy have cold JIT, empty
+caches and an empty connection pool. What I would then check is whether the spike is
+consistent — every request slow, or a heavy tail — because a bimodal distribution with a
+slow second mode after a deploy is usually a cache miss path or a lazily-initialised
+component that is being hit for the first time.
+
+**D22. A canary at 5% has been green for 4 minutes. The team is about to promote. What do you
+check first?** `D` `STAFF`
+
+The sample size, because if it is too small the other three checks are meaningless. At 5% of
+100 rps, four minutes is 1,200 requests and the result means something. At 5% of 10 rps it
+is 12 requests, and no percentage computed from 12 observations is a measurement — the
+confidence interval spans nearly the whole range. So the first question is the traffic rate
+behind the percentage, and if it is low the answer is to raise the percentage, extend the
+window, or add a synthetic transaction that exercises the change deterministically. Second,
+the window against the p99: four minutes against a two-second p99 is 120 p99s, which will not
+observe the tail, and the requirement is at least five times the p99. Third, whether the
+comparison is against the live baseline rather than an absolute threshold, because a
+regression is a relative degradation. And fourth, the one people skip: does the canary path
+actually exercise the changed code? Five percent of *traffic* is not five percent of the
+request types — if the change affects a rare endpoint, a new input shape, or a small
+tenant, the canary is running a fraction of requests through a path nobody exercises. That
+class of defect is structurally invisible to canaries, which is why a synthetic transaction
+hitting the actual feature belongs in the gate beside the metric comparison.
+
+**T23. A feature flag has been `true` for a year and is now read by three teams. What is the
+risk and the first step?** `ADVANCED`
+
+The flag stopped being a rollout mechanism and became a permanent conditional, which means
+there are now eight untested combinations across three services, none of them in the test
+suite because each belongs to someone else. Every one is a latent incident, and the cost when
+one fires is high precisely because the interacting code is in services the person on call
+does not own. There is a second, sharper risk: if the flag is read at startup into a field,
+a mid-flight change has no effect on running instances — so it is not a rollback mechanism at
+all, and the team believes they hold a lever they do not. The first step is to find the owner
+and force a decision, because the alternative is that the flag lives forever. The decision is
+one of three: remove it, give it a named owner and an expiry date, or — if it genuinely is a
+permanent business toggle — promote it out of the flag system into a typed, validated
+configuration value. The governance that stops recurrence is structural: every flag gets an
+owner and a removal ticket at creation, so the expiry is never something someone has to
+remember.
+
+### Kubernetes
+
+**D24. Is a readiness probe that checks the database a bug?** `STAFF`
+
+Yes, and it is one of the most common causes of self-inflicted total outages, because
+readiness controls membership of the Service's endpoint set. A readiness probe that fails
+whenever the database is unreachable removes *every* pod of *every* service that checks it,
+simultaneously, the moment a shared dependency degrades — so a database blip that should
+have cost a few percent of requests costs the entire service. It is worse than a plain
+outage, because the pods stay running: they keep their heaps, keep their failing connection
+pools, and consume cluster resources while serving nothing. The correct design separates
+three concerns: liveness checks only that the process is not wedged (a thread-dump
+heartbeat, never a dependency), readiness checks that the instance can serve a request in
+hand, and dependency health goes in a separate human-facing health group. If readiness
+genuinely must check a hard dependency, you have deliberately chosen this service's
+availability to be lower than the dependency's, and that should be a documented decision
+with a fallback — not a copy-pasted default endpoint.
+
+**D25. Our JVM service is being OOMKilled with no `OutOfMemoryError`. What is happening and
+what do you change?** `STAFF`
+
+Two different things produce "out of memory" and the container makes the distinction
+important. The cgroup OOM-killer kills the process when the *container's* total memory
+exceeds its limit — heap, Metaspace, code cache, thread stacks, direct and native buffers,
+JVM overhead. That produces a container that vanishes with no Java-level exception, no heap
+dump and no stack trace, which is why it is so often misdiagnosed as a mystery crash. A
+Java heap OOM, by contrast, throws `OutOfMemoryError` inside the JVM and leaves a dump. The
+usual cause is a JVM that sized its heap from the node's memory rather than the container
+limit, which pre-`UseContainerSupport` JVMs did by default; modern JVMs read the cgroup
+limit, so what remains is that `MaxRAMPercentage` is too aggressive for the limit — cAdvisor
+reserves roughly 1GB per container for non-heap, so a 256Mi limit with
+`MaxRAMPercentage=75` gets the process killed long before the heap fills — or that non-heap
+genuinely grew. I would set `-Xmx` explicitly for small limits, leave real headroom above
+the request, and add `ExitOnOutOfMemoryError` so the failure is loud.
+
+**D26. We want to autoscale on CPU but our service times out under load. What do you scale
+on instead?** `ADVANCED`
+
+Something that reflects the actual bottleneck. CPU is demand, not saturation, and it is a
+poor proxy for any service waiting on a database, a cache, or a downstream call — that
+service sits at 20% CPU while completely saturated on connections or threads, so the HPA
+computes that it needs *fewer* replicas. The pathological case is worse: a service in a
+retry storm has high CPU (backoff loops, reconnection churn, exception handling) while
+failing, so the HPA adds replicas of an already-broken service, which adds load to the
+dependency that started the storm and accelerates the outage. Scale instead on in-flight
+requests, queue depth, active connections, or a business signal like requests per second —
+the HPA supports custom and external metrics for exactly this. And configure the asymmetric
+stabilisation windows deliberately: scale up fast, scale down slowly (the 300s default),
+which prevents flapping at the cost of paying for stale capacity for a few minutes after a
+spike ends.
+
+**T27. A pod is terminated during a rolling update. What is the sequence, and what causes
+the small 5xx burst people always see?** `ADVANCED`
+
+Kubernetes removes the pod from the EndpointSlice and sends SIGTERM at the same time, then
+allows `terminationGracePeriodSeconds` (30s default) before SIGKILL. The 5xx burst has two
+sources. The first is a **race**: endpoint propagation to every node's kube-proxy is
+asynchronous and takes a second or two, so a client that opened a keep-alive connection in
+that window sends a request to a pod that has already stopped accepting. The fix is a
+`preStop` hook that sleeps a few seconds before shutdown, so the removal has propagated
+first — it looks like cargo cult and it is a workaround for a real race. The second is a
+**drain overrun**: if the JVM has not finished in-flight requests and closed its connection
+pool within the grace period, SIGKILL lands mid-transaction. That one needs real shutdown
+handling and a grace period matched to the actual drain time, not a longer timeout.
+
+**S28. A PR adds `limits: { cpu: 2 }` to a Spring Boot deployment. What is your objection?**
+`S`
+
+A CPU limit is a quota enforced every 100ms, not a reservation, and a Spring service is
+heavily multithreaded — Tomcat threads, the GC, the JIT, async executors — so it will
+routinely consume the quota within a period and then be throttled for the remainder, and be
+throttled again in the next period. The symptom is latency that spikes with no CPU
+*usage* spike to explain it, which is among the hardest things to diagnose because the
+throttling is invisible in the usual metrics. The request, by contrast, is a real
+reservation: the scheduler sets it aside and `AvailableProcessors` respects it, so the JVM
+sizes its GC threads and JIT correctly for the parallelism it actually has. So I would keep
+the CPU request and drop the limit. On a CPU-bound service a limit is defensible, but then
+I would want to know the throttling metric is being watched.
+
+**P29. A service works in staging with 3 pods and falls over in production with 40. The
+staging config is identical. What differs?** `SCENARIO`
+
+The things that scale with replica count are the ones staging is not exercising, and I would
+look there before at the config. Connection pool sizing: 40 pods × 50 connections is 2,000
+connections against a database whose `max_connections` is often 500, so production is
+exhausting the *database's* connection pool and every new pod makes it worse — and this is
+an incident that gets worse as you add capacity, which is the signature. Client-side load
+balancing: with 40 pods there are 40 times more keep-alive connections, and each one pins to
+a pod, so a rollout or a drain breaks connections that a 3-pod staging environment would
+never have. Caches: 40 local caches means 40 times less hit rate, so production takes 40× the
+database load of staging, which can be the whole story. And HPA: if it is on, 40 pods can
+mean an autoscaling event that staging never performed. The general lesson is that anything
+per-instance — pools, caches, local state, connection counts — does not scale linearly, and
+staging with 3 pods tests none of it.
+
+**D30. Our readiness probe checks a downstream service. Fix it?** `D` `STAFF`
+
+Yes, and I would treat it as an active bug rather than a style question, because it is one of
+the most reliable ways to convert a partial outage into a total one. Readiness controls
+membership of the Service endpoint set, so a probe that fails when a dependency is
+unreachable pulls *every* pod of *every* service that probes it out of rotation
+simultaneously the moment that dependency degrades. A database blip that should have cost a
+few percent of requests costs the entire service — and it is arguably worse than a plain
+outage, because the pods stay running: they keep their heaps, keep their failing connection
+pools, and consume cluster capacity while serving nothing, so the blast radius includes every
+other service sharing the cluster. The fix separates three concerns. Liveness checks only
+that the process is not wedged — a thread-dump heartbeat, and essentially never a
+dependency. Readiness checks that the instance can serve a request it has in hand, which for
+a Spring service means the web server is up and the handler chain is intact. And dependency
+health goes in a separate group that a human reads and no scheduler acts on. If readiness
+genuinely must gate on a hard dependency — some services do need this, because accepting
+traffic they cannot serve is worse — then you have deliberately made this service's
+availability lower than its dependency's, and that belongs in a design doc with a named
+owner, not copied from a template.
+
+**P31. A pod is evicted during a node drain and the pod right behind it also fails. What is
+the second-order cause?** `SCENARIO`
+
+Almost always that the drain was not coordinated with the service's own capacity. The first
+pod's loss is handled — the Service has other endpoints, the client retries, nothing visible.
+The second failure is what reveals the design: the remaining pods were already at their
+connection or thread ceiling, so losing one more pushed them over, and the failure is
+non-linear rather than gradual. The usual culprits in order: per-instance connection pools
+against a shared database whose `max_connections` was sized for the old replica count, so
+fewer pods means more connections each and the database is the actual ceiling; a fixed
+memory limit that assumes a specific number of pods for total cluster memory; or readiness
+probes that take a while to flip, so the terminating pod is pulled from endpoints late and
+in-flight requests are lost. The check I run first is whether the failure rate is
+proportional to the pod loss — if losing one of twelve produces a 30% error rate, the system
+has no headroom and the drain exposed a capacity problem that was always there. The fix is a
+PodDisruptionBudget so drains are rate-limited, plus capacity sized for N+1 as Chapter 6
+requires, and a drain that respects the PDB rather than evicting everything at once.
+
+### Service Mesh
+
+**D32. Should we get a service mesh?** `STAFF`
+
+The first question is how many services and how many teams, because that determines whether
+the mesh's value is even available. The mesh's genuine value is *uniform enforcement* — mTLS
+and traffic policy applied below the application, where an application bug cannot bypass it.
+That value only exists at a scale where you cannot achieve uniformity by asking every team
+to remember. Below roughly ten services, mTLS is a day of work with a shared library, you can
+still see all the traffic, so a misconfiguration is one team's problem rather than a
+fleet-wide push, and the mesh's one-to-two engineer-months of platform cost plus permanent
+operational surface is not justified. Above that scale, or where a platform team exists with
+capacity to own a control plane, the argument is strong — particularly for mTLS, because
+workload identity genuinely belongs at the workload boundary. What I would not do is adopt it
+as a single binary decision: transport mTLS in `PERMISSIVE` first to observe, then workload
+identity, then `STRICT`, then traffic policy, then telemetry. The cost I would weigh most
+heavily is the debugging story, because it is paid by whoever is on call and it is not in
+any of the marketing.
+
+**D33. We already have an API gateway. What does the mesh add that we are missing?** `STAFF`
+
+They solve different problems and conflating them is common and consequential. A gateway is
+an **ingress boundary** — one entry point for external traffic — and it is a place where you
+own the code, so putting aggregation, coarse auth and request shaping there is legitimate. A
+mesh is an **ambient layer** around every workload, covering east-west traffic, configured
+by a control plane the platform team owns. So the mesh adds mTLS and service identity between
+internal services, per-service traffic policy, and telemetry that is uniform across
+languages. The reason the conflation is dangerous is that a business rule written into mesh
+config — because the mesh can route, someone assumes it should decide — turns a pricing fix
+into a control-plane push, reviewed by the platform team, to change something a developer
+should be able to change in a repository. My rule: anything that needs a code change, a
+business rule, or a per-team review belongs at the gateway or in the service; the mesh is
+for properties that should be uniform and should not depend on whether a particular service
+remembered to implement them.
+
+**T34. A mesh is deployed with `STRICT` mTLS on every port. What happens to callers that are
+not meshed?** `ADVANCED`
+
+They fail, immediately and completely, and the failure is a TLS handshake error that looks
+like a network fault rather than a configuration change — which is why it is such an
+expensive mistake to make on day one. This is the concrete argument for `PERMISSIVE` first:
+run mTLS in permissive mode, which accepts both plaintext and mutual TLS, so you can observe
+which callers are actually meshed and which are not, from the telemetry, before you make it
+mandatory. Only then move to `STRICT`, and only after workload identity is in place, because
+`STRICT` without identity means the application cannot see who the caller is and will end up
+trusting a header that anything inside the boundary can forge. The related trap is scope: a
+`PeerAuthentication` applied to the wrong port or the wrong workload selector breaks traffic
+for a subset of callers in a way that is difficult to attribute, because the control plane
+applies it consistently and instantly.
+
+**P35. A service is failing intermittently after the mesh rollout. Your first three
+diagnostic steps?** `SCENARIO`
+
+First, `istioctl proxy-status` — it shows whether the proxy for each pod is SYNCED, and a
+STALE or NOT SENT config is a config-push problem rather than an application problem, which
+eliminates half the hypothesis space immediately. Second, check the proxy's own metrics and
+upstream stats rather than the application's, because the outbound connection is the
+proxy's and the application's client pool is not the one in play; the answer to "who is
+rejecting this" is usually in the proxy's `cluster_upstream_rq_*` counters. Third, read the
+*effective* config rather than the source YAML — a `VirtualService` whose `hosts` does not
+match is silently never applied, so the policy you wrote and the policy in force can be
+different, and that class of error is completely invisible from the repository. If those
+three are clean, then it is the sidecar's process being the shared-fate component, and I would
+look at whether the pod was OOMKilled with the sidecar as the cause.
+
+**D36. The mesh is installed. Where should mTLS terminate, and who owns the identity?** `D`
+`STAFF`
+
+The identity belongs as close to the workload as possible, and that is the mesh's real
+argument rather than a stylistic preference. A certificate proves *who is at the other end of
+this connection*, and that fact is only as trustworthy as the distance between the proof and
+the thing being protected. If mTLS terminates in a sidecar and the application trusts a
+plaintext header, the identity is real on the wire and forgeable in the process — and any
+workload in the mesh, or anything that can reach the pod's network namespace, can assert any
+identity it likes. So `STRICT` is the correct end state precisely because it means the proxy
+is not trusted to re-assert identity, and workload identity — a per-workload credential from
+the platform's CA — is what makes that possible. In practice this is a sequence, not a
+switch: `PERMISSIVE` first so telemetry shows which callers are actually meshed, then
+identity issued, then `STRICT`, then traffic policy. The ownership question matters as much
+as the placement: the platform team owns the control plane and the CA, the service team owns
+what the application *does* with the identity it receives, and if nobody owns the second half
+you have built a transport-security system with no authorisation in it.
+
+**D37. A team wants to move business logic into the mesh because the mesh can route it. Your
+position?** `D` `STAFF`
+
+Firmly no, and the reason is about where the knowledge lives rather than what the technology
+can do. Mesh routing is configuration evaluated by a control plane, and its unit of change is
+a YAML object reviewed by whoever owns the platform. A pricing rule, a fraud threshold, a
+tenant entitlement — these are business decisions that change weekly, have named domain
+owners, and need a test, a rollback and a code review. In mesh config, every price change
+becomes a control-plane push reviewed by an infrastructure team, which is a latency and an
+ownership problem before it is a correctness one. The failure modes are worse too: a routing
+rule is applied consistently and instantly across every instance, so a bad one is a
+fleet-wide incident with an unusually fast onset and no partial exposure to catch it in. My
+rule: anything requiring a business decision, a code change or a domain review belongs in
+the service or at the gateway, where the team owning the logic can change it. The mesh is for
+properties that should be uniform and should not depend on whether each service remembered to
+implement them — mTLS, identity, telemetry, traffic policy. Using it for business rules
+trades an engineering boundary for a configuration one, and business rules always end up in
+the configuration.
+
+### Scaling & Load Testing
+
+**D38. Our load test says we have 5× headroom. What are you most suspicious of?** `STAFF`
+
+Coordinated omission, first and by a lot. If the generator is closed-loop — a fixed number of
+threads, each sending, waiting for the response, and sending again — then when the service
+slows, each thread's cycle time grows with the latency, so the generator's *offered load*
+silently falls by the same factor, and the slow requests it never got round to sending are
+never recorded. The test then reports a healthy p99 for a service that was saturated, and the
+capacity number can be wrong by an order of magnitude. The fix is an open-loop generator that
+fires on a fixed schedule and measures latency from the *intended* send time, so a request
+that took 2s is attributed the 2s a real user would have experienced. Second, whether the
+dependencies were real or stubbed — a stubbed database means the test measured the service's
+own overhead, not its behaviour, and the real path is dominated by waits. Third, duration: a
+five-minute test cannot find a memory leak, connection exhaustion or a cardinality leak,
+because those are slopes and slopes are invisible in short runs. I would rerun it open-loop,
+at full offered load, with a real slow-dependency scenario, overnight, before believing the
+number.
+
+**D39. How many instances do we actually need?** `ADVANCED`
+
+Three multiplications, and then the part people skip. Required concurrency is peak rps ×
+mean service time — 4,000 rps at 40ms is 160 concurrent requests. Divided by per-instance
+sustainable concurrency, that gives the number to *meet peak*, which for those figures is
+about one instance, and that is exactly why the naive answer is wrong. The real requirement is
+surviving a loss: you must lose one instance (deploy, drain, OOMKill, spot reclaim) and still
+hold the SLO, so N must satisfy (N−1) × per-instance concurrency ≥ peak, with margin for the
+next instance's cold start — 30–90 seconds for a JVM warming up. And per-instance
+concurrency is not the thread count; it is the smaller of your thread pool and your
+connection pool, because a thread blocked on a connection is not capacity. Then the cost
+question, which is the staff-level part: that N is a number to meet peak, not a number to run
+all day, and the gap between peak and trough is a cost decision — over-provision, scale on a
+schedule, HPA with a slow scale-down and a `minReplicas` floor, or scale to zero where the
+cold start is acceptable.
+
+**D40. Should we put a queue between two of our services?** `STAFF`
+
+On a synchronous request path, almost never — and the reason is specific rather than
+stylistic. A queue converts a fast failure, where the client gets one error immediately and
+can retry, into a slow failure, where the request waits; and while it waits it holds a
+thread and usually a connection, which is the worst possible use of the resource under
+pressure. It makes the collapse last *longer*, not shorter: in the scenario in Chapter 6,
+eleven minutes of unavailability where fast shedding gave three. Queues belong asynchronously,
+between decoupled components, where a slow consumer legitimately should not block a producer
+and buffering is the point. If you want to bound what a dependency can take from you on a
+synchronous path, the mechanisms are a bulkhead and a load shed, both of which fail fast
+and visibly. And if you do put a queue on a path, it must be bounded with an explicit
+rejection handler, or it is not a mitigation — it is a slower outage.
+
+**T41. A dependency returns 5% errors. Why is that more dangerous than it being fully
+down?** `ADVANCED`
+
+Because at 0% failure the circuit breaker opens and the load stops, whereas at 5% it may
+never reach its threshold and the retry logic fires on every one of those 5%. The dependency
+receives its normal 100% of traffic *plus* roughly 15% of retries, precisely because it is
+slightly broken — so the extra load deepens the degradation, more calls fail, more retries
+fire, and the failure rate climbs. A total outage would have been safer, because the breaker
+would have opened and stopped the load entirely. This is the Chapter 2 multiplier reproduced
+at the capacity layer, and it is also why a load test that only exercises 0% and 100% failure
+will never find it. The control that actually bounds it is a retry budget, and the reason
+you want the *fraction* rather than a count is precisely this case: a budget is consumed
+faster when failures are frequent, so the multiplier falls as the system degrades.
+
+**S42. A PR adds `Thread.sleep(5000)` in a `preStop` hook. What is the reasoning, and is
+5 seconds the right number?** `S`
+
+The reasoning is real and the sleep is not cargo cult. When a pod is deleted, Kubernetes
+removes it from the EndpointSlice and sends SIGTERM at the same time, but endpoint
+propagation to every node's kube-proxy is asynchronous and takes a second or two. A client
+with a keep-alive connection opened in that window sends a request to a pod that has already
+stopped accepting, which is the small burst of 5xx that correlates with every rollout and
+node drain and is invisible at low traffic. The sleep lets the removal propagate before the
+app stops. The number is empirical, not principled — it should be however long endpoint
+propagation takes in your cluster, which you can measure, and it should be shorter than
+`terminationGracePeriodSeconds` so the sleep does not eat your drain window. The alternative
+to a sleep is application-level endpoint-aware shutdown, which is nicer and which most teams
+have not built.
+
+### Antipatterns, Cost and Organisation
+
+**D43. When should we stop splitting?** `STAFF`
+
+The bound is operational attention, not engineering ability. A team can build 30 services
+and operate five to eight well, because each service consumes a roughly constant amount of
+on-call attention — dashboards to read, alerts to tune, a runbook to keep current, failure
+modes to know, dependencies to track — and that does not scale down with how simple the
+service is. So the test is not "can we build another" but "is there a boundary that pays for
+itself". A split is justified by independent team ownership, an independent scaling need, or
+an independent change rate. It is not justified by being "more scalable": a distributed
+monolith is *harder* to scale than either a monolith or a properly split set, because you
+have the network without the independence. Premature distribution is uniquely expensive
+because it also multiplies the extraction work — a boundary discovered late is a data
+migration, and doing it four times is four data migrations. The signals that you are past the
+number are concrete: more services per on-call engineer than anyone can hold in their head, a
+declining alert-to-action ratio, stale runbooks, and the clearest metric of all, a net
+service count that only goes up. The question I would take to leadership is which services
+we would stop building if we started again, and what retiring each would cost — because
+retirement is legitimate and badly underused.
+
+**D44. Two teams each added retries to the same dependency. Who is wrong?** `STAFF`
+
+Neither individually, and that is precisely the point. This is the clearest example in the
+whole catalogue of a failure that exists only at the level of the organisation: each team's
+decision is locally correct — their dependency was flaky once and retrying is the right
+local response — and no individual team can see that the composition multiplies offered load
+on the shared dependency by the product of the attempts at each layer, with that multiplier
+applied exactly when the dependency can least afford it. So the answer to "who is wrong" is
+"nobody, because nobody owns the resilience policy", which is a policy gap rather than a
+people gap. The fix is a central policy: a retry budget as a fraction of inbound traffic, a
+named owner for the timeout/retry/breaker configuration of inbound calls, and the rule that
+retries live at one layer. The one thing I would note in favour of the current setup is that
+moving retries into a service mesh's configuration would make the composition auditable for
+the first time, because you can read the effective policy for a whole call path instead of
+inferring it from six repositories — that is the strongest argument for a mesh I would make
+in a review, and it is an argument about auditability rather than elegance.
+
+**D45. Our platform team has become a bottleneck. What is the actual problem?** `STAFF`
+
+The platform is organised as a support function rather than as a product, and the mechanism
+is specific: it optimises for *handling requests well* instead of for *eliminating
+requests*. A team answering 200 tickets a week is doing support work, and support work does
+not scale and does not improve the platform. It also learns which problems are common only
+from tickets, which are the problems people thought to ask about, so it invests in the wrong
+things while the real bottleneck stays untouched. The cost is that the platform's queue
+becomes the critical path for every team's delivery — a team with 2-minute deploys now waits
+three days — and the organisation has traded the latency of a distributed system for the
+centralisation of a monolith, which is the distributed monolith's organisational form reached
+by a different route. The fix is the product framing: publish a paved road with a
+self-service default so the 80% case is "click a button in the internal portal" with no
+human in the loop, and then measure the platform by the median time from a developer deciding
+to ship to it running in production without asking permission. Minutes means it is a product;
+days means it is a ticket queue.
+
+**T46. A team has services A, B and C, all owned by one team, split by technical layer. Can
+they deploy independently?** `TRICKY`
+
+No, and the structure guarantees it rather than the maturity of the team being the limiting
+factor. Splitting by technical layer — `api-service`, `service-service`, `worker-service` —
+produces services that cannot be deployed independently *by construction*, because every
+feature change touches all three. The team ownership is the second, compounding problem:
+Conway's law re-merges the deployment process within a quarter even where the split was by
+business capability, so the service boundary is code and the team boundary is what actually
+produces independence. The test is the one I use in review: take any single feature request
+and count how many services must change. If the answer is "all of them", you have a
+distributed monolith, and the fix is a redraw rather than a refactor. And the honest
+alternative is consolidation back into a modular monolith, which at one team is usually
+cheaper than untangling and loses nothing, because independent deployment was never the
+constraint.
+
+**P47. A service's error rate is 0% but users report the feature does not work. Where do
+you look first?** `SCENARIO`
+
+At the degradation paths, because they are deliberately shaped to avoid the error rate. The
+candidates in order: a circuit breaker rejecting 100% of calls with a fallback that returns
+a cached or empty result, which gives a 0% error rate and a 100% incorrect result; bulkhead
+rejections producing a default value for the same reason; a load shedder working exactly as
+designed, which is an outage by another name and has its own counter; or a catch-all
+exception handler that converts a genuine failure into a 200 with an error payload. What I
+would do is look for the *rejected* and *shed* and *fallback* counters rather than the error
+count, because those are the metrics that describe failure modes designed not to look like
+failures. The general lesson is that any degradation path needs its own counter and its own
+alert, because a service that is 100% degraded by its own resilience machinery is the one
+incident nobody is paged for.
+
+**D48. This service is our largest infrastructure line item. What would you do?** `STAFF`
+
+I would separate the three cost components first, because they have completely different
+fixes. The **observability bill** grows with series count and trace volume, so it is
+addressable by cardinality discipline and sampling policy without touching the service.
+The **capacity provision for peak** is addressable by asking the question nobody has asked:
+what utilisation are we paying for at the 95th percentile, and what is the marginal cost of
+the instance we added for a spike that lasted four minutes? A large fraction of provisioned
+capacity is idle by design, and the fix is usually the HPA's scale-down window, a `minReplicas`
+floor at the trough, or scheduling on a known daily curve. The **operational surface** is
+addressable only by consolidating or retiring, which brings us to the question nobody wants to
+ask: should this be a service at all? And the framing I would use in the room is not "does
+this work" but "what does this cost per month, who pays it, and is that cheaper than the
+alternative" — because a system that is correct and unaffordable will be simplified by
+someone under time pressure, and the thing that gets removed will be the load shedder or the
+canary, and then we have the outage the cost saving was supposed to prevent.
+
+**S49. A PR adds a cache in front of a database query with no invalidation strategy. What is
+your review comment?** `S`
+
+This converts an optimisation into a correctness dependency, and nobody has written down the
+consistency model, so there is no answer to "how stale is this allowed to be" — which means
+the answer will be discovered in production by a user. Three things I want to see: a written
+consistency statement for the entity (what does "fresh enough" mean here, and is this a path
+where a user acting on a stale value would be harmed — a balance, an availability, a price —
+or a path where a slightly old value is fine?), a named owner for invalidation, and a
+tested miss path, because the miss path is the one that runs during a deploy, a cache
+restart, and every cold instance, and it is where a 200ms optimisation turns into a 500. I
+would also want TTL jitter rather than a fixed TTL, so the keyspace does not expire in a
+single wave and dump the full read load onto the database at once — and I would note that we
+have been bitten by that here, which a soak test would have found.
+**D50. You are asked to halve the infrastructure bill without touching the SLO. Where do you
+start?** `D` `STAFF`
+
+I would resist the framing for a moment, because "without touching the SLO" usually means the
+SLO is not the constraint — it is being used as a shield for a number nobody agreed to. So
+the first step is to read the SLO, and if it is aspirational rather than measured, the
+conversation is actually about the SLO. Assuming it is real, I would attack the three cost
+components in order of reversibility. **Observability first**, because it is cheapest to fix
+and usually the largest surprise: cardinality discipline, retention tiers, and a sampling
+policy that keeps the errors rather than the successes. **Then capacity provision**, and the
+question nobody has asked is what utilisation we pay for at the 95th percentile and what the
+marginal instance costs for a spike that lasted four minutes — often a third of the fleet is
+idle by design, and that is addressable through the HPA's scale-down window and a
+`minReplicas` floor rather than by cutting peak headroom. **The operational surface last**,
+because consolidating services is the only one of the three that is genuinely hard to
+reverse. What I would not allow is the exercise reaching the resilience mechanisms first: the
+load shedder, the canary, the extra replica that lets you lose one safely. Those are cheap
+relative to an outage, and a system that is correct but unaffordable gets simplified by
+someone under time pressure — and the thing removed is always the resilience mechanism, after
+which you get the outage the saving was meant to prevent.
+
+**D51. You have 40 services and 30 engineers. What is your first recommendation?** `D`
+`STAFF`
+
+Measure the operational load per service before changing anything, because the instinct to
+consolidate is often right and the *choice* of which is entirely wrong without data. The
+three numbers: services per on-call engineer, the alert-to-action ratio per service, and —
+the one I would put on a dashboard first — the net service count trend, since a count that
+only goes up is the clearest signal the estate has passed what the team can operate. Then sort
+the services by a criterion that is not code volume. **Services with a genuine boundary** —
+independent team ownership, independent scaling need, or independent change rate — stay.
+**Services whose reason for existence has expired** are candidates for retirement. **Services
+that are pure overhead** — thin wrappers, single-caller edges, split-by-technical-layer
+services that could never have been independently deployed — get consolidated. And the
+consolidation should go into a modular monolith, preserving the boundary in code, because
+that is the change that reduces operational load without giving up the reasoning the
+boundary provided. The number I would hold the organisation to is the one from 7.12: this
+team can operate perhaps five to eight well, so the goal is not fewer services for their own
+sake but **each remaining service having an owner who knows its failure modes** — because
+their absence is exactly what makes incidents slow.
+
+**P52. Two teams share a cache instance. One team deploys a change that alters the cached
+shape. What happens, and what should have prevented it?** `SCENARIO`
+
+The deploying team publishes a new shape, the reading team deserialises into an old class,
+and the failure is intermittent and timing-shaped — it occurs only for keys written after the
+deploy, and only until they expire or are overwritten, which makes it look like data
+corruption rather than a deploy. The deploying team sees nothing wrong, because their tests
+and their own reads are self-consistent, and the reading team's dashboard shows a low steady
+error rate that nobody connects to a deploy twelve hours earlier. What should have prevented
+it is the expand-and-contract argument applied to a cache instead of a schema: put the
+version in the key, `order:v2` alongside `order:v1`, have consumers read both, drop `v1` on a
+later date. That makes the migration reversible and the two teams' deploys independent. The
+organisational cause is Chapter 7's — a cache with no owner and no written contract, so a
+shared instance is an invisible coupling between two teams who have never spoken about it.
+
+**T53. A load test shows p50 fine and p95 exactly 4x p50, reproducibly. What does that
+shape suggest?** `ADVANCED`
+
+A stable bimodal distribution — two distinct paths rather than random slowness. p50 at 45ms
+and p95 at 180ms on every run means roughly 5–10% of requests take a completely different
+route. The usual candidates, in order: a cache-hit path and a cache-miss path where the miss
+is a database query; a fast path that skips a dependency and a slow path that does not,
+usually a degraded or fallback branch that has quietly become 20% of traffic; or a
+synchronisation point — a lock, a contended entry — where a minority of requests queue. This
+shape deserves attention before the p99 does, because a bimodal p50/p95 gap is structural and
+diagnosable, while a high p99 with a normal p50/p95 ratio is usually just variance. The test
+is to plot the histogram rather than read percentiles, then split the two modes by a
+dimension you already have — endpoint, tenant, cache status — and the split names the cause
+immediately. A p99 that is merely high is a tuning problem; a p95 that is 4x the p50 is a
+second code path you did not know you had.
