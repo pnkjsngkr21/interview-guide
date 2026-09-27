@@ -62,6 +62,32 @@ trade-offs.
 | 2 | [Communication, Data & Consistency](microservices/microservices-deep-dive-volume-02-communication-data-consistency.md) |
 | 3 | [Operations, Platforms & Evolution](microservices/microservices-deep-dive-volume-03-operations-platforms-evolution.md) |
 
+### Database — "The Database Complete Deep-Dive"
+
+An 11-volume study & interview mastery guide at senior/staff level, covering databases
+from the storage engine up — the physical layer, the relational model, SQL as a language,
+indexing and query execution, transactions and concurrency, schema design and scaling, and
+then a deep dive on each engine: PostgreSQL, MySQL, Redis, Cassandra, DynamoDB, MongoDB,
+Elasticsearch, and S3. The volume is framed around where the abstraction stops paying for
+itself: why `SELECT *` is a page-count problem before it is a bandwidth problem, why the
+optimiser is a cost estimator rather than a mind reader, and what a shard key costs to
+undo. Volume 11 carries a consolidated database & SQL interview bank of 150+ questions
+organised by category rather than by volume.
+
+| # | Volume |
+|---|--------|
+| 1 | [Database Fundamentals & the Relational Model](database/database-deep-dive-volume-01-fundamentals-relational-model.md) |
+| 2 | [SQL — DDL, DML & Constraints](database/database-deep-dive-volume-02-sql-ddl-dml-constraints.md) |
+| 3 | [SQL — Queries, Joins, CTEs & Window Functions](database/database-deep-dive-volume-03-sql-queries-joins-window-functions.md) |
+| 4 | [Indexes, Query Planning & Execution](database/database-deep-dive-volume-04-indexes-query-planning-execution.md) |
+| 5 | [Transactions, Isolation Levels & Concurrency](database/database-deep-dive-volume-05-transactions-isolation-concurrency.md) |
+| 6 | [Schema Design, Partitioning & Scaling](database/database-deep-dive-volume-06-schema-design-partitioning-scaling.md) |
+| 7 | [PostgreSQL](database/database-deep-dive-volume-07-postgresql.md) |
+| 8 | [MySQL](database/database-deep-dive-volume-08-mysql.md) |
+| 9 | [Redis & Caching Strategies](database/database-deep-dive-volume-09-redis-caching.md) |
+| 10 | [NoSQL & Distributed Stores — Cassandra, DynamoDB, MongoDB](database/database-deep-dive-volume-10-nosql-cassandra-dynamodb-mongodb.md) |
+| 11 | [S3, Elasticsearch & the Database Interview Bank](database/database-deep-dive-volume-11-s3-elasticsearch-interview-bank.md) |
+
 ## Suggested Study Path
 
 **Java** — Volumes 1 → 3 build the language foundation, 4 → 5 cover the library and
@@ -83,6 +109,16 @@ most heavily weighted toward design trade-offs. Volume 3 is the operational half
 (observability, resilience, delivery, Kubernetes, mesh, scaling) and assumes you can
 reason about failure modes rather than just framework configuration.
 
+**Database** — Volumes 1 → 6 are the portable material and the sensible order: Volume 1
+gives you the physical and logical model, 2 → 3 make SQL a language you can write fluently
+rather than pattern-match, 4 → 5 are the two that decide whether your application is fast
+and correct, and 6 is where schema choices start becoming irreversible. Volumes 7 → 8 are
+the relational engines most teams actually run, 9 is the cache in front of everything, 10
+is the NoSQL set, and 11 is object storage plus search plus the consolidated interview
+bank. Volumes 1 → 5 are assumed knowledge for the Spring set's Volume 6 (Spring Data JPA
+& Persistence), which treats the ORM's default behaviour as the dangerous thing, and
+Volume 5's isolation material underpins the Microservices set's Volume 2.
+
 ## Repository Layout
 
 ```
@@ -93,8 +129,11 @@ reason about failure modes rather than just framework configuration.
 │   └── pdfs/                                # Printable PDF editions
 ├── spring/
 │   └── spring-deep-dive-volume-01..11-*.md  # Markdown source for each volume
-└── microservices/
-    └── microservices-deep-dive-volume-01..03-*.md  # Markdown source for each volume
+├── microservices/
+│   └── microservices-deep-dive-volume-01..03-*.md  # Markdown source for each volume
+└── database/
+    ├── README.md                                     # Authoring format contract
+    └── database-deep-dive-volume-01..11-*.md        # Markdown source for each volume
 ```
 
 ## Contributing
