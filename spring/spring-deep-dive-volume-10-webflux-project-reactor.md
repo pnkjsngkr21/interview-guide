@@ -602,7 +602,7 @@ Mono.just(callApi())
 > the fleet and produce periodic load spikes that keep the dependency from recovering.
 > Jitter is not a nicety; it is what breaks the synchronisation. And the multiplication is
 > multiplicative across a call chain: a 4-hop chain where each hop retries twice is
-> **2³ = 8 requests per user request**, per layer, and it compounds with the number of
+> **3⁴ = 81 requests per user request**, per layer, and it compounds with the number of
 > concurrent callers.
 
 ### 3.3 Timeouts

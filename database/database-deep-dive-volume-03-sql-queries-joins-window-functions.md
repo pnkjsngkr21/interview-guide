@@ -3433,7 +3433,7 @@ ORDER  BY c.country NULLS LAST;
   ───────  ─────────  ───────
   DE            1    270.00   (Bruno: 103 220.00 + 107 50.00)
   GB            2    133.00   (Ada 51.00 + Dara 82.00)
-  NG            2     37.50   (Chidi: only 104; 108 is NULL)
+  NG            1     37.50   (Chidi: only 104; 108 is NULL)
   NULL          1     NULL     (Elin — the unknown bucket)
   → 4 rows. The NULL row is a real row in the result.
 ```

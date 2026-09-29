@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bean Lifecycle, Scopes &amp; Advanced DI — Cheatsheet</title>
+<meta name="description" content="Condensed cheatsheet for Spring Deep-Dive Volume 2: the full bean creation and destruction callback sequence, singleton vs prototype, circular references, FactoryBean, and the lifecycle failure modes.">
+<link rel="stylesheet" href="../cheatsheet.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="page">
+
+  <nav class="sidebar" aria-label="Contents">
+    <h2>On this page</h2>
+    <ol>
+      <li><a href="#ch1">1 — The full lifecycle</a></li>
+      <li><a href="#ch2">2 — Post-processors</a></li>
+      <li><a href="#ch3">3 — Bean scopes</a></li>
+      <li><a href="#ch4">4 — Bean validation</a></li>
+      <li><a href="#ch5">5 — Dynamic registration</a></li>
+      <li><a href="#ch6">6 — Resources &amp; environment</a></li>
+      <li><a href="#ch7">7 — Circular dependencies</a></li>
+      <li><a href="#ch8">8 — Failure modes</a></li>
+      <li><a href="#numbers">Numbers</a></li>
+    </ol>
+    <h2>Series</h2>
+    <ul>
+      <li><a href="01-spring-core-ioc.html">01 — Core &amp; IoC</a></li>
+      <li><a href="02-bean-lifecycle-scopes-di.html">02 — Lifecycle &amp; DI</a></li>
+      <li><a href="03-aop-proxying.html">03 — AOP &amp; Proxying</a></li>
+      <li><a href="04-transaction-management.html">04 — Transactions</a></li>
+      <li><a href="05-spring-mvc-web-layer.html">05 — Spring MVC</a></li>
+      <li><a href="06-spring-data-jpa-persistence.html">06 — Data JPA</a></li>
+      <li><a href="07-spring-boot-auto-configuration.html">07 — Boot &amp; Auto-Config</a></li>
+      <li><a href="08-spring-security.html">08 — Security</a></li>
+      <li><a href="09-testing-production-troubleshooting.html">09 — Testing &amp; Ops</a></li>
+      <li><a href="10-webflux-project-reactor.html">10 — WebFlux</a></li>
+      <li><a href="11-spring-cloud-distributed-systems.html">11 — Spring Cloud</a></li>
+    </ul>
+    <h2>Repository</h2>
+    <ul>
+      <li><a href="../index.html">All cheatsheets</a></li>
+      <li><a href="../../spring/spring-deep-dive-volume-02-bean-lifecycle-scopes-di.md">Source volume</a></li>
+    </ul>
+  </nav>
+
+  <main class="main" id="main">
+
+    <header class="masthead">
+      <p class="masthead__eyebrow">Spring — The Spring Complete Deep-Dive</p>
+      <h1>Volume 2 — Bean Lifecycle, Scopes &amp; Advanced DI</h1>
+      <p class="masthead__sub">
+        At what exact moment does this code run, what created it, and what happens if it runs at
+        the wrong moment? Almost every failure in this volume is a phase error or a provenance
+        error.
+      </p>
+      <ul class="masthead__meta">
+        <li>9 sections</li>
+        <li>From <a href="../../spring/spring-deep-dive-volume-02-bean-lifecycle-scopes-di.md">the source volume</a></li>
+      </ul>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <input type="search" data-filter-input placeholder="Filter sections — press /" aria-label="Filter sections">
+        <span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span>
+      </div>
+      <div class="pager">
+        <a href="01-spring-core-ioc.html">&larr; Prev</a>
+        <a href="03-aop-proxying.html">Next &rarr;</a>
+      </div>
+    </div>
+
+    <div class="keyfacts">
+      <h2>If you only remember five things</h2>
+      <ol>
+        <li><strong><code>@PostConstruct</code> runs BEFORE <code>afterPropertiesSet()</code>, and
+        <code>@PreDestroy</code> runs BEFORE <code>destroy()</code>.</strong> Destruction is not the
+        reverse of creation. Both annotation hooks are fired by
+        <code>CommonAnnotationBeanPostProcessor</code> from a post-processor pass, not by the
+        container — one inside <code>postProcessBeforeInitialization</code>, one inside the
+        <code>DestructionAwareBeanPostProcessor</code> pre-pass.</li>
+        <li><strong><code>singleton</code> is the only scope the container manages past
+        construction.</strong> A prototype is built, handed out, and forgotten: no reference, no
+        <code>DisposableBeanAdapter</code>, no destruction callback, ever. And a prototype injected
+        into a singleton gives you exactly one instance, because the singleton's constructor ran
+        once.</li>
+        <li><strong><code>BeanFactoryPostProcessor</code> sees definitions;
+        <code>BeanPostProcessor</code> sees instances.</strong> That is the whole distinction. Scope,
+        <code>lazyInit</code> and qualifiers live on the <code>BeanDefinition</code>, so a
+        post-processor that tries to change them has already lost.</li>
+        <li><strong>Constructor injection cannot participate in cycle resolution.</strong>
+        <code>this</code> is not assigned until the constructor body completes, so there is no
+        instance to hand out. Setter and field can, through the three-level cache — and a working
+        field-injected cycle is a design error running, not a solved problem.</li>
+        <li><strong>Prefer <code>ObjectProvider&lt;T&gt;</code> to a scoped proxy.</strong> The
+        provider is explicit, allocates nothing, and says "resolved late" in the code; the proxy
+        is indistinguishable from a singleton at the injection point and pays a
+        <code>ThreadLocal</code> plus map lookup on <em>every method call</em>.</li>
+      </ol>
+    </div>
+
+    <p class="empty" data-filter-empty hidden>No section matches that filter.</p>
+
+    <!-- ============ 1 ============ -->
+    <section id="ch1" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">01</span>
+        <h2>The full bean lifecycle</h2>
+      </div>
+
+      <p>Every singleton is built by <code>AbstractAutowireCapableBeanFactory.doCreateBean()</code>,
+      which is roughly 300 lines of callback dispatch. The order below is fixed, all of it runs in
+      phase 3 of <code>refresh()</code>, and none of it runs in the order your eye reads the file in.
+      Step 7 is where the AOP proxy is born — so nothing before it can be intercepted by your own
+      aspects. Volume 3 takes that one hook and follows it; here it is an ordering fact and nothing
+      more.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 545" role="img" aria-label="The seven-step bean creation sequence. Instantiate, then populate properties, then Aware callbacks, then postProcessBeforeInitialization inside which PostConstruct fires, then afterPropertiesSet, then the custom init-method, then postProcessAfterInitialization where the AOP proxy is created, and finally promotion to the fully initialised singleton.">
+          <defs>
+            <marker id="arw-s2-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <text class="label label--sub" x="110" y="44" text-anchor="end">1</text>
+          <rect class="node" x="130" y="16" width="380" height="50" rx="6"/>
+          <text class="label" x="148" y="38">Instantiation</text>
+          <text class="label label--sub" x="148" y="55">Supplier / static factory / constructor</text>
+
+          <path class="edge" d="M 320 66 L 320 78" marker-end="url(#arw-s2-a)"/>
+
+          <text class="label label--sub" x="110" y="112" text-anchor="end">2</text>
+          <rect class="node" x="130" y="80" width="380" height="50" rx="6"/>
+          <text class="label" x="148" y="102">Property population</text>
+          <text class="label label--sub" x="148" y="119">@Autowired fields, @Value, setters</text>
+
+          <path class="edge" d="M 320 130 L 320 142" marker-end="url(#arw-s2-a)"/>
+
+          <text class="label label--sub" x="110" y="176" text-anchor="end">3</text>
+          <rect class="node" x="130" y="144" width="380" height="50" rx="6"/>
+          <text class="label" x="148" y="166">Aware callbacks</text>
+          <text class="label label--sub" x="148" y="183">BeanName, ClassLoader, Environment</text>
+
+          <path class="edge" d="M 320 194 L 320 206" marker-end="url(#arw-s2-a)"/>
+
+          <text class="label label--sub" x="110" y="242" text-anchor="end">4</text>
+          <rect class="node node--warn" x="130" y="208" width="380" height="50" rx="6"/>
+          <text class="label" x="148" y="230">postProcessBeforeInitialization</text>
+          <text class="label label--sub" x="148" y="247">@PostConstruct fires INSIDE this call</text>
+
+          <path class="edge" d="M 320 258 L 320 270" marker-end="url(#arw-s2-a)"/>
+
+          <text class="label label--sub" x="110" y="306" text-anchor="end">5</text>
+          <rect class="node" x="130" y="274" width="380" height="50" rx="6"/>
+          <text class="label" x="148" y="296">InitializingBean.afterPropertiesSet</text>
+          <text class="label label--sub" x="148" y="313">dispatched by invokeInitMethods</text>
+
+          <path class="edge" d="M 320 324 L 320 336" marker-end="url(#arw-s2-a)"/>
+
+          <text class="label label--sub" x="110" y="372" text-anchor="end">6</text>
+          <rect class="node" x="130" y="340" width="380" height="50" rx="6"/>
+          <text class="label" x="148" y="362">custom init-method</text>
+          <text class="label label--sub" x="148" y="379">a name on the BeanDefinition</text>
+
+          <path class="edge" d="M 320 390 L 320 402" marker-end="url(#arw-s2-a)"/>
+
+          <text class="label label--sub" x="110" y="438" text-anchor="end">7</text>
+          <rect class="node node--accent" x="130" y="406" width="380" height="50" rx="6"/>
+          <text class="label" x="148" y="428">postProcessAfterInitialization</text>
+          <text class="label label--sub" x="148" y="445">the AOP proxy is born here</text>
+
+          <path class="edge" d="M 320 456 L 320 486" marker-end="url(#arw-s2-a)"/>
+          <text class="edge-label" x="332" y="476" text-anchor="start">promote L2 &#8594; L1</text>
+
+          <rect class="node node--good" x="130" y="488" width="380" height="42" rx="6"/>
+          <text class="label" x="320" y="514" text-anchor="middle">singletonObjects — fully built</text>
+        </svg>
+        <figcaption>
+          <strong>The proxy arrives after every callback, and the order is not the file's
+          order.</strong> Everything on this path runs during
+          <code>finishBeanFactoryInitialization()</code> — before your migrations, before your
+          scheduler, and, in some setups, before the web server is accepting traffic. Which is why a
+          <code>@PostConstruct</code> that queries a table fails on a fresh database, and why
+          <code>SmartInitializingSingleton.afterSingletonsInstantiated()</code> exists: it is the
+          one callback the container guarantees runs with the whole graph built.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The four initialisation callbacks, in dispatch order</caption>
+          <thead><tr><th>Callback</th><th>Mechanism</th><th>Fails loudly?</th><th>Sees the proxy?</th></tr></thead>
+          <tbody>
+            <tr><td><code>@PostConstruct</code></td><td><code>CommonAnnotationBeanPostProcessor</code>, a BPP</td>
+              <td>Yes — <code>BeanCreationException</code> wrapping the cause</td><td><strong>No</strong></td></tr>
+            <tr><td><code>afterPropertiesSet()</code></td><td><code>InitializingBean</code>, via <code>invokeInitMethods</code></td>
+              <td>Yes</td><td><strong>No</strong></td></tr>
+            <tr><td>custom <code>init-method</code></td><td>Name on the <code>BeanDefinition</code>, after <code>afterPropertiesSet</code></td>
+              <td>Yes</td><td><strong>No</strong></td></tr>
+            <tr><td><code>postProcessAfterInitialization()</code></td><td>The last BPP in the chain</td>
+              <td>Yes</td><td>This is where the proxy is made</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Init callbacks, one class" data-hl-line="4,11"><code>@Component
+public class OrderService implements InitializingBean {
+
+    @PostConstruct
+    void postConstruct() {
+        // STEP 4 — fired from inside CommonAnnotationBeanPostProcessor,
+        // so it runs BEFORE afterPropertiesSet(), and before the proxy exists
+    }
+
+    @Override
+    public void afterPropertiesSet() {
+        // STEP 5 — dispatched by the container
+    }
+}</code></pre>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — the two orderings nobody remembers</span>
+        <p><code>@PostConstruct</code> runs <strong>before</strong>
+        <code>afterPropertiesSet()</code>, and <code>@PreDestroy</code> runs <strong>before</strong>
+        <code>destroy()</code>. The reason is structural rather than conventional, and naming it
+        is the answer: <code>@PostConstruct</code> is not a callback the container calls, it is
+        invoked from inside
+        <code>CommonAnnotationBeanPostProcessor.postProcessBeforeInitialization()</code> — a
+        <code>BeanPostProcessor</code> firing an annotation, one dispatch layer below
+        <code>invokeInitMethods()</code>. The mirror is
+        <code>DestructionAwareBeanPostProcessor.postProcessBeforeDestruction()</code>, which
+        <code>AbstractAutowireCapableBeanFactory</code> runs <em>before</em> it ever reaches the
+        <code>DisposableBeanAdapter</code>. A candidate who says "reverse order" has memorised a
+        symmetry the implementation does not have.</p>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 350" role="img" aria-label="Creation reversed compared with actual destruction. The creation column reversed would put the post-processor pass last, but actual destruction runs PreDestroy first, then the DisposableBeanAdapter, and nothing at all for prototypes.">
+          <defs>
+            <marker id="arw-s2-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <text class="label label--sub" x="40" y="26">CREATION, reversed</text>
+          <text class="label label--sub" x="40" y="66">postProcessAfterInitialization</text>
+          <text class="label label--sub" x="40" y="92">custom init-method</text>
+          <text class="label label--sub" x="40" y="118">afterPropertiesSet</text>
+          <text class="label label--sub" x="40" y="144">@PostConstruct</text>
+          <text class="label label--sub" x="40" y="170">populate properties</text>
+          <text class="label label--sub" x="40" y="196">instantiate</text>
+          <text class="label label--sub" x="40" y="222">first destroyed &#8595;</text>
+
+          <path class="edge edge--warn edge--return" d="M 268 118 Q 330 118 330 250" marker-end="url(#arw-s2-b)"/>
+          <text class="edge-label edge-label--strong fill-warn" x="330" y="278" text-anchor="middle">never happens</text>
+
+          <text class="label label--sub" x="356" y="26">DESTRUCTION, actual</text>
+
+          <rect class="node node--warn" x="356" y="40" width="264" height="56" rx="6"/>
+          <text class="label" x="374" y="63">1 &#183; @PreDestroy</text>
+          <text class="label label--sub" x="374" y="81">DestructionAwareBeanPostProcessor</text>
+
+          <path class="edge" d="M 488 96 L 488 116" marker-end="url(#arw-s2-b)"/>
+
+          <rect class="node" x="356" y="118" width="264" height="76" rx="6"/>
+          <text class="label" x="374" y="141">2 &#183; DisposableBeanAdapter.destroy()</text>
+          <text class="label label--sub" x="374" y="159">DisposableBean.destroy()</text>
+          <text class="label label--sub" x="374" y="175">else if AutoCloseable &#8594; close()</text>
+          <text class="label label--sub" x="374" y="189">then the custom destroy-method</text>
+
+          <path class="edge" d="M 488 194 L 488 214" marker-end="url(#arw-s2-b)"/>
+
+          <rect class="node node--bad" x="356" y="216" width="264" height="56" rx="6"/>
+          <text class="label" x="374" y="239">3 &#183; nothing</text>
+          <text class="label label--sub" x="374" y="257">prototypes are not tracked at all</text>
+
+          <text class="edge-label" x="330" y="60" text-anchor="middle">the</text>
+          <text class="edge-label" x="330" y="76" text-anchor="middle">symmetry</text>
+          <text class="edge-label" x="330" y="92" text-anchor="middle">is a</text>
+          <text class="edge-label" x="330" y="108" text-anchor="middle">lie</text>
+        </svg>
+        <figcaption>
+          <strong><code>@PreDestroy</code> is the first thing that runs on shutdown, not the
+          last.</strong> Symmetry of the <em>API</em> was never the design goal — symmetry of the
+          <em>dispatch points</em> was, and the two annotation hooks hang off different extension
+          points at the two ends of the lifecycle. The third row is the one candidates leave out
+          entirely: the container does not track prototypes, so there is nothing to iterate at
+          <code>close()</code>.
+        </figcaption>
+      </figure>
+
+      <pre class="snippet" data-lang="java" data-title="DisposableBeanAdapter" data-hl-line="3"><code>// DisposableBeanAdapter.destroy(), simplified
+if (bean instanceof DisposableBean) {
+    ((DisposableBean) bean).destroy();          // 1 — and ONLY this
+} else if (bean instanceof AutoCloseable) {
+    ((AutoCloseable) bean).close();             // 2 — the branches are exclusive
+}
+if (customDestroyMethodName != null) {
+    invokeCustomDestroyMethod();                 // 3 — outside the if / else if
+}</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — three rules inside the adapter</span>
+        <p><strong>The <code>else if</code> is exclusive; the custom method is not.</strong> A bean
+        implementing <code>DisposableBean</code> does <em>not</em> get <code>close()</code> from
+        the adapter — only the custom <code>destroy-method</code>, if you declared one. A bean
+        implementing only <code>AutoCloseable</code> gets <code>close()</code> and nothing else.</p>
+        <p><strong><code>@Bean(destroyMethod = "")</code> disables the inference.</strong> By
+        default Spring <em>infers</em> a <code>close()</code> or <code>shutDown()</code> method on
+        a <code>@Bean</code> return type and registers it — so a <code>@Bean</code> method
+        returning a type with a public <code>close()</code> gets a shutdown callback you never
+        wrote. Set it to <code>""</code> when the framework, not Spring, owns that lifecycle.</p>
+        <p><strong>The container's shutdown has no default timeout.</strong> A
+        <code>destroy()</code> that blocks on a 60-second HTTP call makes every pod take 60
+        seconds to terminate, and most orchestrators <code>SIGKILL</code> you first. Bound your own
+        wait.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — @PostConstruct or afterPropertiesSet?</span>
+        <p>In your own code, use <code>@PostConstruct</code>. It is the JSR-250 standard, refactoring
+        tools understand it, it does not make your class implement a Spring interface, and it
+        composes with containers other than Spring's. <strong>Flips on:</strong> you are
+        implementing a <em>framework contract</em> that declares <code>InitializingBean</code> —
+        Spring uses it internally on <code>FactoryBean</code> support and AOP infrastructure, and
+        there you have no choice. Know that in that case your method runs <em>after</em> every
+        <code>@PostConstruct</code> in the same class.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Does this run at startup? Say the scope before you open the file</caption>
+          <thead><tr><th>Bean / callback</th><th>Runs at refresh (phase 3)</th><th>Runs at first <code>getBean()</code></th></tr></thead>
+          <tbody>
+            <tr><td>Non-lazy singleton</td><td>Yes</td><td>Already built</td></tr>
+            <tr><td><code>@Lazy</code> singleton</td><td>No</td><td>Yes — a cold-start latency spike</td></tr>
+            <tr><td><code>SmartInitializingSingleton</code></td><td>Yes, all together, at the end</td><td>No</td></tr>
+            <tr><td><strong>prototype</strong></td><td>No</td><td><strong>Every single time, forever</strong></td></tr>
+            <tr><td><code>request</code> / <code>session</code></td><td>Bound at request time</td><td>Per request / per session</td></tr>
+            <tr><td><code>ContextRefreshedEvent</code> listener</td><td>Last thing in <code>refresh()</code></td><td>No</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — @PostConstruct calling a @Transactional method</span>
+        <p>It does <strong>not</strong> run in a transaction, and nothing fails. The proxy is
+        created in <code>postProcessAfterInitialization</code>, the last step of all — two steps
+        <em>after</em> <code>@PostConstruct</code> has already run, so this is not even a
+        self-invocation question. The correct answers are a <code>TransactionTemplate</code> used
+        explicitly, or a call into another bean whose method is transactional. The same applies to
+        <code>@PreAuthorize</code> and to any custom metric aspect: <strong>you cannot rely on
+        your own aspects intercepting your own initialisation callbacks.</strong> Volume 3 owns the
+        full list of proxy bypasses.</p>
+      </div>
+    </section>
+
+    <!-- ============ 2 ============ -->
+    <section id="ch2" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">02</span>
+        <h2>Post-processors: definitions vs instances</h2>
+      </div>
+
+      <p>Two extension points, one distinction, and almost every post-processor that "does
+      nothing" has misread which one it is. The sentence that settles nearly all of it: a
+      <code>BeanFactoryPostProcessor</code> runs before beans exist and therefore cannot see one; a
+      <code>BeanPostProcessor</code> runs once per bean and therefore cannot see the whole
+      graph.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 400" role="img" aria-label="The refresh timeline. BeanFactoryPostProcessors run at refresh step 4 over bean definitions with no instances in existence. BeanPostProcessors are registered at step 5, which is where a static Bean method is resolved. Singletons are then created in finishBeanFactoryInitialization, each passing through the whole post-processor chain.">
+          <defs>
+            <marker id="arw-s2-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node" x="40" y="14" width="300" height="96" rx="6"/>
+          <text class="label" x="58" y="38">refresh() step 4</text>
+          <text class="label label--sub" x="58" y="57">invokeBeanFactoryPostProcessors()</text>
+          <text class="label label--sub" x="58" y="76">Input: BeanDefinition objects</text>
+          <text class="label label--sub" x="58" y="92">add / remove / mutate definitions</text>
+          <text class="label label--sub" x="58" y="105">cannot see an instance</text>
+
+          <path class="edge" d="M 190 110 L 190 130" marker-end="url(#arw-s2-c)"/>
+
+          <rect class="node node--warn" x="40" y="132" width="300" height="96" rx="6"/>
+          <text class="label" x="58" y="156">refresh() step 5</text>
+          <text class="label label--sub" x="58" y="175">registerBeanPostProcessors()</text>
+          <text class="label label--sub" x="58" y="194">a @Bean BPP is resolved HERE</text>
+          <text class="label label--sub" x="58" y="210">the chain is still being assembled</text>
+          <text class="label label--sub" x="58" y="223">hence: static is mandatory</text>
+
+          <path class="edge" d="M 190 228 L 190 248" marker-end="url(#arw-s2-c)"/>
+
+          <rect class="node node--accent" x="40" y="250" width="300" height="96" rx="6"/>
+          <text class="label" x="58" y="274">phase 3</text>
+          <text class="label label--sub" x="58" y="293">finishBeanFactoryInitialization()</text>
+          <text class="label label--sub" x="58" y="312">every non-lazy singleton, in order</text>
+          <text class="label label--sub" x="58" y="328">each through the whole BPP chain</text>
+          <text class="label label--sub" x="58" y="341">and every BPP per bean</text>
+
+          <rect class="node" x="380" y="14" width="250" height="90" rx="6"/>
+          <text class="label label--sub" x="396" y="36">PHASE 1 — Spring&#39;s own</text>
+          <text class="label label--sub" x="396" y="56">PropertySourcesPlaceholderConfigurer</text>
+          <text class="label label--sub" x="396" y="72">ConfigurationClassPostProcessor</text>
+          <text class="label label--sub" x="396" y="92">resolves ${...}; turns @Configuration</text>
+          <text class="label label--sub" x="396" y="104">into bean definitions at all</text>
+
+          <rect class="node" x="380" y="132" width="250" height="126" rx="6"/>
+          <text class="label label--sub" x="396" y="154">PHASE 2 — Spring&#39;s own</text>
+          <text class="label label--sub" x="396" y="174">AutowiredAnnotationBeanPostProcessor</text>
+          <text class="label label--sub" x="396" y="190">CommonAnnotationBeanPostProcessor</text>
+          <text class="label label--sub" x="396" y="206">AnnotationAwareAspectJAutoProxyCreator</text>
+          <text class="label label--sub" x="396" y="222">PersistenceExceptionTranslation</text>
+          <text class="label label--sub" x="396" y="246">@Autowired, @PostConstruct,</text>
+          <text class="label label--sub" x="396" y="260">the AOP proxy, @Repository wrapping</text>
+
+          <path class="edge edge--good" d="M 342 60 L 378 60" marker-end="url(#arw-s2-c)"/>
+          <path class="edge edge--good" d="M 342 190 L 378 190" marker-end="url(#arw-s2-c)"/>
+
+          <text class="edge-label edge-label--strong" x="330" y="376" text-anchor="middle">A custom post-processor is competing with infrastructure, not running alongside it.</text>
+        </svg>
+        <figcaption>
+          <strong>The phase decides what is even possible.</strong> A
+          <code>BeanFactoryPostProcessor</code> that tried to inject a collaborator could not — no
+          instances exist yet, and it is itself instantiated before them. A
+          <code>BeanPostProcessor</code> that tried to change a scope, a lazy flag or a qualifier
+          is working on metadata that has already been consumed to build the object in front of it.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>The decision, framed as what each one can see</caption>
+          <thead><tr><th>Concept</th><th><code>BeanFactoryPostProcessor</code></th><th><code>BeanPostProcessor</code></th></tr></thead>
+          <tbody>
+            <tr><td>Sees</td><td><code>BeanDefinition</code>s</td><td>Live bean instances</td></tr>
+            <tr><td>Runs</td><td>Once, at refresh step 4</td><td>Once per bean, as it is created</td></tr>
+            <tr><td>Mutate scope / lazy / qualifiers</td><td>Yes</td><td><strong>No</strong> — too late by definition</td></tr>
+            <tr><td>Register new definitions</td><td>Only via the registry subclass</td><td>No, ever</td></tr>
+            <tr><td>Return a substitute object</td><td>No</td><td>Yes — <code>postProcessAfterInitialization</code></td></tr>
+            <tr><td>Typical user</td><td>Rare — you almost never write one</td><td>Common, and dangerous</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The same phase split decides something subtler. <code>ConfigurationClassPostProcessor</code>
+      is itself a <code>BeanDefinitionRegistryPostProcessor</code> — it runs in phase 1 and its
+      <em>output</em> is bean definitions, which is why turning <code>@Configuration</code> into
+      definitions is a registry post-processor's job. Whether the class is then full or lite is
+      recorded as a flag on the <code>ConfigurationClass</code> in that same phase, while the CGLIB
+      subclass is installed by <code>ConfigurationClassEnhancer</code> in phase 2 and applied in
+      phase 3. Three phases, one behaviour, and the observable difference is a second instance that
+      no log line mentions.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>What puts a @Configuration class into lite mode</caption>
+          <thead><tr><th>Condition</th><th>Result</th><th>How it bites</th></tr></thead>
+          <tbody>
+            <tr><td><code>proxyBeanMethods = false</code></td><td>Lite — no CGLIB, no self-call interception</td>
+              <td>A <code>@Bean</code> method calling its own method directly constructs a <strong>second, unmanaged</strong> instance. No warning, no log line</td></tr>
+            <tr><td>The class is <code>final</code></td><td>Lite, automatically</td>
+              <td>Silently the same trap — the flag you never wrote</td></tr>
+            <tr><td>A <code>@Bean</code> method is <code>private</code> or <code>final</code></td><td>Lite</td>
+              <td>Same, and it reads as a compiler error you thought you'd avoided</td></tr>
+            <tr><td>No intra-config calls at all</td><td>Lite</td>
+              <td>Harmless — this is the case lite mode exists for</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "set proxyBeanMethods = false, it is faster"</span>
+        <p>It is faster, and it is correct, and it is also the single most common cause of "this
+        works in integration tests and behaves differently in production for no reason anyone can
+        find" — because the two instances differ only in identity, so a transaction annotation, a
+        lock or an identity-map lookup quietly applies to one of them and not the other. The safe
+        idiom is to take collaborators as <strong>parameters</strong> rather than calling your own
+        methods, which is correct in both modes. The related trap in the same phase: a
+        <code>@Bean</code> method may only be non-static if the config class is not itself used by
+        another <code>@Configuration</code> class; two config classes calling each other's
+        <code>@Bean</code> methods is the case that produces <em>"Bean method 'x' is non-static and
+        returns an object of type 'y'"</em>.</p>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Static post-processor" data-hl-line="4"><code>@Configuration
+public class MetricsConfig {
+
+    @Bean                                    // static is MANDATORY
+    public static MetricsBeanPostProcessor metricsPostProcessor() {
+        return new MetricsBeanPostProcessor();
+    }
+}</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — why static is mandatory</span>
+        <p>To register post-processors the container calls <code>getBean()</code> on the
+        <code>@Bean</code> method during <code>registerBeanPostProcessors()</code>. A non-static
+        method needs an instance of the configuration class, and creating that instance means running
+        it through a <code>BeanPostProcessor</code> chain that is not yet assembled. The result is
+        a <code>BeanCurrentlyInCreationException</code> or a
+        <code>BeanPostProcessorChecker</code> warning: <em>"Bean 'xxx' is not eligible for getting
+        processed by all BeanPostProcessors."</em> The checker exists precisely because this is the
+        single most common authoring mistake for the extension point.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "what order do post-processors run in?"</span>
+        <p>There is <strong>no</strong> guaranteed order, and asserting one costs the point. The
+        rules that do hold: <code>PriorityOrdered</code> first, then <code>Ordered</code>, then
+        registration order within each group — and registration order is
+        <code>getBeanNamesForType</code> over the registry, not your source file order.
+        <code>postProcessBeforeInitialization</code> runs in registration order;
+        <code>postProcessAfterInitialization</code> runs in <strong>reverse</strong>, so a
+        later-registered wrapper ends up outermost. If your behaviour depends on it, implement
+        <code>PriorityOrdered</code> and say so.</p>
+        <p>The related failure: a library's <code>PriorityOrdered</code> processor displacing
+        <code>CommonAnnotationBeanPostProcessor</code> takes <code>@PostConstruct</code>
+        application-wide. That, or a processor throwing in
+        <code>postProcessBeforeInitialization</code> for a bean it does not understand, which
+        aborts the entire refresh rather than one bean. Diagnose with <code>--debug</code> plus
+        <code>DEBUG</code> on <code>org.springframework.beans.factory.support</code>.</p>
+      </div>
+
+      <p>Two smaller traps with the same root cause. Returning <code>null</code> from
+      <code>postProcessAfterInitialization</code> is <strong>not</strong> a no-op — it registers a
+      <code>NullBean</code>, and injection fails with <code>NullBeanException</code> or a
+      misleading "expected single matching bean but found 0". And
+      <code>factory.addBeanPostProcessor(...)</code> on a live factory only sees beans created
+      <em>after</em> the call; register it first or the call does nothing.</p>
+    </section>
+
+    <!-- ============ 3 ============ -->
+    <section id="ch3" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">03</span>
+        <h2>Bean scopes</h2>
+      </div>
+
+      <p>There are five scopes and one rule that generates most of the confusion: <strong>singleton
+      is the only scope the container manages past construction.</strong> Everything else is the
+      container handing you an object and then forgetting about it. That single fact explains the
+      prototype-into-singleton trap, the absence of prototype destruction, and the request-scope
+      exception on background threads.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>What the container knows about each scope</caption>
+          <thead><tr><th></th><th>singleton</th><th>prototype</th><th>request</th><th>session</th><th>application</th><th>websocket</th></tr></thead>
+          <tbody>
+            <tr><td>Instances</td><td>1 per context</td><td>Unlimited</td><td>1 per request</td><td>1 per session</td><td>1 per context</td><td>1 per WS session</td></tr>
+            <tr><td>Tracked?</td><td>Yes</td><td><strong>No</strong></td><td>A <code>RequestScope</code> map</td><td>A <code>SessionScope</code> map</td><td>Yes</td><td>No</td></tr>
+            <tr><td>Destruction fires?</td><td>Yes</td><td><strong>No</strong></td><td>No</td><td>No</td><td>Yes</td><td>No</td></tr>
+            <tr><td>Injectable directly?</td><td>Yes</td><td>Yes</td><td>Only via proxy</td><td>Only via proxy</td><td>Only via proxy</td><td>Only via proxy</td></tr>
+            <tr><td>Needs a web context?</td><td>No</td><td>No</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Reactive</td></tr>
+            <tr><td>Thread-safe?</td><td><strong>Your problem</strong></td><td><strong>Your problem</strong></td><td>Per-request</td><td>Per-session</td><td><strong>Your problem</strong></td><td>Per-session</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 320" role="img" aria-label="The prototype-into-singleton trap. At refresh the singleton's constructor runs once and calls getBean on the prototype, creating instance one, which is stored in a field. Ten thousand requests later every caller is still handed that same instance, so one user's items are visible to another.">
+          <defs>
+            <marker id="arw-s2-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <text class="edge-label" x="40" y="20">during refresh — happens once</text>
+
+          <rect class="node" x="40" y="32" width="130" height="46" rx="6"/>
+          <text class="label" x="105" y="52" text-anchor="middle">getBean</text>
+          <text class="label label--sub" x="105" y="68" text-anchor="middle">orderService</text>
+
+          <path class="edge" d="M 172 55 L 208 55" marker-end="url(#arw-s2-d)"/>
+          <text class="edge-label" x="190" y="45" text-anchor="middle">ctor</text>
+
+          <rect class="node" x="210" y="32" width="150" height="46" rx="6"/>
+          <text class="label" x="285" y="52" text-anchor="middle">OrderService</text>
+          <text class="label label--sub" x="285" y="68" text-anchor="middle">constructed</text>
+
+          <path class="edge" d="M 362 55 L 398 55" marker-end="url(#arw-s2-d)"/>
+          <text class="edge-label" x="380" y="45" text-anchor="middle">1&times;</text>
+
+          <rect class="node" x="400" y="32" width="220" height="46" rx="6"/>
+          <text class="label" x="510" y="52" text-anchor="middle">getBean(cart) &#8594; instance #1</text>
+          <text class="label label--sub" x="510" y="68" text-anchor="middle">prototype semantics honoured</text>
+
+          <path class="edge" d="M 510 80 L 510 106" marker-end="url(#arw-s2-d)"/>
+
+          <rect class="node node--warn" x="400" y="108" width="220" height="46" rx="6"/>
+          <text class="label" x="510" y="128" text-anchor="middle">stored in a final field</text>
+          <text class="label label--sub" x="510" y="144" text-anchor="middle">a value, not a recipe</text>
+
+          <text class="edge-label" x="40" y="196">10,000 requests later</text>
+
+          <rect class="node" x="40" y="208" width="130" height="46" rx="6"/>
+          <text class="label" x="105" y="228" text-anchor="middle">user A</text>
+          <text class="label label--sub" x="105" y="244" text-anchor="middle">request 1</text>
+
+          <rect class="node" x="40" y="264" width="130" height="46" rx="6"/>
+          <text class="label" x="105" y="284" text-anchor="middle">user B</text>
+          <text class="label label--sub" x="105" y="300" text-anchor="middle">request 2</text>
+
+          <path class="edge edge--bad" d="M 172 231 L 398 216" marker-end="url(#arw-s2-d)"/>
+          <path class="edge edge--bad" d="M 172 287 L 398 216" marker-end="url(#arw-s2-d)"/>
+
+          <rect class="node node--bad" x="400" y="196" width="220" height="60" rx="6"/>
+          <text class="label" x="510" y="220" text-anchor="middle">the SAME instance #1</text>
+          <text class="label label--sub" x="510" y="238" text-anchor="middle">one live ArrayList</text>
+          <text class="label label--sub" x="510" y="250" text-anchor="middle">A&#39;s items visible to B</text>
+        </svg>
+        <figcaption>
+          <strong>Injecting a prototype does not inject "a prototype"; it injects "one
+          prototype".</strong> The container did the right thing — that instance genuinely was
+          fresh. The singleton's constructor just ran once, at refresh, and captured the result as
+          a field value. No exception, plausible-looking responses, and
+          <code>cartServiceCreates</code> sitting at <code>1</code>. The review rule that catches
+          it: <em>a prototype-scoped bean injected by constructor into a singleton is a blocking
+          comment</em>.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>The three fixes, and what each one costs you</caption>
+          <thead><tr><th>Fix</th><th>Inject what?</th><th>New instance per…</th><th>How it bites</th></tr></thead>
+          <tbody>
+            <tr><td><code>ObjectProvider&lt;T&gt;</code></td><td>The provider</td><td><code>getObject()</code> call</td>
+              <td>Nothing. Handles an absent bean via <code>getIfAvailable()</code>, supports <code>orderedStream()</code></td></tr>
+            <tr><td><code>ObjectFactory&lt;T&gt;</code></td><td>The factory</td><td><code>getObject()</code> call</td>
+              <td>Older and narrower; <strong>throws</strong> when the bean is absent. Survives only because older APIs expose it</td></tr>
+            <tr><td>Scoped proxy</td><td>A proxy implementing <code>T</code></td><td><strong>Every method invocation</strong></td>
+              <td>A <code>ThreadLocal</code> dereference plus a map access per call, and <strong>invisible at the injection point</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Prototype, two fixes" data-hl-line="2,7"><code>// FIX 1 — ObjectProvider: the container injects the PROVIDER
+private final ObjectProvider&lt;CartService&gt; carts;
+public Cart freshCart() { return carts.getObject(); }   // new instance per call
+
+// FIX 2 — scoped proxy: the injection point reads like a singleton
+@Bean
+@Scope(value = "prototype", proxyMode = ScopedProxyMode.TARGET_CLASS)
+public CartService cartService() { return new CartService(); }</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — prototypes are never destroyed</span>
+        <p>There is <strong>no configuration flag to enable one</strong>, and the reason is
+        structural rather than an omission: for a singleton the container holds
+        <code>singletonObjects</code> plus a <code>DisposableBeanAdapter</code>, and iterates both at
+        <code>close()</code>. For a prototype it holds <em>nothing</em> — no list, no adapter, no
+        name. The phrase "the container manages the prototype's lifecycle" is wrong. What it manages
+        is only the <em>act of construction</em>.</p>
+        <p>The follow-up that separates candidates: <em>"so what is a prototype's difference from
+        just calling <code>new</code>?"</em> The honest answer is <strong>almost none</strong>,
+        except that a prototype still gets injection, post-processing and proxying. In order of
+        preference: don't hold resources in a prototype (make it a singleton with a real
+        lifecycle); use request scope for genuinely per-request resources; or implement
+        <code>AutoCloseable</code> and use try-with-resources at the call site, which requires an
+        <code>ObjectProvider</code> rather than a direct injection.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — a scoped proxy is not free</span>
+        <p>"It's just a proxy, so it costs nothing" is the wrong answer. The cost is a
+        <strong>target lookup per method invocation</strong>, and for <code>request</code> scope
+        that is a <code>ThreadLocal</code> dereference plus a map access. A service with 20 methods
+        called 50 times per request pays 1,000 lookups a singleton would not. Worse, the proxy masks
+        the substitution completely: the injected object is a <code>CartService</code> subclass, so
+        <code>instanceof</code> checks and method resolution all still work and the swap is
+        invisible in code review. It also simply fails for types CGLIB cannot subclass — a
+        <code>final</code> class, a class with <code>final</code> methods, anything that gets
+        serialised.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — when request scope is the wrong tool</span>
+        <p><code>request</code> scope buys a <strong>hidden dependency</strong>: the class no longer
+        names the collaborator, no constructor mentions it, and no unit test can construct the class
+        without a <code>RequestContextHolder</code> setup. It is right when the object's
+        <em>identity</em> is request-bound — the security context, the current locale, a per-request
+        idempotency token. <strong>Flips on:</strong> the moment the value could legitimately change
+        mid-request. A request-scoped bean is frozen at first resolution for the remainder of the
+        request, so if the answer is yes, pass it as a parameter. The test: "if you could pass this
+        as an argument, would you?"</p>
+      </div>
+
+      <p>Two more traps that share a cause. Resolving a request-scoped bean from a
+      <code>@Scheduled</code> method, an <code>ApplicationRunner</code> or an
+      <code>@Async</code> task throws <code>IllegalStateException: No thread-bound request
+      found</code> — the application being a web application is irrelevant; the
+      <em>thread</em> has no <code>RequestAttributes</code>. And capturing a request-scoped bean
+      in a singleton field produces no exception at all, just one user's data served to another;
+      the proxy exists precisely because it re-resolves per invocation. Any object from a web scope
+      must be used on the thread it came from — passing it to
+      <code>CompletableFuture.supplyAsync</code> or a message listener is a correctness bug even
+      when it does not throw.</p>
+    </section>
+
+    <!-- ============ 4 ============ -->
+    <section id="ch4" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">04</span>
+        <h2>Bean validation</h2>
+      </div>
+
+      <p>Jakarta Validation is a specification; Hibernate Validator is the reference implementation
+      and the one Boot pulls in. The annotations people misuse most are below, and the
+      <code>BindingResult</code> one is the single most consequential bean-validation bug in Spring
+      MVC — because it is exactly backwards from the intuition.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Null and empty semantics, which are not interchangeable</caption>
+          <thead><tr><th>Annotation</th><th>null</th><th><code>"  "</code></th><th>Empty list</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>@NotNull</code></td><td><strong>Fails</strong></td><td>Passes</td><td>n/a</td><td>"there is a value"</td></tr>
+            <tr><td><code>@NotBlank</code></td><td><strong>Fails</strong></td><td><strong>Fails</strong></td><td>n/a</td><td>CharSequence only; content after trimming</td></tr>
+            <tr><td><code>@NotEmpty</code></td><td><strong>Fails</strong></td><td><strong>Fails</strong></td><td><strong>Fails</strong></td><td>"size &gt; 0" — strings, collections, maps, arrays</td></tr>
+            <tr><td><code>@Size(min, max)</code></td><td>Passes</td><td>Fails if min &gt; 0</td><td>Fails if min &gt; 0</td><td>length bounds</td></tr>
+            <tr><td><code>@Pattern</code></td><td><strong>Fails</strong></td><td>&mdash;</td><td>&mdash;</td><td>regex; null fails unless the regexp allows it</td></tr>
+            <tr><td><code>@Email</code></td><td><strong>Fails</strong></td><td><strong>Fails</strong></td><td>&mdash;</td><td>Deliberately loose — it is not RFC 5322</td></tr>
+            <tr><td><code>@Positive</code></td><td><strong>Fails</strong></td><td>&mdash;</td><td>&mdash;</td><td><code>&gt; 0</code>, so it rejects 0</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>@Valid and @Validated are two different annotations</caption>
+          <thead><tr><th></th><th><code>@Valid</code></th><th><code>@Validated</code></th></tr></thead>
+          <tbody>
+            <tr><td>Package</td><td><code>jakarta.validation.Valid</code></td><td><code>org.springframework.validation.annotation.Validated</code></td></tr>
+            <tr><td>On a <code>@RequestBody</code> param</td><td>Triggers validation during binding</td><td>Also triggers it</td></tr>
+            <tr><td>On a <strong>class</strong></td><td><strong>Does nothing by itself</strong></td><td>Activates method-level validation via a proxy</td></tr>
+            <tr><td>Carries <code>groups</code></td><td>No</td><td>Yes — <code>value = PublishChecks.class</code></td></tr>
+            <tr><td>Creates a proxy?</td><td>No</td><td>Yes, by <code>MethodValidationPostProcessor</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="BindingResult fail-open" data-hl-line="7"><code>// No BindingResult — MVC throws MethodArgumentNotValidException, so you get 400
+@PostMapping("/orders")
+public Order create(@Valid @RequestBody CreateOrderRequest request) { ... }
+
+// With BindingResult — the exception is SUPPRESSED; you own the check
+@PostMapping("/orders")
+public String create(@Valid CreateOrderRequest request, BindingResult errors) {
+    if (errors.hasErrors()) { return "orders/new"; }   // nothing else will
+    service.create(request);
+    return "redirect:/orders";
+}</code></pre>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — the parameter that turns off the 400</span>
+        <p><code>ModelAttributeMethodProcessor</code> only throws
+        <code>MethodArgumentNotValidException</code> when the handler has <em>no</em>
+        immediately-following <code>BindingResult</code> or <code>Errors</code> parameter. Add one
+        and the exception is suppressed entirely: the violations are collected into the
+        <code>BindingResult</code> and the method body runs with invalid input. A find-and-replace
+        that adds the parameter for form repopulation is enough to turn
+        <code>POST /orders</code> into an endpoint that persists a null customer and returns
+        <code>201</code>. The prevention is four lines: an ArchUnit rule forbidding
+        <code>BindingResult</code> on <code>@RestController</code> methods.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Two more — blank strings, and constraints that do I/O</span>
+        <p><strong>Any string arriving from outside your process that identifies something is
+        <code>@NotBlank</code>, not <code>@NotNull</code>.</strong> The diff looks equivalent, the
+        review passes, and the failure is a database row with a blank customer ID three weeks
+        later. And <code>@NotEmpty List&lt;@NotNull String&gt;</code> is what means "at least one
+        element, and no element is null" — container element validation is type-use syntax,
+        supported since Jakarta Validation 2.0.</p>
+        <p><strong>A constraint that hits the database turns a 400 into an outage
+        vector.</strong> Constraints are expected to be pure, synchronous and fast. A rule requiring
+        a <em>lookup</em> — does this SKU exist, is this IBAN valid — belongs in the service layer
+        in the same transaction as the write, returning a domain exception. Keep bean validation
+        about <em>shape</em>, keep referential integrity in the domain. The other half of the
+        custom-validator contract that experienced reviewers check: <code>isValid</code> returns
+        <code>true</code> for <code>null</code> so nullability stays with <code>@NotNull</code>, and
+        <code>disableDefaultConstraintViolation()</code> is called before adding a custom template,
+        or every violation arrives with two messages.</p>
+      </div>
+
+      <p>The deeper argument is about entry points, not elegance. A rule expressed only on an
+      inbound DTO protects exactly the paths that go through MVC argument resolution — a batch
+      import, a message consumer, a scheduled reconciliation job, a data migration and a test
+      calling the service directly all bypass it. The review question is never "is the annotation
+      right"; it is "how many entry points exist, and which of them enforce this?" The exception
+      is configuration, where failing at startup is unambiguously right: <code>@Validated</code> on
+      a <code>@ConfigurationProperties</code> class turns a wrong value into a
+      <code>BindValidationException</code> during refresh that an operator sees immediately, rather
+      than a production crash when the reading code path first runs.</p>
+    </section>
+
+    <!-- ============ 5 ============ -->
+    <section id="ch5" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">05</span>
+        <h2>Dynamic registration &amp; FactoryBean</h2>
+      </div>
+
+      <p><code>@Import</code> comes in three forms with genuinely different powers, and the one
+      distinction that matters in review is that an <code>ImportSelector</code> <em>cannot</em>
+      register a bean definition — it returns strings that are then processed
+      <em>as configuration classes</em>. For a definition, you need
+      <code>ImportBeanDefinitionRegistrar</code>. This is also the mechanism every starter uses:
+      Boot's <code>AutoConfigurationImportSelector</code> is Form 2 exactly, which is why a
+      starter's beans arrive without you importing anything.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Three forms of @Import</caption>
+          <thead><tr><th>Form</th><th>You supply</th><th>Runs</th><th>Use for</th></tr></thead>
+          <tbody>
+            <tr><td>A configuration class</td><td>A class</td><td>As a configuration class</td><td>Ordinary modular config — <strong>the default</strong></td></tr>
+            <tr><td><code>ImportSelector</code></td><td>Class <strong>names</strong> as Strings</td><td>Before the named classes are parsed</td><td>Conditional selection among configs; <strong>cannot touch the registry</strong></td></tr>
+            <tr><td><code>ImportBeanDefinitionRegistrar</code></td><td>Code calling <code>registerBeanDefinition</code></td><td>During <code>ConfigurationClassPostProcessor</code></td><td>Fully programmatic, generated, or per-tenant registration</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="FactoryBean contract" data-hl-line="6"><code>public class SqlClientFactoryBean implements FactoryBean&lt;SqlClient&gt; {
+
+    @Override public SqlClient getObject() { return new SqlClient(dataSource); }
+
+    // The PRODUCT type, not the factory class — or type injection fails
+    @Override public Class&lt;?&gt; getObjectType() { return SqlClient.class; }
+
+    @Override public boolean isSingleton() { return true; }   // default
+}</code></pre>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — FactoryBean is not "for complex objects"</span>
+        <p>The common answer misses the point: <strong>a <code>FactoryBean</code> and a
+        <code>@Bean</code> method are the same mechanism</strong> — the container wraps a
+        <code>@Bean</code> method in one. The only reason to write the class form is that you are
+        writing a <em>library</em> whose configuration is described by name rather than by code, so
+        the indirection has to be a type. In application code it is a <code>@Bean</code> method
+        written the long way, plus a <code>getObjectType()</code> contract you must get right.</p>
+        <p>Three more facts about that contract. Type matching uses <code>getObjectType()</code>,
+        so returning the factory class makes the bean invisible to type injection — the failure is
+        <code>NoSuchBeanDefinitionException</code> for a bean that is plainly registered and visible
+        in <code>getBeanDefinitionNames()</code>. <code>getBean("&amp;sqlClient")</code> returns
+        the <em>factory</em>; the unprefixed name returns the product, and that <code>&amp;</code>
+        convention is obscure enough to be worth being able to explain rather than merely
+        recognise. And <code>isSingleton()</code> is a claim, not a guarantee — returning
+        <code>false</code> calls <code>getObject()</code> on every lookup, which is a
+        <code>FactoryBean</code> re-expressing prototype scope and inheriting every problem,
+        including no destruction. Finally, <code>getObjectType()</code> may be called before the
+        factory is fully initialised, so touching its own <code>@Autowired</code> field there is a
+        <code>BeanCurrentlyInCreationException</code>.</p>
+      </div>
+
+      <p>The programmatic levels differ in one way that causes silent failures.
+      <code>registerBean(Class, Consumer&lt;BeanDefinition&gt;)</code> goes through the container;
+      <code>registerSingleton(name, instance)</code> takes an <strong>already-constructed</strong>
+      object and therefore bypasses the entire <code>BeanPostProcessor</code> chain — no
+      <code>@PostConstruct</code>, no <code>afterPropertiesSet</code>, no init method, no AOP proxy,
+      no exception translation — and never appears as a <code>BeanDefinition</code>, so it is
+      invisible to tooling that inspects definitions. Correct for infrastructure you built
+      yourself, a trap for anything carrying Spring annotations.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Per-tenant bean registration or a Map&lt;TenantId, Impl&gt;?</caption>
+          <thead><tr><th>Concern</th><th>One bean per tenant</th><th><code>Map&lt;TenantId, Impl&gt;</code></th></tr></thead>
+          <tbody>
+            <tr><td>Bean count</td><td>O(tenants)</td><td>O(implementations)</td></tr>
+            <tr><td>Startup validation</td><td>Every tenant, or none</td><td>Every <em>implementation</em>, shared</td></tr>
+            <tr><td>New tenant at runtime</td><td>Requires a deploy</td><td>One <code>computeIfAbsent</code> call</td></tr>
+            <tr><td>A broken tenant's config</td><td><strong>Blocks the whole deploy</strong></td><td>Fails for that tenant, at request time</td></tr>
+            <tr><td>Type safety</td><td>Bean names are Strings</td><td>Keys are <code>TenantId</code></td></tr>
+            <tr><td>DI within a tenant's graph</td><td>Full — a real bean graph</td><td>Manual — you construct it</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — and the number at which it stops working</span>
+        <p>Registration buys real things: per-tenant configuration bound at startup, and
+        startup-time validation that a failure is at deploy rather than at the first request from a
+        customer you cannot reach. The cost is linear and the constant is not small, because each
+        tenant's beans are a <em>graph</em> — 100 tenants is 200 beans and +2–5s of refresh; 1,000
+        is 2,000 beans and +20–50s; 10,000 is 20,000 beans and +3–8 minutes with OOM risk, around
+        2&nbsp;GB. <strong>Flips on:</strong> whether the tenant's <em>object graph</em> genuinely
+        differs, or only the <em>implementation</em> of one interface — and the second is
+        overwhelmingly the more common case. The tell that you have misdiagnosed it is a registrar
+        whose registered beans are all the same type. The failure mode to raise unprompted is the
+        third option teams drift into: per-tenant beans <em>and</em> a runtime override, which gives
+        startup validation for some tenants and none for others with no way for a reader to tell
+        which is which.</p>
+      </div>
+    </section>
+
+    <!-- ============ 6 ============ -->
+    <section id="ch6" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">06</span>
+        <h2>Resources &amp; the environment</h2>
+      </div>
+
+      <p>Volume 1 owns the <code>Resource</code> abstraction and the context hierarchy, and
+      <code>@Value</code> SpEL syntax. What is left here is what costs real money, and all three
+      items below produce the same symptom: works locally, wrong in production, no stack trace
+      pointing anywhere useful.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>classpath: vs classpath*:</caption>
+          <thead><tr><th>Prefix</th><th>Resolution</th><th>Use when</th><th>How it bites</th></tr></thead>
+          <tbody>
+            <tr><td><code>classpath:</code></td><td>First match, then stop</td><td>A single well-known resource you own</td>
+              <td><strong>Silent</strong> — a dependency shipping the same path wins and your copy is never read</td></tr>
+            <tr><td><code>classpath*:</code></td><td>Every match across every jar, via <code>getResources()</code></td>
+              <td>Migrations, locale bundles, auto-config metadata — where several artifacts may legitimately contribute</td>
+              <td>O(resources), re-walked on every resolution unless you cache it. Ordering is classloader order, not alphabetical</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="MessageSource setup" data-hl-line="6"><code>@Bean
+MessageSource messageSource() {
+    var ms = new ReloadableResourceBundleMessageSource();
+    ms.setBasename("classpath:messages/messages");
+    ms.setDefaultEncoding("UTF-8");
+    ms.setFallbackToSystemLocale(false);   // THE setting people miss
+    return ms;
+}</code></pre>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — where slow startup actually lives</span>
+        <p><code>classpath*:</code> resolution is a top-three suspect for unexplained startup
+        cost, alongside component-scan breadth and eager I/O in <code>@PostConstruct</code> — and
+        the expensive scan is <strong>almost never in the team's code</strong>. It is in a starter,
+        contributed by a transitive dependency. The canonical case: startup went from 8 seconds to
+        55 after a routine upgrade, with 41 of those seconds inside
+        <code>ConfigurationClassPostProcessor</code> and template resolution, hitting 14,000
+        classes — because the new library added a scan that did not exist in the previous version.
+        The prevention is not a faster container but a <strong>startup-time baseline in CI that
+        alerts on a regression ratio, not an absolute number</strong>: a 40-second startup at 4&times;
+        baseline is a real signal; the same 40 seconds at 1.05&times; is not.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Two traps, one symptom</span>
+        <p><strong><code>Properties.load(InputStream)</code> decodes as ISO-8859-1</strong> — by
+        specification, since Java 1.0, and it has never changed. A UTF-8 file with a
+        <code>&euro;</code> sign or an accented character comes out mangled, and the
+        <em>keys</em> containing non-ASCII stop matching too. The fix is
+        <code>PropertiesLoaderUtils.loadProperties(resource, "UTF-8")</code>, or an
+        <code>InputStreamReader</code> with an explicit charset. The reason some files work and
+        others do not: <code>\uXXXX</code> escapes are immune to encoding entirely.</p>
+        <p><strong><code>setFallbackToSystemLocale</code> at its default of
+        <code>true</code></strong> falls back to <code>Locale.getDefault()</code> — the <em>JVM's</em>
+        locale. In Docker <code>LANG</code> is frequently unset, so that is
+        <code>en_US</code> for every request, and a request for <code>de</code> missing a key
+        silently resolves against English instead of failing. The third candidate cause of the same
+        symptom is <code>classpath:</code> resolving a dependency's copy of the bundle. All three
+        are invisible without reproducing the container's locale and classpath.</p>
+      </div>
+
+      <p>One more thing worth knowing about SpEL: the senior question is not the syntax, which
+      Volume 1 covers, but the <strong>reach</strong>. It is evaluated in <code>@Value</code>, in
+      <code>@PreAuthorize</code>, in <code>@Profile</code> and in <code>@Conditional</code>, and in
+      every one of them the security property is identical: the expression stays a constant in the
+      annotation and the data is bound to a parameter. Concatenating an untrusted value into an
+      expression is code-execution class — Volume 8 owns the authorisation mechanics.</p>
+    </section>
+
+    <!-- ============ 7 ============ -->
+    <section id="ch7" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">07</span>
+        <h2>Circular dependencies</h2>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 360" role="img" aria-label="The three-level singleton cache. Level three holds an ObjectFactory per bean, registered when creation starts. Level two holds the result after a cycle asked for the bean early. Level one holds fully initialised beans. A calls B, B calls back for A and finds the level-three factory, which is invoked at most once so every consumer in the cycle gets the same object.">
+          <defs>
+            <marker id="arw-s2-e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node node--warn" x="20" y="16" width="190" height="72" rx="6"/>
+          <text class="label" x="36" y="40">L3 singletonFactories</text>
+          <text class="label label--sub" x="36" y="58">name &#8594; ObjectFactory</text>
+          <text class="label label--sub" x="36" y="74">registered at creation start</text>
+
+          <path class="edge" d="M 212 52 L 226 52" marker-end="url(#arw-s2-e)"/>
+          <text class="edge-label" x="219" y="40" text-anchor="middle">cycle</text>
+
+          <rect class="node" x="228" y="16" width="190" height="72" rx="6"/>
+          <text class="label" x="244" y="40">L2 earlySingletonObjects</text>
+          <text class="label label--sub" x="244" y="58">name &#8594; early object</text>
+          <text class="label label--sub" x="244" y="74">L3 entry removed after</text>
+
+          <path class="edge" d="M 420 52 L 434 52" marker-end="url(#arw-s2-e)"/>
+          <text class="edge-label" x="427" y="40" text-anchor="middle">promote</text>
+
+          <rect class="node node--good" x="436" y="16" width="190" height="72" rx="6"/>
+          <text class="label" x="452" y="40">L1 singletonObjects</text>
+          <text class="label label--sub" x="452" y="58">name &#8594; fully built</text>
+          <text class="label label--sub" x="452" y="74">what everyone else gets</text>
+
+          <circle class="node" cx="150" cy="190" r="26"/>
+          <text class="label" x="150" y="194" text-anchor="middle">A</text>
+          <circle class="node" cx="380" cy="190" r="26"/>
+          <text class="label" x="380" y="194" text-anchor="middle">B</text>
+
+          <path class="edge" d="M 177 185 L 353 185" marker-end="url(#arw-s2-e)"/>
+          <text class="edge-label" x="265" y="174" text-anchor="middle">A&#39;s ctor needs B</text>
+
+          <path class="edge edge--warn" d="M 372 208 Q 265 262 176 214" marker-end="url(#arw-s2-e)"/>
+          <text class="edge-label" x="268" y="262" text-anchor="middle">B needs A &#8594; no L1, no L2, L3 hit</text>
+
+          <path class="edge edge--good" d="M 150 164 L 150 130 L 528 130 L 528 88"
+                marker-end="url(#arw-s2-e)"/>
+          <text class="edge-label" x="360" y="122" text-anchor="middle">A finishes &#8594; L2 &#8594; L1</text>
+
+          <rect class="node" x="440" y="176" width="200" height="90" rx="6"/>
+          <text class="label" x="456" y="200">The factory is called</text>
+          <text class="label" x="456" y="218">AT MOST ONCE, so every</text>
+          <text class="label" x="456" y="236">consumer in the cycle gets</text>
+          <text class="label" x="456" y="254">the same object — proxy or not</text>
+
+          <text class="edge-label edge-label--strong" x="330" y="326" text-anchor="middle">Three levels, not two: caching the RAW object would hand out an unproxied bean and silently disable @Transactional for everyone in the cycle.</text>
+        </svg>
+        <figcaption>
+          <strong>Level 3 holds a factory, not the product</strong>, and that is the whole design.
+          AOP decides at early-reference time whether to wrap the raw instance; caching a factory
+          defers that decision to the first consumer and applies it consistently, while removing
+          the L3 entry ensures a second call cannot produce a second, different answer. The hazard
+          is the mirror image: the mechanism converts a <em>design</em> error into a
+          <em>runtime</em> success, which is the worst possible failure mode for a container.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Which injection styles can participate in a cycle</caption>
+          <thead><tr><th>Style</th><th>Cycle resolvable?</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Field <code>@Autowired</code></td><td>Yes</td><td>The instance exists before population — it can be handed over mid-population</td></tr>
+            <tr><td>Setter</td><td>Yes</td><td>Same: the object exists before the setter is called</td></tr>
+            <tr><td><strong>Constructor</strong></td><td><strong>No</strong></td>
+              <td>The constructor has not returned. <code>this</code> is assigned by the JVM after the body completes — there is no instance to hand out</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Circular dependency fixes" data-hl-line="4,11"><code>// FIX A — extract the third object both sides actually share
+@Service
+class OrderService {
+    private final PricingRules rules;             // both sides need THIS
+    public OrderService(PricingRules rules) { this.rules = rules; }
+}
+
+// FIX B — @Lazy injects a PROXY; the failure moves to first use
+@Service
+class RuleEngine {
+    public RuleEngine(@Lazy OrderService orders) { this.orders = orders; }
+}</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — field injection hides cycles, it does not solve them</span>
+        <p>The three-level cache makes a setter/field cycle <em>work</em>, and that is exactly the
+        problem: a working cycle is invisible. Nobody gets an exception, so nobody investigates.
+        The class is genuinely un-constructible in isolation, <code>new A(b)</code> and
+        <code>new B(a)</code> are mutually impossible, and the only reason the application runs is
+        that the container will hand out half-built objects. Every test that constructs these with a
+        mock gets a different object graph than production. In review the finding is not "add
+        <code>@Lazy</code>" — it is "this class cannot be constructed without a container, and that
+        is a design problem hiding behind a runtime mechanism."</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — is @Lazy the right fix?</span>
+        <p>Sometimes, and it is better than the alternatives when the cycle is real. But it does
+        <strong>not</strong> remove the cycle: the injection point receives a proxy, so the
+        <code>BeanCurrentlyInCreationException</code> moves to the first call rather than going
+        away, a proxy is allocated at every injection point, and every call becomes a virtual
+        dispatch. <code>ObjectProvider&lt;T&gt;</code> is better where you can use it, because it
+        allocates nothing and is explicit about the timing. <strong>Flips on:</strong> whether the
+        cycle is genuine. If two classes need each other, they usually both need the <em>same third
+        thing</em>, and naming it is the refactor. The genuine exception is a bidirectional JPA
+        association — there the cycle lives in the entities, is resolved by the persistence context
+        rather than the container, and the right move is to keep it out of the bean graph
+        entirely.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — why Boot 2.6 turned cycles off</span>
+        <p>Because they were working, and working cycles are worse than broken ones. The concrete
+        failures: a bean obtained as an early reference may never have had its
+        <code>@PostConstruct</code> run and may never have been proxied, so a
+        <code>@Transactional</code> bean in a cycle is <strong>silently non-transactional for
+        exactly the callers inside the cycle</strong> — intermittent, correlated with the call path
+        rather than with load, and indistinguishable from a connection-pool problem. And the cycle
+        itself survives refactors until someone converts field injection to constructor injection,
+        which is what happened to thousands of teams on 2.6.
+        <code>spring.main.allow-circular-references=false</code> is now the default.</p>
+        <p><strong>Do not "fix" it with <code>spring.main.lazy-initialization=true</code>.</strong>
+        Nothing is created during refresh, so no cycle is hit and startup passes — and the cycle is
+        now deferred to the first request that touches it. Startup no longer validates the object
+        graph, a cold instance in a scale-up serves its worst latency exactly when the system is
+        stressed, and a <code>BeanCurrentlyInCreationException</code> surfaces as a 500 in
+        production instead of a failure in CI. It is a <strong>diagnostic</strong> — turn it on, see
+        whether startup improves, learn whether the cost is in eager initialisation — never the
+        fix.</p>
+      </div>
+
+      <p>One debugging note that catches people: the exception names where the loop
+      <em>closes</em>, not where it <em>started</em>. A cycle that was resolvable via field
+      injection becomes a hard failure the moment either side is converted to constructor
+      injection, so look at recent injection-style changes — and at recent
+      <code>proxyBeanMethods = false</code> changes, which have the same effect on intra-config
+      cycles. A bean that has not changed in two years is not evidence that it is not the
+      problem.</p>
+    </section>
+
+    <!-- ============ 8 ============ -->
+    <section id="ch8" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">08</span>
+        <h2>Failure modes</h2>
+      </div>
+
+      <p>The scenario bank for this volume has one theme running through it. Almost every failure
+      is a <strong>phase error</strong> or a <strong>provenance error</strong>: code ran at the
+      wrong point in the lifecycle, a bean was Spring's when you thought it was yours or the
+      reverse, a value was captured at construction when you assumed it resolved at use, or a proxy
+      was assumed to be in the call path when it was not. The candidates who stand out ask "which
+      phase is this in?" <em>before</em> answering, and can say why the container behaves as it
+      does rather than only that it does.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Symptom to first thing to check</caption>
+          <thead><tr><th>Symptom</th><th>What it usually is</th><th>First thing to check</th></tr></thead>
+          <tbody>
+            <tr><td><code>@PostConstruct</code> fails with a SQL error at startup</td>
+              <td>Phase 3 of <code>refresh()</code> runs before your migrations</td>
+              <td>Move the check to a health indicator, or make that one bean <code>@Lazy</code> — not every bean</td></tr>
+            <tr><td>A prototype's <code>@PostConstruct</code> runs far more often than expected</td>
+              <td>Every <code>getBean()</code> re-runs the entire creation sequence</td>
+              <td>Find the injection point; switch it to <code>ObjectProvider</code></td></tr>
+            <tr><td><code>NoSuchBeanDefinitionException</code> for a plainly registered bean</td>
+              <td><code>FactoryBean.getObjectType()</code> returned the factory class, or was never called</td>
+              <td>Return the <em>product</em> type; reach the factory with <code>&amp;name</code></td></tr>
+            <tr><td>No <code>@PostConstruct</code> runs anywhere in the application</td>
+              <td>A <code>PriorityOrdered</code> BPP displaced <code>CommonAnnotationBeanPostProcessor</code></td>
+              <td><code>--debug</code> plus <code>DEBUG</code> on the bean factory support package</td></tr>
+            <tr><td><code>BeanCurrentlyInCreationException</code> after an upgrade</td>
+              <td>A field-injected cycle became constructor-injected</td>
+              <td>Diff recent injection-style changes, not the two beans the trace names</td></tr>
+            <tr><td><code>@Transactional</code> intermittently commits nothing</td>
+              <td>A bean handed out raw through a cycle's early reference</td>
+              <td>Remove the cycle; <code>allow-circular-references</code> is what let it survive</td></tr>
+            <tr><td>"No thread-bound request found" from a job, while HTTP works</td>
+              <td>Request scope resolved off the request thread</td>
+              <td>Stop depending on request scope from <code>@Scheduled</code>, runners, or <code>@Async</code></td></tr>
+            <tr><td>A starter&#39;s beans are simply absent</td>
+              <td>A <code>@Conditional</code> did not match — not a missing import</td>
+              <td><code>ConditionEvaluationReport</code>: <code>--debug</code> or <code>/actuator/conditions</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — a 25-second refresh</span>
+        <p>With 3,000 beans and a 25-second refresh, audit the <code>@PostConstruct</code> methods
+        and non-lazy <code>@Bean</code> methods doing I/O first: they all run in
+        <code>finishBeanFactoryInitialization()</code> and they run <strong>serially on the refresh
+        thread</strong>, so a <code>@PostConstruct</code> making three HTTP calls at 200&nbsp;ms each
+        is 600&nbsp;ms per bean. Then the <code>SmartInitializingSingleton</code> implementations,
+        which are a single serial batch by definition, and only then classpath resolution. The
+        probe timing separates the two causes before you open a profiler: a slow <em>startup</em>
+        delays readiness measurably, while a slow first request delays nothing until traffic
+        arrives. Do <strong>not</strong> reach for
+        <code>spring.main.lazy-initialization</code> as the fix — it moves a startup failure into a
+        first-request failure, which is the same trade as section 7's, for the whole
+        application.</p>
+      </div>
+    </section>
+
+    <!-- ============ numbers ============ -->
+    <section id="numbers" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">&nbsp;</span>
+        <h2>Numbers worth memorising</h2>
+      </div>
+      <div class="numbers">
+        <div class="number"><span class="number__value">7</span><span class="number__label">steps in the singleton creation sequence</span></div>
+        <div class="number"><span class="number__value">3</span><span class="number__label">levels in the singleton cache — and the third holds a factory</span></div>
+        <div class="number"><span class="number__value">4</span><span class="number__label">Aware calls made when only ApplicationContextAware is implemented</span></div>
+        <div class="number"><span class="number__value">1,000&times;</span><span class="number__label">scope lookups per request for a 20-method bean called 50 times</span></div>
+        <div class="number"><span class="number__value">0</span><span class="number__label">destruction callbacks a prototype ever gets — there is no flag to enable one</span></div>
+        <div class="number"><span class="number__value">2.6</span><span class="number__label">Boot version where circular references default to false</span></div>
+        <div class="number"><span class="number__value">1,000</span><span class="number__label">tenants &#8594; 2,000 beans, +20&ndash;50s refresh, ~200 MB</span></div>
+        <div class="number"><span class="number__value">10,000</span><span class="number__label">tenants &#8594; 20,000 beans, +3&ndash;8 min refresh, ~2 GB, OOM risk</span></div>
+        <div class="number"><span class="number__value">3,000</span><span class="number__label">beans in a 25-second refresh; one BPP pass each, serially</span></div>
+        <div class="number"><span class="number__value">2.3</span><span class="number__label">Boot version where the web starter stopped shipping Hibernate Validator</span></div>
+        <div class="number"><span class="number__value">ISO-8859-1</span><span class="number__label">Properties.load(InputStream) encoding, by spec, since Java 1.0</span></div>
+        <div class="number"><span class="number__value">40,000</span><span class="number__label">resources in a fat jar where a classpath*: scan gets measurably slow</span></div>
+      </div>
+    </section>
+
+    <footer class="pagefoot">
+      <span>Volume 2 of 11 &mdash; Spring Complete Deep-Dive</span>
+      <div class="pager">
+        <a href="01-spring-core-ioc.html">&larr; Core &amp; IoC</a>
+        <a href="03-aop-proxying.html">AOP &amp; Proxying &rarr;</a>
+      </div>
+    </footer>
+
+  </main>
+</div>
+
+<script src="../search.js"></script>
+<script src="../highlight.js"></script>
+</body>
+</html>

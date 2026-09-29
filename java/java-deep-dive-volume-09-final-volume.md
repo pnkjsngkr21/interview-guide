@@ -306,8 +306,8 @@ Structured concurrency (a preview feature in recent JDKs, built directly on virt
 
 ```java
 try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
-Supplier<String> user = scope.fork(() -> fetchUser(userId));       // spawns as a virtual thread
-Supplier<List<Order>> orders = scope.fork(() -> fetchOrders(userId)); // spawns as a virtual thread
+Subtask<String> user = scope.fork(() -> fetchUser(userId));       // spawns as a virtual thread
+Subtask<List<Order>> orders = scope.fork(() -> fetchOrders(userId)); // spawns as a virtual thread
 scope.join();              // waits for BOTH subtasks — the scope cannot exit before they finish
 scope.throwIfFailed();      // if EITHER failed, propagates that failure here, in the PARENT
 // If we reach this line, BOTH succeeded — safe to use both results

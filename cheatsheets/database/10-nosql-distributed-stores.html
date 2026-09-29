@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NoSQL &amp; Distributed Stores — Cheatsheet</title>
+<meta name="description" content="Condensed cheatsheet for Database Deep-Dive Volume 10: Cassandra tombstones and SSTables, DynamoDB hot partitions and adaptive capacity, MongoDB documents against relations, and the consistency knobs each store exposes.">
+<link rel="stylesheet" href="../cheatsheet.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="page">
+
+  <nav class="sidebar" aria-label="Contents">
+    <h2>On this page</h2>
+    <ol>
+      <li><a href="#ch1">1 — Why relational stopped being default</a></li>
+      <li><a href="#ch2">2 — CAP and the consistency ladder</a></li>
+      <li><a href="#ch3">3 — Partitioning &amp; the hot partition</a></li>
+      <li><a href="#ch4">4 — Cassandra: the LSM write path</a></li>
+      <li><a href="#ch5">5 — Cassandra: modelling from WHERE</a></li>
+      <li><a href="#ch6">6 — DynamoDB: keys, consistency, cost</a></li>
+      <li><a href="#ch7">7 — MongoDB: documents &amp; pipelines</a></li>
+      <li><a href="#ch8">8 — Choosing between them</a></li>
+      <li><a href="#numbers">Numbers</a></li>
+    </ol>
+    <h2>Series</h2>
+    <ul>
+      <li><a href="01-fundamentals-relational-model.html">01 — Fundamentals</a></li>
+      <li><a href="02-sql-ddl-dml-constraints.html">02 — DDL &amp; Constraints</a></li>
+      <li><a href="03-sql-queries-joins-window-functions.html">03 — Queries &amp; Joins</a></li>
+      <li><a href="04-indexes-query-planning-execution.html">04 — Indexes &amp; Planning</a></li>
+      <li><a href="05-transactions-isolation-concurrency.html">05 — Transactions</a></li>
+      <li><a href="06-schema-design-partitioning-scaling.html">06 — Schema &amp; Scaling</a></li>
+      <li><a href="07-postgresql.html">07 — PostgreSQL</a></li>
+      <li><a href="08-mysql.html">08 — MySQL &amp; InnoDB</a></li>
+      <li><a href="09-redis-caching.html">09 — Redis &amp; Caching</a></li>
+      <li><a href="10-nosql-distributed-stores.html">10 — NoSQL &amp; Distributed</a></li>
+      <li><a href="11-s3-elasticsearch-interview-bank.html">11 — S3, ES &amp; Bank</a></li>
+    </ul>
+    <h2>Repository</h2>
+    <ul>
+      <li><a href="../index.html">All cheatsheets</a></li>
+      <li><a href="../../database/database-deep-dive-volume-10-nosql-cassandra-dynamodb-mongodb.md">Source volume</a></li>
+    </ul>
+  </nav>
+
+  <main class="main" id="main">
+
+    <header class="masthead">
+      <p class="masthead__eyebrow">Database — The Database Complete Deep-Dive</p>
+      <h1>Volume 10 — NoSQL &amp; Distributed Stores</h1>
+      <p class="masthead__sub">
+        What each of these three stores gives you that a relational database cannot, what it
+        charges for it, and the one decision in each that is effectively permanent.
+      </p>
+      <ul class="masthead__meta">
+        <li>9 sections</li>
+        <li>From <a href="../../database/database-deep-dive-volume-10-nosql-cassandra-dynamodb-mongodb.md">the source volume</a></li>
+      </ul>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <input type="search" data-filter-input placeholder="Filter sections — press /" aria-label="Filter sections">
+        <span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span>
+      </div>
+      <div class="pager">
+        <a href="09-redis-caching.html">&larr; Redis &amp; Caching</a>
+        <a href="11-s3-elasticsearch-interview-bank.html">S3, ES &amp; Bank &rarr;</a>
+      </div>
+    </div>
+
+    <div class="keyfacts">
+      <h2>If you only remember five things</h2>
+      <ol>
+        <li><strong>CAP is a per-operation claim made during a partition.</strong> A database is
+        not "CP" or "AP" — the guarantee lives at the consistency level of a single statement.
+        Partition tolerance is not a choice, so the only choice is C or A, made per operation
+        and only while the partition lasts.</li>
+        <li><strong>The partition key is the design, and it is a commitment.</strong> It is
+        simultaneously the unit of storage, of replication, of write throughput and the ceiling
+        on query shape. Changing it is a data migration with a dual-write window, not a
+        configuration change.</li>
+        <li><strong>Adding nodes does not fix a hot partition.</strong> Throughput scales
+        <em>per partition</em>. A single key keeps its per-key ceiling however many nodes join,
+        and adaptive capacity redistributes capacity across partitions without ever splitting
+        one.</li>
+        <li><strong>In an LSM store a delete is a write.</strong> A tombstone is a row that must
+        be read, compared and merged until <code>gc_grace_seconds</code> (10 days) passes —
+        which is a resurrection-bug guard, not a tuning knob.</li>
+        <li><strong>"Schemaless" is a misnomer in both DynamoDB and MongoDB.</strong> You
+        designed a key schema; you wrote it in the client instead of in DDL. What you gained
+        is a new non-key attribute without a migration, and what you lost is the database
+        telling you a client broke the contract.</li>
+      </ol>
+    </div>
+
+    <p class="empty" data-filter-empty hidden>No section matches that filter.</p>
+
+    <!-- ============ 1 ============ -->
+    <section id="ch1" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">01</span>
+        <h2>Why relational stores stopped being the default</h2>
+      </div>
+
+      <p>"We moved to NoSQL because relational databases don't scale" is four claims wearing
+      one coat. The senior move is to take them apart, because three of the four have a
+      cheaper answer that takes a sprint rather than a migration, and only one is a genuine
+      architectural limit.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Which scale — and which engine actually fixes it</caption>
+          <thead><tr><th>The scale</th><th>What it really is</th><th>The right answer</th></tr></thead>
+          <tbody>
+            <tr><td>Write throughput</td><td>A relational primary is a <strong>single writer</strong> by construction — one leader process, one WAL, one lock manager</td>
+              <td>Distributed store. <strong>This is the one NoSQL genuinely fixed</strong></td></tr>
+            <tr><td>Data volume per machine</td><td>A 10 TB table on a 64 GB box — a working set that does not fit</td>
+              <td>Partitioning. See <a href="06-schema-design-partitioning-scaling.html">06 — Schema &amp; Scaling</a></td></tr>
+            <tr><td>Read throughput, p99 latency</td><td>Reads scale with replicas</td>
+              <td>A read replica and a routing layer. Usually cheaper than a store change</td></tr>
+            <tr><td>Developer velocity</td><td>"I want to store a JSON blob" — a schema problem in a platform costume</td>
+              <td>A <code>jsonb</code> column, a GIN index, or a partial index</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>So the genuinely unsolvable-by-PostgreSQL case is narrow: write throughput exceeding
+      what one process can push, on an append-mostly workload that is never joined. If a 30 GB
+      database is "too slow", the working set fits in RAM and PostgreSQL will serve it faster
+      than any distributed store serves it over the network; the honest question is what the
+      write rate is and what one write costs, because a write whose <code>SELECT</code>
+      sequential-scans is a bug, not a ceiling.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The four cost claims, and what each really costs you</caption>
+          <thead><tr><th>Claim</th><th>True?</th><th>The cost</th></tr></thead>
+          <tbody>
+            <tr><td>Schema rigidity</td><td>Narrower than it sounds</td>
+              <td><code>ALTER TABLE ADD COLUMN</code> nullable with no default is metadata-only in PostgreSQL and InnoDB. <strong>Changing the <em>shape</em> of an entity is a project</strong> — shadow table, batched backfill, dual-write window, cutover — in any store</td></tr>
+            <tr><td>Single-writer throughput</td><td>Yes, structurally</td>
+              <td>Fixed by distribution, which buys you a partition key and a cross-shard query problem in exchange</td></tr>
+            <tr><td>Operational cost</td><td>Underrated, and the real bill</td>
+              <td>Replaced, not removed: compaction debt, repair windows, partition-key audits, capacity modelling — against the removed single-writer ceiling and the manual <code>VACUUM</code></td></tr>
+            <tr><td>Write amplification at the storage layer</td><td>The one that changes shape</td>
+              <td>A B+ tree write is a random page I/O; a log-structured write is a sequential append. The slowest and fastest things a disk does</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — shard PostgreSQL, or move to Cassandra?</span>
+        <p>Both end up with a partition key and a cross-shard query problem; the difference is
+        who owns the shard router and what the cross-shard query costs. <strong>Flips on:</strong>
+        how many distinct query patterns exist and how many are cross-shard. Two or three, and
+        you shard Postgres — Citis, or an application-level routing layer — and keep joins.
+        Fifteen patterns including "everything for this user, every entity type, sorted by
+        date", and a wide-column store where each pattern gets its own table is cheaper,
+        because the alternative is eight hand-written fan-out queries you maintain forever.</p>
+      </div>
+    </section>
+
+    <!-- ============ 2 ============ -->
+    <section id="ch2" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">02</span>
+        <h2>CAP, precisely, and the consistency ladder</h2>
+      </div>
+
+      <p>The theorem is an impossibility result and it is conditional: <strong>during a network
+      partition, no system can guarantee both linearizable consistency and total
+      availability</strong>. Two consequences are routinely dropped, and both are what an
+      interviewer is listening for. First, outside a partition a distributed system can offer
+      both, so CAP describes a rare dramatic moment and not your production. Second,
+      partition tolerance is not a choice — partitions are the normal failure mode of a
+      network — so the real decision is C or A, and it is only forced while the partition
+      lasts. That is the same content as the else branch of PACELC, and it is the <em>else</em>
+      branch that governs your configuration: your read consistency level, your cache TTL, your
+      replica routing, your SLAs.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>What an operation does when the network splits</caption>
+          <thead><tr><th>Operation</th><th>What a partition does</th><th>Engine behaviour</th></tr></thead>
+          <tbody>
+            <tr><td>Write to a single-writer relational primary</td><td>Primary is on the minority side</td>
+              <td>Write fails and returns an error — <strong>C</strong></td></tr>
+            <tr><td>Read from a replica during that partition</td><td>Reachable but behind</td>
+              <td>Read succeeds with old data — <strong>A</strong></td></tr>
+            <tr><td><code>QUORUM</code> write, RF=3, one node isolated</td><td>2 of 3 still reachable</td>
+              <td>Succeeds; the isolated node is repaired later by hinted handoff</td></tr>
+            <tr><td><code>QUORUM</code> write, RF=3, two nodes isolated</td><td>Only 1 of 3 reachable</td>
+              <td><strong>Fails.</strong> This is the C half, and it is real</td></tr>
+            <tr><td><code>ONE</code> read, RF=3</td><td>Whichever replica answers</td>
+              <td>Succeeds, may be stale — <strong>A</strong></td></tr>
+            <tr><td><code>ALL</code> write, RF=3</td><td>Any node down</td>
+              <td>Fails under <em>any</em> partition. Maximally C, minimally A</td></tr>
+            <tr><td>DynamoDB read, <code>ConsistentRead=true</code></td><td>Quorum unreachable</td>
+              <td>Blocks, then <strong>fails</strong> — an error, never a stale value</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>The "C" outcomes are failures, and that is the point.</strong> An engineer who
+      said "we chose consistency" and did not realise it means "we chose to return
+      <code>503</code> to some users" has not finished the design. The most common real
+      resolution is a system that is <em>read</em>-available and <em>write</em>-unavailable
+      under partition: serving stale reads is small and explicable, accepting writes on both
+      sides is split-brain whose reconciliation is your problem forever.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "is your database CP or AP?"</span>
+        <p>The question is malformed, because it asks for a property the thing does not have.
+        Name the operation and the condition instead: "our order-status read is served from any
+        replica and may be seconds stale; our payment write requires a quorum of three, so it
+        <em>fails</em> on the minority side rather than forking." Three things worth adding.
+        A single-writer primary with asynchronous replicas is <strong>CP, not AP</strong> —
+        partition the primary and writes fail. CAP says nothing about the 99.99% of the time
+        there is no partition, which is why PACELC's else branch is the one that governs your
+        configuration.</p>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 330" role="img" aria-label="Majority intersection at replication factor 3. A QUORUM write of two replicas and a later QUORUM read of two replicas must share at least one replica, so the reader is guaranteed to see the write. A read of one replica need not overlap the write set at all, so it can return a stale value.">
+          <defs>
+            <marker id="arw-d10-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <text class="label" x="330" y="24" text-anchor="middle">RF = 3 — a write set of 2 and a read set of 2 always overlap</text>
+
+          <rect class="node" x="150" y="70" width="180" height="52" rx="6"/>
+          <text class="label" x="240" y="92" text-anchor="middle">REPLICA A</text>
+          <text class="label label--sub" x="240" y="108" text-anchor="middle">write + read</text>
+
+          <rect class="node" x="370" y="70" width="180" height="52" rx="6"/>
+          <text class="label" x="460" y="92" text-anchor="middle">REPLICA B</text>
+          <text class="label label--sub" x="460" y="108" text-anchor="middle">write + read</text>
+
+          <rect class="node node--warn" x="260" y="150" width="180" height="52" rx="6"/>
+          <text class="label" x="350" y="172" text-anchor="middle">REPLICA C</text>
+          <text class="label label--sub" x="350" y="188" text-anchor="middle">neither set</text>
+
+          <rect class="node node--accent" x="150" y="240" width="400" height="46" rx="6"/>
+          <text class="label" x="350" y="269" text-anchor="middle">overlap &ge; 1 — the reader is guaranteed to see the write</text>
+
+          <path class="edge edge--good" d="M 240 122 Q 240 200 350 200" marker-end="url(#arw-d10-a)"/>
+          <path class="edge edge--good" d="M 460 122 Q 460 200 350 200" marker-end="url(#arw-d10-a)"/>
+          <path class="edge edge--warn" d="M 350 150 L 350 128" marker-end="url(#arw-d10-a)"/>
+
+          <text class="edge-label edge-label--strong fill-bad" x="588" y="118" text-anchor="middle">ONE read: no</text>
+          <text class="edge-label edge-label--strong fill-bad" x="588" y="132" text-anchor="middle">overlap at all</text>
+          <path class="edge edge--bad edge--return" d="M 500 176 Q 570 176 570 130" marker-end="url(#arw-d10-a)"/>
+        </svg>
+        <figcaption>
+          <strong>Quorum is a majority-intersection argument, not a magic number.</strong> The
+          formula is <code>floor(RF/2) + 1</code>, so RF=3 gives 2, RF=5 gives 3. RF=2 does not
+          work: a quorum of 2 of 2 is unavailable the moment one node is down. RF=3 is the
+          smallest useful value and the near-universal default. But intersection buys
+          <em>read-your-writes</em> — a <code>ONE</code> read's set need not overlap the
+          write's at all, which is why a write acknowledged at <code>QUORUM</code> can still be
+          followed by a read that returns the old value.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The consistency ladder — memorise the cost column, not the definitions</caption>
+          <thead><tr><th>Model</th><th>What it forbids</th><th>Who pays</th></tr></thead>
+          <tbody>
+            <tr><td>Linearizable</td><td>Nothing. All operations take effect at one point between invocation and response</td>
+              <td>Nobody. Code is ordinary. Costs a quorum per operation</td></tr>
+            <tr><td>Sequential</td><td>Reordering operations from the <em>same client</em></td>
+              <td>Low — sticky session or client-side sequencing</td></tr>
+            <tr><td>Causal</td><td>Observing an effect without its cause</td>
+              <td><strong>None of these engines offers a switch.</strong> You build it</td></tr>
+            <tr><td>Read-your-writes</td><td>Showing a client state older than a write it was told succeeded</td>
+              <td>Low, but it is a contract that needs a test</td></tr>
+            <tr><td>Monotonic reads</td><td>Showing a value older than one the client already saw</td>
+              <td>Low — read a catch-up replica, or pin the session</td></tr>
+            <tr><td>Eventual</td><td>Nothing in steady state. Guarantees only convergence</td>
+              <td><strong>The application.</strong> Every screen, computed field, and "why is this number wrong" ticket</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — the models are not settings</span>
+        <p>There is no "eventual consistency: on" anywhere. A consistency model is a
+        <em>consequence</em> of a consistency level, a read preference, a routing decision, a
+        write concern or a read concern. A candidate who cannot name the setting behind a
+        guarantee does not yet understand the system they are defending. And the most valuable
+        guarantee in practice — read-your-writes — is <strong>always constructed, never
+        configured</strong>, because no engine offers a causal-consistency switch. There are
+        exactly two mechanisms: route the read to where the write landed, or carry a version
+        token and escalate when the replica is behind. Everything else is an implementation of
+        one of the two.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — "eventually consistent" is not a specification</span>
+        <p>It names no bound, no mechanism, no failure case and no owner. A usable claim needs
+        four things: <strong>the bound</strong> (Cassandra's <code>ONE</code> read is
+        <em>unbounded</em> even in normal operation — it is whatever the slowest reachable
+        replica says, and a node that is down rather than lagging does not answer at all);
+        <strong>the mechanism</strong> (anti-entropy, hinted handoff, read repair, a projection
+        worker — each with different failure behaviour); <strong>the failure case</strong> (a
+        node holding the newest value down for a week); and <strong>who is watching</strong>
+        (<code>nodetool tp</code>, a replication-lag alarm). A convergence guarantee nobody
+        monitors is a hope.</p>
+      </div>
+    </section>
+
+    <!-- ============ 3 ============ -->
+    <section id="ch3" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">03</span>
+        <h2>Partitioning &amp; the hot partition</h2>
+      </div>
+
+      <p>Everything else in this volume is engine detail. The partition key is the design: it
+      determines how much data lives on one machine, how much write throughput one machine
+      absorbs, whether a query is a point read or a fan-out, and whether a rebalance moves a
+      petabyte or a megabyte. The general argument about denormalising, sharding and shard-key
+      choice belongs to
+      <a href="06-schema-design-partitioning-scaling.html">06 — Schema &amp; Scaling</a>; what
+      belongs here is what each of these three engines does with the key it is given.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 340" role="img" aria-label="A hot partition in a 24-node cluster. Requests for one partition key arrive at a throughput above the key's 1,000 WCU per second ceiling, so the three replicas of that key are pinned while the other 21 nodes sit idle, and the excess requests are throttled. Adding nodes does not move the ceiling.">
+          <defs>
+            <marker id="arw-d10-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node" x="18" y="34" width="124" height="36" rx="18"/>
+          <text class="label" x="80" y="57" text-anchor="middle">client</text>
+          <text class="edge-label" x="80" y="90" text-anchor="middle">all traffic on</text>
+          <text class="edge-label" x="80" y="104" text-anchor="middle">tenant = &quot;acme&quot;</text>
+          <path class="edge edge--bad" d="M 142 52 L 236 52" marker-end="url(#arw-d10-b)"/>
+
+          <rect class="node node--bad" x="238" y="34" width="150" height="36" rx="6"/>
+          <text class="label" x="313" y="57" text-anchor="middle">1,000 WCU/s ceiling</text>
+          <path class="edge edge--bad" d="M 388 52 L 452 52" marker-end="url(#arw-d10-b)"/>
+
+          <rect class="node node--bad" x="454" y="34" width="188" height="36" rx="6"/>
+          <text class="label" x="548" y="57" text-anchor="middle">excess &rarr; throttled</text>
+          <path class="edge edge--bad edge--return" d="M 548 70 Q 548 100 313 100 Q 142 100 80 78" marker-end="url(#arw-d10-b)"/>
+          <text class="edge-label fill-bad" x="330" y="116" text-anchor="middle">ProvisionedThroughputExceededException</text>
+
+          <text class="label" x="330" y="158" text-anchor="middle">THE RING — 24 nodes, one partition</text>
+
+          <g class="node node--bad">
+            <rect x="18" y="176" width="52" height="40" rx="5"/>
+            <rect x="76" y="176" width="52" height="40" rx="5"/>
+            <rect x="134" y="176" width="52" height="40" rx="5"/>
+          </g>
+          <text class="label" x="102" y="201" text-anchor="middle">replicas of the hot key: 100%</text>
+
+          <g class="node">
+            <rect x="192" y="176" width="52" height="40" rx="5"/>
+            <rect x="250" y="176" width="52" height="40" rx="5"/>
+            <rect x="308" y="176" width="52" height="40" rx="5"/>
+            <rect x="366" y="176" width="52" height="40" rx="5"/>
+            <rect x="424" y="176" width="52" height="40" rx="5"/>
+            <rect x="482" y="176" width="52" height="40" rx="5"/>
+            <rect x="540" y="176" width="52" height="40" rx="5"/>
+            <rect x="192" y="226" width="52" height="40" rx="5"/>
+            <rect x="250" y="226" width="52" height="40" rx="5"/>
+            <rect x="308" y="226" width="52" height="40" rx="5"/>
+            <rect x="366" y="226" width="52" height="40" rx="5"/>
+            <rect x="424" y="226" width="52" height="40" rx="5"/>
+            <rect x="482" y="226" width="52" height="40" rx="5"/>
+            <rect x="540" y="226" width="52" height="40" rx="5"/>
+          </g>
+          <text class="label label--sub" x="392" y="256" text-anchor="middle">21 other nodes: idle</text>
+
+          <path class="edge edge--warn" d="M 240 226 L 240 176" marker-end="url(#arw-d10-b)"/>
+          <path class="edge edge--warn" d="M 392 226 L 392 176" marker-end="url(#arw-d10-b)"/>
+          <text class="edge-label fill-warn" x="600" y="238" text-anchor="middle">nodes 25&ndash;48 join</text>
+          <text class="edge-label fill-warn" x="600" y="252" text-anchor="middle">and the ceiling</text>
+          <text class="edge-label fill-warn" x="600" y="266" text-anchor="middle">does not move</text>
+
+          <rect class="node node--accent" x="18" y="290" width="624" height="36" rx="6"/>
+          <text class="label" x="330" y="313" text-anchor="middle">fix: pk = f&quot;{id}-{hash(other) % 16}&quot; &mdash; 16 partitions, one key's load</text>
+        </svg>
+        <figcaption>
+          <strong>A hot partition is a per-key resource ceiling, and cluster size is
+          irrelevant to it.</strong> The tell at the cluster level is a small set of nodes
+          pinned while the rest idle, plus a compaction backlog on exactly those nodes. The
+          remedy is always in the key — a computed shard suffix, a day bucket, N counters
+          instead of one — never in the node count. And note the amplification: a client
+          timeout with a retry is a load multiplier on the machine that is already saturated,
+          so a warm partition becomes an outage in minutes. Backoff and jitter are not
+          optional at this layer.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table>
+          <caption>One query, three key schemas — the difference is a p99</caption>
+          <thead><tr><th>Key design</th><th>Work</th><th>Latency</th></tr></thead>
+          <tbody>
+            <tr><td><code>pk = customer_id</code>,<br><code>sk = order_ts DESC</code></td>
+              <td>One partition, one range, 25 rows</td>
+              <td>~1 RTT, independent of table size</td></tr>
+            <tr><td><code>pk = order_id</code></td>
+              <td>No idea which partition holds that customer's orders — read every partition, filter, sort</td>
+              <td>1 RTT + N partitions. Pages forever; times out at 1M rows and again at 10M</td></tr>
+            <tr><td><code>pk = customer_id</code>,<br>no sort key</td>
+              <td>One node, but the <strong>whole</strong> partition, sorted in the application</td>
+              <td>Fine at 200 orders, 40 ms at 20,000, a 1.2 GB payload at 200,000</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>A partition is a unit of storage as well as a unit of throughput, which is what makes
+      the third row a trap: Cassandra enforces a practical partition-size budget of roughly
+      5&ndash;10 GB, and DynamoDB publishes a hard 10 MB per physical partition. A key that
+      grows without bound is a table that was never partitioned — everything works until it
+      does not, and by then it is in production.</p>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — a partition key is four things at once</span>
+        <p>It is the <strong>unit of storage</strong>, the <strong>unit of replication</strong>,
+        the <strong>unit of write throughput</strong>, and the <strong>ceiling on query
+        shape</strong>. Change any one and you have changed all four, which is why "let's just
+        shard by a different key" is a data-migration project with a downtime plan, not a
+        configuration change. The design-review question is therefore never "is this key good
+        for one query" but "walk me through the whole access-pattern list and show me every
+        query this key serves and every query it turns into a scan." The artefact that makes
+        it survivable is one page: every query as a <code>WHERE</code> clause, its expected
+        rate, and — for each — whether it is a point read.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — hash or range partitioning</span>
+        <p>Hash wins in almost every case: even distribution with no coordination, and no hot
+        range at the end of the key space. Its cost is that range queries touch every
+        partition, so the compensation is a <em>sort key</em> designed so the hot access
+        pattern is a prefix scan of one partition. Range partitioning is right when the
+        dominant pattern is a range scan and the key space is naturally bounded — a country
+        code, a tenant list you control. <strong>Flips on:</strong> a partition key that is a
+        monotonically increasing value — a timestamp, an autoincrement, a ULID. Then hash it.
+        That one sentence prevents the most common hot-partition incident there is.</p>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — the per-partition ceiling</span>
+        <p>The number to carry: <strong>about 1,000 WCU/s and 1,000 RCU/s on a single
+        partition</strong>, with up to 3,000 RCU/s for strongly consistent reads on one
+        partition. A customer, an account, a device or a tenant is a natural single partition
+        key, and any of them can legitimately be a 1,000-writes-per-second key. The moment
+        your per-tenant write rate approaches a few hundred per second, you are designing a
+        "one big tenant" problem — and the fix is in the key, not in the capacity.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "adaptive capacity will fix the hot key"</span>
+        <p>Adaptive capacity is real, documented and useful: it continuously tracks item sizes
+        and request distribution across a table's partitions and delivers burst capacity to
+        the ones that need it, so a skewed workload is not provisioned for its worst partition
+        across the whole table. <strong>It redistributes capacity across partitions. It never
+        splits one.</strong> The per-partition ceilings are structural, because a partition is
+        the unit of distribution. The same is true of Cassandra's ring: adding nodes changes
+        token ownership, not the size of a partition. And the most common actual root cause is
+        not a hot cluster — it is a <em>defaulted</em> dimension. A null, a
+        <code>"tenant-default"</code> from an unconfigured integration, or a placeholder
+        device id collapses a whole class of writers onto one key, and a logical bug in the
+        client becomes a physical ceiling in the database. The standing rule that follows:
+        any dimension a client can default must never be a partition key.</p>
+      </div>
+    </section>
+
+    <!-- ============ 4 ============ -->
+    <section id="ch4" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">04</span>
+        <h2>Cassandra: the LSM write path</h2>
+      </div>
+
+      <p>Cassandra never modifies a file in place. Writes go to memory, memory is flushed to
+      immutable files, and files are merged in the background — the log-structured merge tree.
+      That single inversion is the whole engine, and every operational question about
+      Cassandra is one of two questions: <em>is this a write problem or a read problem?</em></p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 400" role="img" aria-label="The Cassandra LSM write path and read path. A write goes to the coordinator, which appends to each replica's commit log then updates its in-memory memtable. A full memtable is flushed to an immutable sorted SSTable with a bloom filter and partition index. Compaction merges SSTables in the background, which is the only thing that reduces the file count. A read searches the memtable and then every SSTable, skipping files whose bloom filter says the key is absent.">
+          <defs>
+            <marker id="arw-d10-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node" x="18" y="20" width="118" height="34" rx="6"/>
+          <text class="label" x="77" y="41" text-anchor="middle">write(pk, ck, v)</text>
+          <path class="edge" d="M 136 37 L 196 37" marker-end="url(#arw-d10-c)"/>
+          <text class="edge-label" x="166" y="28" text-anchor="middle">route</text>
+
+          <rect class="node node--accent" x="198" y="20" width="140" height="34" rx="6"/>
+          <text class="label" x="268" y="41" text-anchor="middle">coordinator</text>
+          <path class="edge" d="M 268 54 L 268 92" marker-end="url(#arw-d10-c)"/>
+          <text class="edge-label" x="278" y="76" text-anchor="start">to the RF replicas</text>
+
+          <rect class="node" x="150" y="94" width="236" height="34" rx="6"/>
+          <text class="label" x="268" y="115" text-anchor="middle">commit log append</text>
+          <text class="label label--sub" x="268" y="140" text-anchor="middle">this is the durability</text>
+          <path class="edge" d="M 268 150 L 268 176" marker-end="url(#arw-d10-c)"/>
+
+          <rect class="node node--good" x="150" y="178" width="236" height="34" rx="6"/>
+          <text class="label" x="268" y="199" text-anchor="middle">memtable (in memory)</text>
+          <text class="label label--sub" x="268" y="224" text-anchor="middle">sequential, cheap</text>
+          <path class="edge" d="M 268 234 L 268 260" marker-end="url(#arw-d10-c)"/>
+          <text class="edge-label" x="278" y="250" text-anchor="start">flush when full</text>
+
+          <rect class="node" x="150" y="262" width="236" height="34" rx="6"/>
+          <text class="label" x="268" y="283" text-anchor="middle">SSTable — immutable</text>
+          <text class="label label--sub" x="268" y="308" text-anchor="middle">+ bloom filter + index</text>
+
+          <path class="edge edge--warn" d="M 386 279 L 452 279" marker-end="url(#arw-d10-c)"/>
+          <text class="edge-label" x="419" y="270" text-anchor="middle">compaction</text>
+          <rect class="node node--warn" x="454" y="248" width="188" height="62" rx="6"/>
+          <text class="label" x="548" y="272" text-anchor="middle">merged SSTable</text>
+          <text class="label label--sub" x="548" y="290" text-anchor="middle">the only thing that</text>
+          <text class="label label--sub" x="548" y="304" text-anchor="middle">reduces file count</text>
+
+          <rect class="node" x="18" y="330" width="118" height="34" rx="6"/>
+          <text class="label" x="77" y="351" text-anchor="middle">read(pk, ck)</text>
+          <path class="edge edge--bad" d="M 136 347 L 148 347" marker-end="url(#arw-d10-c)"/>
+
+          <rect class="node node--bad" x="150" y="330" width="236" height="56" rx="6"/>
+          <text class="label" x="268" y="352" text-anchor="middle">search every SSTable</text>
+          <text class="label label--sub" x="268" y="370" text-anchor="middle">bloom filter skips the</text>
+          <text class="label label--sub" x="268" y="382" text-anchor="middle">ones that cannot hold it</text>
+        </svg>
+        <figcaption>
+          <strong>A write is cheap; a read is a search across files.</strong> In a B+ tree the
+          reverse holds — a read is a lookup and a write is a page modification, and updating
+          one column of one row still rewrites a whole 4&ndash;16 kB page as a random I/O.
+          The corollary is how you diagnose: a write-heavy problem lives in the memtable and
+          the commit log; a read-heavy problem lives in the SSTable count and the bloom
+          filters. Deletes and updates are <em>writes</em> too, which is the root of the
+          tombstone problem below.
+        </figcaption>
+      </figure>
+
+      <p>The coordinator hashes the partition key with Murmur3, maps the token to a range, and
+      reads the replica set from gossiped ring metadata — every node knows the topology, so
+      there is no registry service. Each replica appends to its <strong>commit log first</strong>,
+      then updates its memtable; the order is what makes the write durable when the process
+      dies. If a replica is down, the coordinator stores a <strong>hinted handoff</strong> entry
+      and, given the quorum was met, returns success. The read path is harder than a lookup: a
+      bloom filter per SSTable, built at write time, lets the reader skip a file without touching
+      the disk, and a partition index — a sampled key-to-offset summary — lets it seek into a
+      multi-gigabyte file. Once the key is found the scanner keeps reading forward, because rows
+      of one partition are adjacent on disk — which is why a wide <code>SELECT *</code> on one
+      partition is a fast sequential scan.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Size-tiered vs leveled compaction</caption>
+          <thead><tr><th></th><th>Size-tiered (STCS)</th><th>Leveled (LCS)</th></tr></thead>
+          <tbody>
+            <tr><td>Optimised for</td><td>Write throughput</td><td>Read latency</td></tr>
+            <tr><td>Write amplification</td><td>High — up to ~10&times; the base data in the worst case; a row updated many times is rewritten many times</td><td>Lower, amortised across levels</td></tr>
+            <tr><td>Read amplification</td><td>Low — few, large files</td><td>Higher at L0, decreasing deeper</td></tr>
+            <tr><td>Latency profile</td><td>Bursty: fast, then a long compaction pause</td><td>Smooth: constant background I/O</td></tr>
+            <tr><td>Default in Cassandra</td><td><strong>Yes</strong></td><td>Opt in per table</td></tr>
+            <tr><td>Good for</td><td>Write-heavy, append-only, time series</td><td>Read-heavy, mixed, latency-sensitive</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Time-window compaction (<code>TWCS</code>) is size-tiered with buckets arranged by a
+      time column, and it is the right answer for a table with a <code>TTL</code>: old data is
+      dropped in whole buckets rather than tombstoned one row at a time — the one case where
+      the expensive-deletion concern largely disappears.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "compaction is background, so it doesn't affect performance"</span>
+        <p>It is background <em>work</em>, which means it competes for the same disk
+        bandwidth, and on a write-throughput-bound cluster the compaction queue is the first
+        thing to fall behind. The chain: writes arrive faster than compaction merges, so the
+        SSTable count grows, so reads must consult more files, so read p99 climbs — and if it
+        gets bad enough, memtables cannot flush, <strong>the commit log becomes the only copy
+        of new data, and a node failure in that window is real data loss</strong>. So a
+        compaction backlog is a durability incident in slow motion. The metric that tells you
+        which regime you are in is compaction queue depth and pending bytes on the affected
+        nodes. The staff-level version: compaction is a <em>capacity</em> problem wearing a
+        latency costume, and the fix is a write-rate reduction, a better partition key, or
+        TWCS for a TTL table — not a bigger <code>compaction throughput</code> setting.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — tombstones, and what <code>gc_grace_seconds</code> protects</span>
+        <p>An LSM store cannot remove anything, because the row it would remove is in an
+        immutable SSTable that someone else is reading at this instant. So a delete is written
+        as a <strong>tombstone</strong>: a row with a deletion timestamp that sorts after the
+        data and wins the read comparison. That tombstone is a row, and it must be read,
+        compared and merged on every read of that partition until it is dropped.
+        <code>gc_grace_seconds</code> (default <strong>10 days</strong>) is the minimum
+        retention, and the reason is a resurrection bug: if a replica was down when the delete
+        happened and returns inside that window, hinted handoff replays the old row to it, and
+        if the tombstone had already been dropped, the resurrected row would win and the data
+        would come back from the dead, silently and permanently. <strong>It is a correctness
+        guarantee about a reordering that is going to happen, not a tuning knob.</strong> The
+        failure signature to know: a partition where a large fraction of rows are tombstones.
+        Compaction then spends its I/O merging deletion markers instead of live data, every
+        read of that partition pays more comparisons per row returned, and there is no error
+        message anywhere. The root cause is almost always <em>deleting most of a partition</em>
+        — a <code>DELETE</code> that removes 90% of rows leaves a partition that is 90%
+        tombstone and slower for the next ten days even though it is nearly empty. Detect with
+        <code>nodetool sstablesummary</code>; mitigate with a TTL plus TWCS, or a partition key
+        with enough cardinality that the delete ratio per partition stays low.</p>
+      </div>
+    </section>
+
+    <!-- ============ 5 ============ -->
+    <section id="ch5" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">05</span>
+        <h2>Cassandra: modelling from the WHERE clause</h2>
+      </div>
+
+      <p>A relational engineer arrives with a well-earned instinct to normalise, and in
+      Cassandra that instinct is actively harmful. The reason is the query model: <strong>there
+      is no join, and a query can only locate data through the partition key</strong>, so
+      anything you intend to filter on has to be in the primary key. The consequence is
+      structural: a predicate on a non-key column is not a query change, it is a
+      <strong>schema migration</strong> — a new table, a backfill, and a dual-write. The read
+      path is fixed at table-creation time, so the model is derived from the reads: write every
+      query as a <code>WHERE</code> clause with its rate, ask whether Cassandra can answer it
+      with a partition key plus a clustering range, and make each one a table. <em>In
+      Cassandra, a duplicate is cheaper than a join</em> — the question is never "is this
+      duplication acceptable" but "which queries justify it, and how stale may it be".</p>
+
+      <pre class="snippet" data-lang="sql" data-title="CQL keys and order" data-hl-line="8,9"><code>CREATE TABLE products_by_category (
+  category     text,                    -- partition key: the query's WHERE
+  created_at   timestamp,               -- clustering 1: gives the range AND
+  sku          text,                    -- clustering 2: makes it unique
+  bucket       int,                     -- page-split a category that grows
+  name         text,
+  price_cents  int,
+  PRIMARY KEY ((category, bucket), created_at, sku)
+) WITH CLUSTERING ORDER BY (created_at DESC, sku ASC);
+
+-- served: one partition, one range, LIMIT 20. No sort step, no fan-out.
+SELECT * FROM products_by_category
+  WHERE category = 'tools' AND bucket = 0
+    AND created_at &gt; ?  LIMIT 20;</code></pre>
+
+      <p>Clustering columns do two jobs: they identify rows within a partition, and they
+      <strong>order</strong> them, so <code>ORDER BY</code> on a clustering column is free —
+      the query is a range scan over adjacent rows. Two consequences candidates miss:
+      <code>ORDER BY</code> on a non-clustering column is not supported, and the clustering
+      order is a page-design decision. Time-ordered data plus a <code>LIMIT</code> is the
+      single most common Cassandra table shape, and the most common reason a "slow query" is
+      actually a missing clustering order.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "we added an index on <code>status</code>, why is it still slow?"</span>
+        <p>A Cassandra secondary index is a <strong>local index on each node</strong>, not a
+        global one. Answering the query means fanning out to the replicas of every partition
+        that could hold a match — a point read becomes a ring-wide scatter-gather whose
+        latency is the slowest participant. And Cassandra will not return a partial answer:
+        <strong>all replicas of the base table's data must be up</strong>, because a down
+        replica is an unknown gap in the index. Since 3.0 a 2i query still requires a partition
+        key restriction, so you have already denormalised and the index is buying a small
+        convenience. The fix is not a better index, it is a table: <code>status</code> is
+        low-cardinality, which makes it an excellent <em>partition</em> key in a dedicated
+        table where the query is one partition, one range, one node. A secondary index on a
+        column 40% of your reads filter on is a fan-out on 40% of your reads.</p>
+      </div>
+
+      <p>And <code>ALLOW FILTERING</code> is the other trap: it applies the non-key predicate
+      <em>after</em> reading rows from the partition, so it reads every row and throws most of
+      them away. The cost is proportional to partition size, not result size, and modern
+      Cassandra emits a warning for every such query — but the honest framing is that it is a
+      development affordance, and in production it is a full partition scan with a filter
+      bolted on. The detail that makes it a review emergency: <strong>the query is
+      correct</strong>, it returns the right row, it just took 1.8 seconds, so nothing reports
+      an error and latency is the only signal.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Consistency levels at RF = 3, and what each one costs</caption>
+          <thead><tr><th>Level</th><th>Replicas must ack</th><th>Reads contact</th><th>Use it for</th></tr></thead>
+          <tbody>
+            <tr><td><code>ONE</code></td><td>1</td><td>1</td><td>Default; fast, may be stale</td></tr>
+            <tr><td><code>QUORUM</code></td><td>2 — <code>floor(RF/2)+1</code></td><td>2</td><td>The default write level</td></tr>
+            <tr><td><code>ALL</code></td><td>3</td><td>3</td><td>Almost never for writes</td></tr>
+            <tr><td><code>LOCAL_QUORUM</code></td><td>2 within one DC</td><td>2</td><td>Multi-DC; avoids the inter-DC round trip</td></tr>
+            <tr><td><code>SERIAL</code></td><td>Paxos round</td><td>1 (coordinator)</td><td>Lightweight transaction; read-your-writes</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The formula is <code>floor(RF/2) + 1</code>, so <strong>RF=2 gives 2</strong> — which
+      is why RF=2 is not survivable, since a quorum of 2 of 2 is unavailable the moment one node
+      is down. RF=3 is the smallest useful value; RF=5 buys a lower probability of an
+      unavailable quorum under correlated failure (a rack, an AZ, a bad disk batch) at 5/3 the
+      write cost and the same read cost as RF=3.</p>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — a <code>QUORUM</code> read is also a write</span>
+        <p>Three latency facts separate a staff answer from a mid-level one. <strong>First,
+        <code>ONE</code> and <code>QUORUM</code> within one DC are both about one RTT</strong>
+        — replicas are contacted in parallel and the coordinator waits for the required count,
+        so <code>QUORUM</code> costs more nodes, not another round trip. A <code>QUORUM</code>
+        read that is 10&times; slower than <code>ONE</code> is telling you it is
+        <em>multi-DC</em> (pay the inter-DC RTT, use <code>LOCAL_QUORUM</code>) or the cluster
+        is divergent — not that the quorum is expensive. <strong>Second, a
+        <code>QUORUM</code> read performs read repair</strong>: it compares versions and writes
+        back to any replica that has fallen behind, so the read is also a write and its tail
+        latency is a function of how divergent your cluster is. A cluster that has never been
+        repaired has a permanently expensive read path. <strong>Third,
+        <code>ALL</code> on writes is nearly always wrong</strong> — it maximises C at the cost
+        of availability and adds nothing meaningful over <code>QUORUM</code>, whose quorum
+        intersection already gives you read-your-writes.</p>
+      </div>
+
+      <p>So <code>QUORUM</code> is not linearizability: majority intersection guarantees the
+      reader sees the write, and linearizability in Cassandra is a <code>SERIAL</code>
+      statement running a Paxos round, meaningful only within a single partition. The three
+      mechanisms that finish the consistency story are all <em>repair</em>: <strong>read
+      repair</strong> (a <code>QUORUM</code> read, and probabilistically a <code>ONE</code>
+      read at <code>read_repair_chance</code>, default 10%, reconciles a lagging replica),
+      <strong>hinted handoff</strong> (the coordinator stores the mutation for a down replica
+      and replays it on return), and <strong><code>nodetool repair</code></strong> (the manual
+      anti-entropy backstop). The honest sentence names all three: there is no timer, no bound
+      and no guarantee in the protocol — convergence is a property of operations that are
+      running. A node down longer than <code>gc_grace_seconds</code> has had its hints dropped
+      and is permanently divergent until someone runs repair.</p>
+
+      <p>Denormalised writes are two writes, and there is no cross-partition transaction — so
+      the levels and the acceptable staleness window are part of the design: primary at
+      <code>QUORUM</code>, read-optimised copies at <code>ONE</code>, and a staleness alert on
+      the copies. The most common Cassandra production bug is not a performance problem but a
+      <em>consistency</em> problem nobody named: a read that joins a <code>QUORUM</code> table
+      and an <code>ONE</code> table client-side returns a state that never existed — a price
+      from the current row and a stock count from four seconds ago. The database is correct at
+      every level you asked for; the design is the bug.</p>
+    </section>
+
+    <!-- ============ 6 ============ -->
+    <section id="ch6" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">06</span>
+        <h2>DynamoDB: keys, consistency, capacity</h2>
+      </div>
+
+      <p>A DynamoDB table has a declared key schema — a partition key and an optional sort key,
+      each a single attribute of type S, N or B. The partition key's value is hashed to select
+      a physical partition, replicated across a three-AZ quorum; the sort key orders the items
+      inside it. A <code>Query</code> with a partition key equality and an optional sort key
+      range is the one efficient query shape. Everything outside the key is an untyped,
+      undeclared attribute. The hash exists to keep distribution even without coordination,
+      which is precisely why ordering has to be re-introduced explicitly. A composite sort key
+      such as <code>SK = "ORDER#" + zero-padded-sequence</code> gives a <em>type-prefixed</em>
+      stream, so one table can serve "all orders then all refunds" with the ordering encoded in
+      the key — that is the single-table design's central trick.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Documented limits, and the one that arrives late</caption>
+          <thead><tr><th>Limit</th><th>Value</th><th>How it fails</th></tr></thead>
+          <tbody>
+            <tr><td>Item size</td><td><strong>400 KB</strong></td><td>Rejects the write outright. Rules out "the whole session in one item"</td></tr>
+            <tr><td>Data per physical partition</td><td><strong>10 MB</strong></td>
+              <td><strong>The one that surprises people.</strong> Not a per-item error — a <em>cumulative</em> limit a growing key crosses after months of successful writes, and then a <code>ValidationException</code> on a small new item</td></tr>
+            <tr><td>Throughput per partition</td><td>~1,000 WCU/s, ~1,000 RCU/s<br>(3,000 RCU/s strongly consistent)</td><td>Throttling while table-level utilisation reads 40%</td></tr>
+            <tr><td>Transaction</td><td>100 items, 4 MB, one region, 90 s</td><td>2&times; capacity and 2&times; latency; cannot span a region</td></tr>
+            <tr><td><code>BatchWriteItem</code> / <code>BatchGetItem</code></td><td>25 items</td><td>Batch your own retries at this ceiling — a per-call limit, not a throughput allowance</td></tr>
+            <tr><td><code>Query</code> / <code>Scan</code> response</td><td>1 MB before pagination</td><td>Many round trips, p99 in seconds</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Capacity units — and the arithmetic a design review asks for</caption>
+          <thead><tr><th>Operation</th><th>Standard table</th><th>Global table</th></tr></thead>
+          <tbody>
+            <tr><td>Write</td><td>1 WCU per 1 KB, rounded up</td><td>2&times; — written in two regions</td></tr>
+            <tr><td>Read, eventually consistent</td><td>1 RCU per 4 KB, rounded up to 4 KB</td><td>1 RCU per 4 KB</td></tr>
+            <tr><td>Read, strongly consistent</td><td>2 RCU per 4 KB</td><td>1 RCU per 4 KB</td></tr>
+            <tr><td>Transactional write / read</td><td>2 WCU per KB / 2 RCU per 4 KB</td><td>Single region only</td></tr>
+            <tr><td>LSI write</td><td>1 WCU per 25, <strong>on top of</strong> the base table's write</td><td>&mdash;</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Work the numbers once, because a candidate who says "1 KB is 1 WCU" and cannot compute
+      a bill has memorised half a rule. A 2 KB item written 10,000 times/s is
+      <strong>20,000 WCU/s</strong>. Read 20,000 times/s, a 2 KB item is one 4 KB block, so
+      0.5 RCU each eventually consistent. If 5% of reads are strongly consistent: 19,000 EC
+      reads at 0.5 = 9,500 RCU/s, plus 1,000 SC reads at 1 = 1,000 RCU/s, so 10,500 RCU/s
+      total — <strong>5% of the read traffic is 9.5% of the read cost.</strong> On a global
+      table the write number doubles to 40,000 WCU/s. And one fact couples schema to cost
+      directly: a 3.9 KB item costs 1 RCU and a 4.1 KB item costs 2 RCU, so shaving 200 bytes
+      off an item can halve a read. Strip the fields you do not read on that path.</p>
+
+      <pre class="snippet" data-lang="java" data-title="One table, two access paths" data-hl-line="4"><code>// pk = USER#u42, sk = "ORDER#000000017"  -> orders, newest first
+QueryRequest.builder()
+    .tableName("store")
+    .keyConditionExpression("pk = :p AND sk BETWEEN :lo AND :hi")
+    .expressionAttributeValues(Map.of(":p", "USER#u42",
+        ":lo", "ORDER#000000000", ":hi", "ORDER#999999999"))
+    .scanIndexForward(false)
+    .build();
+// begins_with(sk, "ORDER#") is the other type: one partition, one prefix,
+// still no GSI, so still no GSI eventual consistency and no GSI write cost.</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — GSIs are always eventually consistent</span>
+        <p>There is no <code>ConsistentRead</code> parameter on a global secondary index and
+        there never has been — a GSI is a separately-provisioned, separately-maintained
+        structure updated asynchronously from the base table. A <em>local</em> secondary index
+        has the same options as the table itself. So the rule is structural, not a preference:
+        <strong>if a read must be strongly consistent, it must be served by the base table</strong>,
+        which means the access pattern has to be in the base table's key schema. If it is only
+        reachable through a GSI, the strong-consistency requirement is unmeetable and the
+        design changes rather than the flag. This bites hardest when the requirement emerges
+        late — "we now need to look up orders by promo code" — where a strongly consistent
+        version of that read simply does not exist, and your options are to re-key the base
+        table, to design the read path around eventual consistency (retry until the value
+        appears, or re-read by primary key), or to maintain a strongly consistent projection
+        under its own key with a transaction.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — <code>PutItem</code> as a partial update</span>
+        <p><code>PutItem</code> replaces the <strong>whole item</strong>. A <code>PutItem</code>
+        with three attributes on an item that has ten <strong>silently deletes the other
+        seven</strong> — no error, the data is simply gone. It is the single most common
+        DynamoDB data-loss bug. The second is the lost update: <code>GetItem</code>, add 1,
+        <code>PutItem</code> is two operations where the intent was one, so two workers both
+        read 41 and both write 42. <code>UpdateItem</code> with <code>SET counter = counter +
+        :one</code> or <code>ADD quantity :n</code> is evaluated atomically by the service, so
+        a counter is safe in one round trip with no read. But any business logic that depends on
+        the current value — "increment only if below the limit" — needs a
+        <strong>condition expression</strong>, which is DynamoDB's only atomic guard, and the
+        thing behind optimistic locking, idempotency keys and uniqueness enforcement. Note
+        the scope honestly: a condition expression is a transaction on <em>one item</em>, not
+        across items.</p>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Conditional write" data-hl-line="4,5"><code>// Nothing is written unless the state is still what we read.
+UpdateItemRequest.builder()
+    .tableName("inventory")
+    .key(k -&gt; k.partitionValue("sku#8812"))
+    .updateExpression("SET available = :new")
+    .conditionExpression("available &gt;= :requested")
+    .expressionAttributeValues(Map.of(":new", 0, ":requested", 3))
+    .build();
+// Fails with ConditionalCheckFailedException -&gt; nothing written, caller
+// retries against fresh state. Do not retry blind: read the reasons.</code></pre>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — on-demand or provisioned, and the question that comes first</span>
+        <p>On-demand costs roughly <strong>2&times; the per-unit price</strong> of provisioned
+        and buys predictability with no autoscale lag and no
+        <code>ProvisionedThroughputExceededException</code> under a burst you did not predict;
+        provisioned is billed whether you use it or not, needs headroom above your expected peak
+        rather than your average, and lags a spike by minutes while autoscaling chases it.
+        <strong>Flips on:</strong> predictability — spiky or low-volume traffic, and a launch
+        whose peak is unknowable, favour on-demand; steady well-understood production traffic
+        favours provisioned. The meta-point is the one an interviewer is listening for:
+        <strong>neither fixes a bad access pattern.</strong> A <code>Scan</code> over a 40 GB
+        table costs the same provisioned or on-demand — you have moved the cost from capacity
+        units to request latency — and on-demand makes the accidental scan spectacularly
+        expensive in dollars rather than merely slow. Before choosing a capacity mode, ask
+        whether each pattern is a <code>Query</code> against a key or a <code>Scan</code>,
+        because a <code>Scan</code> is a capacity incident either way. The same is true of
+        <code>FilterExpression</code>: it is applied <em>after</em> the read, so it changes
+        nothing about what DynamoDB fetches, and a filter on a non-key attribute is a full
+        partition read whose p50 looks unchanged while the p99 sits at four seconds.</p>
+      </div>
+
+      <p>One table or many is decided by the access-pattern list, not by the argument. One
+      table wins when entities are accessed together and no single entity is unbounded — many
+      point reads, no GSI write cost, no GSI eventual consistency, and
+      <code>begins_with(sk, "ORDER#")</code> doing the filtering. Many tables with GSIs win
+      when entities have genuinely different volumes, lifetimes or <em>traffic shapes</em>, or
+      when one entity is large enough that 10 MB is a wall — a single table has one capacity
+      profile, and a lookup at 50 rps sharing a table with a timeline at 20,000 rps shares a
+      throttle domain, which is a bug waiting for a launch. The transaction is the third answer
+      and usually a design smell: 2&times; capacity, 2&times; latency, 100 items, one region,
+      and the honest staff position is that the invariants needing a cross-item transaction
+      usually belong <em>inside one item</em>.</p>
+    </section>
+
+    <!-- ============ 7 ============ -->
+    <section id="ch7" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">07</span>
+        <h2>MongoDB: documents, embedding, pipelines</h2>
+      </div>
+
+      <p>A MongoDB document is a BSON value — key-value pairs where a value can be a scalar,
+      an array or a nested document, nested to 100 levels. The flexibility is real in exactly
+      three places, and a candidate who cannot name the three is describing the marketing
+      version. Optional and sparse attributes cost nothing, with no <code>ALTER TABLE</code>.
+      A small, co-located, bounded sub-structure arrives with its parent in one read, with no
+      join. And the shape can evolve without a migration. The same three properties become
+      liabilities under conditions that are easy to miss: a field optional to one client is
+      optional to <em>every</em> client, and two services writing <code>total</code> and
+      <code>total_cents</code> both succeed while the reader silently gets
+      <code>undefined</code>; co-location is only free while the sub-structure is small; and
+      evolving the shape without a migration means <strong>the readers must evolve too, and
+      nothing tells you when they have</strong>.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Embed or reference — a boundedness rule, not a preference</caption>
+          <thead><tr><th></th><th>Embed when</th><th>Reference when</th></tr></thead>
+          <tbody>
+            <tr><td>Read pattern</td><td>Data is read with its parent</td><td>Data is queried on its own</td></tr>
+            <tr><td>Growth</td><td>Grows slowly — the bound is known</td><td>Grows without bound, or "it depends on the customer"</td></tr>
+            <tr><td>Cardinality</td><td>Belongs to the parent 1:1 or 1:few</td><td>Shared between parents — a product in a million orders is one document referenced a million times</td></tr>
+            <tr><td>Indexes</td><td>Never queried independently</td><td>Needs its own indexes</td></tr>
+            <tr><td>You get</td><td>One read, always internally consistent, no join</td><td>One read per item, or a <code>$lookup</code> — two-phase and possibly inconsistent</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "MongoDB is schemaless, so it is more flexible than Postgres"</span>
+        <p>The correction is that it is not schemaless, it is <strong>un-validated</strong>.
+        The schema still exists; you moved it out of the database into every client, where it
+        is a convention rather than a constraint. The cost is exactly that the database will
+        not tell you when a client breaks it: a service that writes <code>total</code> where
+        the reader expects <code>total_cents</code> succeeds, returns no error, and produces a
+        <code>NaN</code> in a dashboard. The honest position is not "MongoDB has no schema"
+        but <em>"MongoDB's schema is optional, lives in the document, and you should turn on
+        validation or you have replaced a constraint with a hope."</em> Two limits on what
+        validation buys: it gives you types, required fields, ranges, enums and pattern
+        matching — a large fraction of a typed column plus a <code>CHECK</code> — but
+        <strong>not</strong> a cross-document invariant, a foreign key, or a uniqueness
+        constraint across documents. And it cannot check a cross-field invariant: a schema can
+        require <code>total_cents</code> to be an integer &ge; 0 and still cannot assert it
+        equals the sum of the line items, because JSON Schema cannot express that. Cross-document
+        integrity in MongoDB is application code, exactly as in Cassandra and DynamoDB.</p>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 290" role="img" aria-label="An unbounded embedded array failing over eighteen months. At month 1 an order averages 3 items and reads take 1 ms. At month 6, 40 items, 5 kB, 4 ms. At month 14, 900 items, 120 kB, 180 ms and the working set no longer fits the cache, degrading every tenant. At month 18 one order crosses the 16 MB document limit and its write is rejected.">
+          <defs>
+            <marker id="arw-d10-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node" x="18" y="26" width="140" height="60" rx="6"/>
+          <text class="label" x="88" y="48" text-anchor="middle">MONTH 1</text>
+          <text class="label label--sub" x="88" y="64" text-anchor="middle">3 items, 400 B</text>
+          <text class="label label--sub" x="88" y="78" text-anchor="middle">p99 read 1 ms</text>
+
+          <rect class="node node--warn" x="178" y="26" width="140" height="60" rx="6"/>
+          <text class="label" x="248" y="48" text-anchor="middle">MONTH 6</text>
+          <text class="label label--sub" x="248" y="64" text-anchor="middle">40 items, 5 kB</text>
+          <text class="label label--sub" x="248" y="78" text-anchor="middle">p99 read 4 ms</text>
+
+          <rect class="node node--warn" x="338" y="26" width="140" height="60" rx="6"/>
+          <text class="label" x="408" y="48" text-anchor="middle">MONTH 14</text>
+          <text class="label label--sub" x="408" y="64" text-anchor="middle">900 items, 120 kB</text>
+          <text class="label label--sub" x="408" y="78" text-anchor="middle">p99 read 180 ms</text>
+
+          <rect class="node node--bad" x="498" y="26" width="144" height="60" rx="6"/>
+          <text class="label" x="570" y="48" text-anchor="middle">MONTH 18</text>
+          <text class="label label--sub" x="570" y="64" text-anchor="middle">one order &gt; 16 MB</text>
+          <text class="label label--sub" x="570" y="78" text-anchor="middle">write rejected</text>
+
+          <path class="edge edge--return" d="M 158 56 L 178 56" marker-end="url(#arw-d10-d)"/>
+          <path class="edge edge--return" d="M 318 56 L 338 56" marker-end="url(#arw-d10-d)"/>
+          <path class="edge edge--bad" d="M 478 56 L 498 56" marker-end="url(#arw-d10-d)"/>
+
+          <rect class="node node--bad" x="18" y="120" width="624" height="46" rx="6"/>
+          <text class="label" x="330" y="140" text-anchor="middle">one document evicting other tenants' data from the cache —</text>
+          <text class="label label--sub" x="330" y="157" text-anchor="middle">p99 degrades for everyone before any single write has failed</text>
+
+          <path class="edge edge--bad" d="M 408 106 L 408 118" marker-end="url(#arw-d10-d)"/>
+          <path class="edge edge--bad" d="M 570 106 L 570 118" marker-end="url(#arw-d10-d)"/>
+
+          <rect class="node" x="18" y="196" width="300" height="46" rx="6"/>
+          <text class="label" x="168" y="216" text-anchor="middle">cost of the fix: a migration</text>
+          <text class="label label--sub" x="168" y="233" text-anchor="middle">of every existing document, not a deploy</text>
+
+          <rect class="node node--accent" x="342" y="196" width="300" height="46" rx="6"/>
+          <text class="label" x="492" y="216" text-anchor="middle">the question that catches it in month 1:</text>
+          <text class="label label--sub" x="492" y="233" text-anchor="middle">&ldquo;what bounds this array?&rdquo;</text>
+        </svg>
+        <figcaption>
+          <strong>The 16 MB BSON limit is a hard wall, but the cost is the failure mode's
+          latency in time.</strong> An unbounded embedded array passes every test, looks fast,
+          and degrades gradually — the document gets wider, every read of it moves the whole
+          array even when the reader wants one field, the working set stops fitting in cache —
+          and then, eventually, a write fails. The 16 MB limit exists because the read path and
+          the storage format are built around documents fitting in memory, and it is not
+          negotiable. Ask four questions of any embedded array, in this order: is there a
+          bound, is it read with the parent every time, is it shared, and what is the growth
+          rate per document? <em>"It depends on the customer" is an answer that means
+          reference it.</em>
+        </figcaption>
+      </figure>
+
+      <p>There is a real asymmetry against the wide-column stores here, and it is worth saying
+      out loud where a team is nervous about going NoSQL: <strong>MongoDB's embedding is a
+      decision you make per field and can revisit per field, whereas a Cassandra or DynamoDB
+      partition key is a commitment for a whole query pattern.</strong> MongoDB's mistakes are
+      recoverable — moving a field from an array to a referenced collection is a program you
+      write — so it is a legitimate reason to feel more relaxed about MongoDB. Its embedding
+      rule is a boundedness rule, and the practical answer to a growing per-entity structure
+      is a bounded, bucketed sub-collection rather than an array.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The aggregation pipeline — performance is decided by stage order</caption>
+          <thead><tr><th>Stage</th><th>What it does</th><th>The trap</th></tr></thead>
+          <tbody>
+            <tr><td><code>$match</code></td><td>Filters documents</td>
+              <td>Pushed to an index only if it is <strong>first</strong> and the shape is indexable. Putting it last is the single most common pipeline mistake</td></tr>
+            <tr><td><code>$project</code> / <code>$addFields</code></td><td>Reshapes, computes</td>
+              <td>Nothing is indexed on a computed field — filtering on one is a scan</td></tr>
+            <tr><td><code>$unwind</code></td><td>Explodes an array into documents</td>
+              <td>Multiplies document count; every later stage pays for it</td></tr>
+            <tr><td><code>$group</code></td><td>Accumulates — <strong>always blocking</strong></td>
+              <td>Holds a hash table of every group in memory or on disk. There is no streaming</td></tr>
+            <tr><td><code>$sort</code></td><td>Sorts — also blocking</td>
+              <td>Sort <em>after</em> a <code>$group</code>; before an expensive match it is a full sort</td></tr>
+            <tr><td><code>$limit</code></td><td>Caps output</td>
+              <td>Put it before an expensive <code>$group</code> when you only need the top N</td></tr>
+            <tr><td><code>$lookup</code></td><td>A join, from a field in this collection to another</td>
+              <td>The <strong>simple form is a loop</strong> — one query on the foreign collection per input document, so 1,000 inputs is 1,000 queries. Only the pipeline form uses an index</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The rule that makes the pipeline usable: <strong>match early, unwind late, group as
+      few times as possible, and <code>$lookup</code> as late as you can while still narrowing
+      what it sees.</strong> A pipeline that starts with a <code>$lookup</code> before a
+      <code>$match</code> is a full collection scan multiplied by a per-document loop, and with
+      an array <code>localField</code> it fans out once per array element on top of that. The
+      practice that pays for itself: every non-trivial pipeline gets an
+      <code>explain("executionStats")</code> against a production-sized fixture, plus a comment
+      naming the index it relies on — a pipeline that depends on an index whose comment does
+      not say which is one index deletion away from a 40-second query.</p>
+
+      <pre class="snippet" data-lang="bash" data-title="Pipeline stage order" data-hl-line="2,5"><code>// $match first and indexable -> pushed down, uses the index
+// $lookup LAST, and in its pipeline form so the join can use an index
+db.orders.aggregate([
+  { $match: { status: "SHIPPED", created_at: { $gte: cutoff } } },
+  { $group: { _id: "$customer", spend: { $sum: "$total_cents" } } },
+  { $sort:  { spend: -1 } },
+  { $limit: 20 },
+  { $lookup: {
+      from: "customers",
+      localField: "_id", foreignField: "_id",
+      pipeline: [ { $match: { tier: { $in: ["gold", "platinum"] } } } ]
+  } }
+])</code></pre>
+
+      <pre class="snippet" data-lang="bash" data-title="Schema validation" data-hl-line="3,4"><code>db.runCommand({
+  collMod: "orders",
+  validator: { $jsonSchema: {
+      required: ["_id", "customer", "items", "total_cents", "status"],
+      properties: {
+        customer:   { bsonType: "string", pattern: "^u#[0-9]+$" },
+        total_cents: { bsonType: "int", minimum: 0 },
+        status:      { enum: ["PENDING","PAID","SHIPPED","CANCELLED"] }
+      } } },
+  validationLevel: "strict",   # apply to all inserts and updates
+  validationAction: "error"    # reject the write, do not warn
+})</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — write concern and read concern for money</span>
+        <p>Write concern is durability: <code>w: 0</code> is fire-and-forget and a
+        "successful" write may not exist anywhere; <code>w: 1</code>, the default on a
+        standalone and a replica-set primary, is acknowledged by one node and is lost if that
+        node dies before replication; <code>w: "majority"</code> is acknowledged by a majority
+        and survives the loss of a minority. Read concern is what a read may return:
+        <code>local</code> (the default) returns the node's own state, which on a secondary
+        may lag; <code>available</code> may read a stale node; <code>majority</code> returns
+        data a majority has acknowledged; <code>linearizable</code> reads from the primary,
+        waits for majority agreement, and is the only true linearizable read — about twice the
+        load of <code>majority</code>, and it <strong>fails during a primary election</strong>.
+        The combination to say in a design review is
+        <code>{ w: "majority" }</code> with <code>readConcern: "majority"</code>, and the
+        reasoning is the failover case, not the happy path: the entry is on a majority before
+        the write returns, so the new primary is guaranteed to have it, which gives
+        read-your-writes and monotonicity across the failover — the guarantee a ledger
+        actually needs. <code>linearizable</code> is not needed once the write concern is
+        right, and it cannot check a cross-field invariant either. Add a <code>wtimeout</code>
+        so a replica-lag spike fails fast rather than queueing, and alert on oplog lag,
+        because a majority write that is slow is a write that is going to time out.</p>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — where the 16 MB wall actually bites</span>
+        <p>It is not the limit that costs you, it is how late the limit arrives: the figure
+        above walks the eighteen months, and the design was fine on the day it was written. The
+        part that is easy to miss is the shape of the B2B case. An order that can legitimately
+        have 5,000 lines is past the wall before the design is finished, and those are exactly
+        the customers whose failures cost the most. Ask four questions of any embedded array,
+        in order: is there a bound, is it read with the parent every time, is it shared, and
+        what is the growth rate per document? <em>"It depends on the customer" is an answer
+        that means reference it</em> — or bucket it.</p>
+      </div>
+    </section>
+
+    <!-- ============ 8 ============ -->
+    <section id="ch8" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">08</span>
+        <h2>Choosing between them</h2>
+      </div>
+
+      <p>The question a senior interviewer asks is not "which database is fastest". It is
+      <strong>how do I know the access patterns, and what happens to this system when I am
+      wrong about them</strong> — and the honest answer is that the choice is a function of
+      three inputs: whether the access patterns are known and fixed, how much of the query is
+      a filter on a non-key column, and how much operational appetite the team has. The third
+      is frequently the deciding factor and it is not a technical one.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>The decision, by workload shape — and what you get when you pick wrong</caption>
+          <thead><tr><th>Store</th><th>Fits this workload</th><th>Access pattern it demands</th><th>When you pick it for the wrong one</th></tr></thead>
+          <tbody>
+            <tr><td>Cassandra</td>
+              <td>Known, fixed, high-volume point and range reads on one key; write rate is the binding constraint and the data is never joined</td>
+              <td>Every query expressed as a <code>WHERE</code> clause <em>before</em> the schema; one table per query pattern; denormalised copies written together and named with their staleness</td>
+              <td>The new query becomes <code>ALLOW FILTERING</code> or a 2i fan-out. It is fast at 10,000 rows and a denial of service at 10 million, and it gets worse every day</td></tr>
+            <tr><td>DynamoDB</td>
+              <td>The same known patterns, where the team does not want to run a cluster and the bill is acceptable; serverless shape</td>
+              <td>A one-page access-pattern list — each pattern as a concrete <code>Query</code> with key expression, rate and item size, checked for point-read-ness</td>
+              <td>The <code>Scan</code> or <code>FilterExpression</code> that is a capacity bill either way, and the hot key that adaptive capacity cannot split. Cheapest to operate, most expensive to un-choose</td></tr>
+            <tr><td>MongoDB</td>
+              <td>Document-shaped entities with a bounded co-located structure, and a meaningful fraction of queries filtering on a non-key attribute or moderately variable reporting logic</td>
+              <td>Embedding decisions made per field with a stated bound, and <code>collMod</code> validation switched on</td>
+              <td>An unbounded array that passes every test for a year and then one customer crosses 16 MB. <strong>Recoverable</strong>, because embedding is revisited per field — unlike a partition key</td></tr>
+            <tr><td>Postgres / MySQL</td>
+              <td>Relational data, ad-hoc SQL, real joins, variable requirements — which is most data, and a 40-query application is a Postgres application</td>
+              <td>Nothing. It is the default, and the cost of leaving is a migration</td>
+              <td>The cost lands the other way: a single-writer ceiling on an append-only never-joined workload, and every cross-entity query becomes a hand-maintained fan-out</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — what makes the choice expensive to undo</span>
+        <p>Think in reversibility, not features. The <strong>partition key</strong> is near
+        permanent: it determines the physical layout, the per-key throughput ceiling and the
+        only efficient query shape, and changing it is a data migration with a dual-write
+        window plus a rewrite of every query that relied on the old shape. The
+        <strong>denormalised duplicate</strong> is close behind, because the application has
+        started depending on it and its staleness has become load-bearing in a user interface
+        the database team does not own — removing one is a product change, not a migration.
+        One-table-versus-many is moderate: it changes the capacity model and the throttling
+        domains. By contrast the <strong>consistency level per statement is a parameter</strong>
+        and is cheap to change, which is exactly why it is the decision that gets made by
+        accident. And the meta-answer is the window: <strong>all of these are cheap before the
+        first production row lands and expensive afterwards.</strong> A NoSQL decision made
+        before there is data is a two-week decision; the same decision after two years of data
+        is a two-quarter migration, and naming that window is often the most valuable thing a
+        staff engineer contributes to the review.</p>
+      </div>
+
+      <p>Two warnings decide more cases than any feature comparison. First, the ordering in a
+      design review is <strong>model first, cache second, never the reverse</strong> — adding a
+      cache is reversible, local and additive, because a miss falls through and a wrong cache
+      is flushed; a cache in front of a cache-shaped data model is much harder to remove than
+      it was to add. And the deeper reason: a cache in front of a full scan is a latency
+      band-aid on a capacity bill that grows linearly with data, which makes it the only
+      mechanism here that gets <em>worse</em> as the data gets bigger. Second, the three
+      artefacts that make any of this survivable cost an afternoon and are missing almost every
+      time: the <strong>access-pattern list</strong>, the <strong>partition review</strong>
+      that walks it against the proposed keys and names the queries that become scans, and the
+      <strong>exit cost</strong> — one paragraph on what it would take to move this data to a
+      different store in two years. A team that has written the exit cost makes better day-one
+      decisions, because the key schema is suddenly visible as the thing that would be
+      expensive to change. Redis is in this picture too, and it is not a system of record: it
+      is the only store here whose failover can lose an acknowledged write (see
+      <a href="09-redis-caching.html">09 — Redis &amp; Caching</a>).</p>
+    </section>
+
+    <!-- ============ numbers ============ -->
+    <section id="numbers" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">&nbsp;</span>
+        <h2>Numbers worth memorising</h2>
+      </div>
+      <div class="numbers">
+        <div class="number"><span class="number__value">10 days</span><span class="number__label"><code>gc_grace_seconds</code> — tombstone retention, and the resurrection-bug guard</span></div>
+        <div class="number"><span class="number__value">10 bits/key</span><span class="number__label">default bloom filter, a 1% false-positive rate; 20 bits = 10 bytes per key</span></div>
+        <div class="number"><span class="number__value">~128 MB</span><span class="number__label">default memtable flush threshold</span></div>
+        <div class="number"><span class="number__value">10%</span><span class="number__label">default <code>read_repair_chance</code> on a <code>ONE</code> read</span></div>
+        <div class="number"><span class="number__value">2 of 3</span><span class="number__label"><code>QUORUM</code> at RF=3 — the formula is <code>floor(RF/2)+1</code>, so RF=2 gives 2</span></div>
+        <div class="number"><span class="number__value">~10&times;</span><span class="number__label">worst-case write amplification under size-tiered compaction</span></div>
+        <div class="number"><span class="number__value">400 KB</span><span class="number__label">maximum DynamoDB item size</span></div>
+        <div class="number"><span class="number__value">10 MB</span><span class="number__label">data per DynamoDB physical partition — the limit that arrives months late</span></div>
+        <div class="number"><span class="number__value">1,000/s</span><span class="number__label">WCU and RCU ceiling per partition; 3,000 RCU/s strongly consistent</span></div>
+        <div class="number"><span class="number__value">1 : 2</span><span class="number__label">WCU per KB written; RCU per 4 KB eventually consistent, doubled for strong</span></div>
+        <div class="number"><span class="number__value">100 / 4 MB</span><span class="number__label">a DynamoDB transaction: items and payload, one region, 90 s, 2&times; cost</span></div>
+        <div class="number"><span class="number__value">25 / 1 MB</span><span class="number__label">items in a <code>BatchWriteItem</code>; a <code>Query</code> response before pagination</span></div>
+        <div class="number"><span class="number__value">2&times;</span><span class="number__label">on-demand versus provisioned per-unit price, and a global table's write cost</span></div>
+        <div class="number"><span class="number__value">16 MB</span><span class="number__label">hard BSON document limit in MongoDB</span></div>
+        <div class="number"><span class="number__value">100</span><span class="number__label">levels of BSON nesting allowed</span></div>
+        <div class="number"><span class="number__value">5&ndash;10 GB</span><span class="number__label">practical Cassandra partition size before it is a storage problem</span></div>
+      </div>
+    </section>
+
+    <footer class="pagefoot">
+      <span>Volume 10 of 11 &mdash; Database Complete Deep-Dive</span>
+      <div class="pager">
+        <a href="09-redis-caching.html">&larr; Redis &amp; Caching</a>
+        <a href="11-s3-elasticsearch-interview-bank.html">S3, ES &amp; Bank &rarr;</a>
+      </div>
+    </footer>
+
+  </main>
+</div>
+
+<script src="../search.js"></script>
+<script src="../highlight.js"></script>
+</body>
+</html>

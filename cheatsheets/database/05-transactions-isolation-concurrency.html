@@ -1,0 +1,1542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transactions, Isolation &amp; Concurrency — Cheatsheet</title>
+<meta name="description" content="Condensed cheatsheet for Database Deep-Dive Volume 5: ACID as four mechanisms, the anomaly matrix, MVCC, locks, deadlocks, and why two-phase commit blocks.">
+<link rel="stylesheet" href="../cheatsheet.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="page">
+
+  <nav class="sidebar" aria-label="Contents">
+    <h2>On this page</h2>
+    <ol>
+      <li><a href="#ch1">1 — ACID, precisely</a></li>
+      <li><a href="#ch2">2 — Anomalies &amp; write skew</a></li>
+      <li><a href="#ch3">3 — Isolation levels</a></li>
+      <li><a href="#ch4">4 — MVCC</a></li>
+      <li><a href="#ch5">5 — Locks &amp; lock waits</a></li>
+      <li><a href="#ch6">6 — Optimistic vs pessimistic</a></li>
+      <li><a href="#ch7">7 — Deadlocks</a></li>
+      <li><a href="#ch8">8 — Distributed transactions</a></li>
+      <li><a href="#numbers">Numbers</a></li>
+    </ol>
+    <h2>Series</h2>
+    <ul>
+      <li><a href="01-fundamentals-relational-model.html">01 — Fundamentals</a></li>
+      <li><a href="02-sql-ddl-dml-constraints.html">02 — DDL &amp; Constraints</a></li>
+      <li><a href="03-sql-queries-joins-window-functions.html">03 — Queries &amp; Joins</a></li>
+      <li><a href="04-indexes-query-planning-execution.html">04 — Indexes &amp; Planning</a></li>
+      <li><a href="05-transactions-isolation-concurrency.html">05 — Transactions</a></li>
+      <li><a href="06-schema-design-partitioning-scaling.html">06 — Schema &amp; Scaling</a></li>
+      <li><a href="07-postgresql.html">07 — PostgreSQL</a></li>
+      <li><a href="08-mysql.html">08 — MySQL &amp; InnoDB</a></li>
+      <li><a href="09-redis-caching.html">09 — Redis &amp; Caching</a></li>
+      <li><a href="10-nosql-distributed-stores.html">10 — NoSQL &amp; Distributed</a></li>
+      <li><a href="11-s3-elasticsearch-interview-bank.html">11 — S3, ES &amp; Bank</a></li>
+    </ul>
+    <h2>Repository</h2>
+    <ul>
+      <li><a href="../index.html">All cheatsheets</a></li>
+      <li><a href="../../database/database-deep-dive-volume-05-transactions-isolation-concurrency.md">Source volume</a></li>
+    </ul>
+  </nav>
+
+  <main class="main" id="main">
+
+    <header class="masthead">
+      <p class="masthead__eyebrow">Database — The Database Complete Deep-Dive</p>
+      <h1>Volume 5 — Transactions, Isolation &amp; Concurrency</h1>
+      <p class="masthead__sub">
+        Two of the four letters in ACID are not guarantees at all: consistency is only what
+        your constraints reach, and durability is a configuration switch. The other two are
+        mechanisms you can point at. This page is those four mechanisms, the four anomalies
+        each level actually prevents, and the failure mode of every way of buying them.
+      </p>
+      <ul class="masthead__meta">
+        <li>9 sections</li>
+        <li>From <a href="../../database/database-deep-dive-volume-05-transactions-isolation-concurrency.md">the source volume</a></li>
+      </ul>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <input type="search" data-filter-input placeholder="Filter sections — press /" aria-label="Filter sections">
+        <span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span>
+      </div>
+      <div class="pager">
+        <a href="04-indexes-query-planning-execution.html">&larr; Prev</a>
+        <a href="06-schema-design-partitioning-scaling.html">Next &rarr;</a>
+      </div>
+    </div>
+
+    <div class="keyfacts">
+      <h2>If you only remember five things</h2>
+      <ol>
+        <li><strong>No standard isolation level fixes a lost update.</strong>
+        <code>UPDATE accounts SET balance = balance - 100</code> is safe because the engine
+        re-evaluates the expression <em>under the row lock it has just taken</em> — not
+        because it is one statement. The safety disappears the moment the value is computed
+        anywhere else: in Java, in a detached entity, in a cache.</li>
+        <li><strong>Write skew is invisible at every level below
+        <code>SERIALIZABLE</code>, and <code>REPEATABLE READ</code> makes it more
+        deterministic.</strong> The levels below <code>SERIALIZABLE</code> constrain what
+        each transaction may <em>see</em>; write skew is a violation that is invisible in
+        any individual transaction's view. Two doctors read the same roster, each concludes
+        the other is covering, both write — and the constraint is broken by two individually
+        valid transactions.</li>
+        <li><strong>PostgreSQL's <code>SERIALIZABLE</code> is SSI: it lets the bad
+        interleaving happen and aborts one transaction at <code>COMMIT</code> with
+        <code>SQLSTATE 40001</code>.</strong> That is a correct outcome, not a failure, so
+        the application must retry with a bounded, jittered loop. Strict
+        <code>SERIALIZABLE</code> and SSI deliver the same guarantee by opposite
+        mechanisms — one pays in contention, the other in rollbacks.</li>
+        <li><strong>Durability is a configuration switch, not a property of
+        committing.</strong> <code>innodb_flush_log_at_trx_commit = 2</code> loses roughly
+        the last second of commits on power loss; <code>0</code> can corrupt InnoDB rather
+        than merely lose data. A single <code>fsync</code> is 0.5&ndash;10&nbsp;ms, so
+        commit throughput is bounded by how many transactions are in flight per flush — not
+        by the disk.</li>
+        <li><strong>A deadlock is a cycle in a wait-for graph, and no timeout can break
+        one.</strong> Lowering the lock timeout does not resolve a deadlock; the engine must
+        abort a victim. The fix is a global total lock order — sort the ids, lock them
+        ascending — which eliminates the class of bug. A bounded jittered retry is the
+        seatbelt; the ordering is the fix.</li>
+      </ol>
+    </div>
+
+    <p class="empty" data-filter-empty hidden>No section matches that filter.</p>
+
+    <!-- ============ 1 ============ -->
+    <section id="ch1" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">01</span>
+        <h2>ACID, precisely</h2>
+      </div>
+
+      <p>The standard answer — <em>ACID stands for Atomicity, Consistency, Isolation,
+      Durability, and the database guarantees all four</em> — restates the acronym and
+      skips the four details that generate incidents. Each letter resolves into a
+      mechanism, and three of the four have a knob you can turn.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Each letter, the mechanism behind it, and what it costs</caption>
+          <thead>
+            <tr><th>Letter</th><th>The mechanism</th><th>The knob that changes it</th><th>What it costs</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>A</td>
+              <td>Write-ahead log plus rollback records. The uncommitted transaction is <em>in the log, durably</em>; recovery discards it by the <strong>absence</strong> of a commit record</td>
+              <td>Log file settings, group commit</td>
+              <td>One <code>fsync</code> per commit</td>
+            </tr>
+            <tr>
+              <td>C</td>
+              <td><em>Nothing.</em> Your job plus the constraints the engine can evaluate</td>
+              <td><code>CHECK</code>, <code>UNIQUE</code>, <code>FOREIGN KEY</code></td>
+              <td>A check per write</td>
+            </tr>
+            <tr>
+              <td>I</td>
+              <td>MVCC snapshots or locks — a menu of levels, not one behaviour</td>
+              <td>Isolation level</td>
+              <td>A longer snapshot, or more contention</td>
+            </tr>
+            <tr>
+              <td>D</td>
+              <td><code>fsync</code> of the log at commit</td>
+              <td><code>synchronous_commit</code>, <code>innodb_flush_log_at_trx_commit</code></td>
+              <td>A device flush per commit</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Atomicity is a log property</h3>
+
+      <p>The intuition is that the engine holds changes until commit and applies them at
+      once. What actually happens is that <strong>every modification is recorded in the
+      write-ahead log as it happens</strong>. The data pages are modified in the buffer
+      pool, possibly visible to nobody, and the log record is what makes those
+      modifications real.</p>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>A transaction is not a unit of durability unless it commits. Its intermediate
+        states are <em>in the log</em> — on disk, surviving a crash, and recovery
+        deliberately throwing them away. <strong>Durable-in-the-log and committed are two
+        different properties</strong>, and conflating them is what produces the question
+        about a rolled-back transaction being visible after a restart.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — “what happens if the database crashes mid-transaction?”</span>
+        <p>“The transaction is rolled back” is correct but invites the follow-up: <em>how
+        does it know, and why is that safe?</em> The strong answer: the log contains a
+        <code>BEGIN</code> record and a set of update records but <strong>no
+        <code>COMMIT</code> record</strong>, because <code>COMMIT</code> is a separate,
+        later, durable write. Recovery replays the log to rebuild the page state, finds the
+        transaction with no commit marker, and discards its effects. <strong>The absence of
+        a record is what carries the information.</strong></p>
+      </div>
+
+      <p>This is also why rollback is cheap. The engine does not “unapply” anything — it
+      stops treating the transaction as one that happened, and the version it would have
+      created becomes garbage that vacuum or purge reclaims later.</p>
+
+      <h3>Durability is a flush, and the flush is configurable</h3>
+
+      <p>At commit the engine writes the log record to the OS buffer, calls
+      <code>fsync</code>, and only then acknowledges the client. Every step after the
+      <code>fsync</code> that anyone tuned away is a step the client was told about but the
+      disk never received.</p>
+
+      <pre class="snippet" data-lang="sql" data-title="Durability ladder" data-hl-line="3,9"><code>SET synchronous_commit = on;            -- default. fsync WAL at every commit.
+SET synchronous_commit = off;           -- hand WAL to the OS and ACK immediately.
+SET synchronous_commit = remote_write;  -- wait for a standby to RECEIVE the record.
+SET synchronous_commit = remote_apply;  -- wait for a standby to make it durable.
+
+-- MySQL / InnoDB, the same decision in a different dialect:
+innodb_flush_log_at_trx_commit = 1   -- default. fsync the redo log every commit.
+innodb_flush_log_at_trx_commit = 2   -- write to OS cache at commit, fsync once a second.
+innodb_flush_log_at_trx_commit = 0   -- write AND fsync to OS cache, fsync once a second.</code></pre>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — the incident that turns a flush setting into a data-loss postmortem</span>
+        <p>Setting <code>innodb_flush_log_at_trx_commit = 2</code> on an orders table is an
+        entirely normal-looking throughput tuning, and it is invisible in every test. The
+        failure appears on a power loss, not in a query: roughly the last second of commits
+        is gone, and because those clients received
+        <code>COMMIT</code> acknowledgements, nothing in the application noticed.
+        <code>0</code> is worse than loss — it can <strong>corrupt InnoDB</strong> rather
+        than merely lose rows. And <code>wal_level = minimal</code> combined with
+        <code>synchronous_commit = off</code> means a crash can lose committed
+        transactions outright.</p>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p>A single <code>fsync</code> is roughly <strong>0.5&ndash;10&nbsp;ms</strong>
+        depending on the device. Committed in one at a time, that is a ceiling of about
+        <strong>100&ndash;2,000 commits per second</strong>, which is why a connection pool
+        of three cannot saturate a modern NVMe drive no matter how fast it is. The number
+        that matters is not “how fast can we <code>fsync</code>” but
+        <strong>“how many transactions are in flight when the <code>fsync</code>
+        returns”</strong> — which is what group commit exploits.</p>
+      </div>
+
+      <h3>Consistency is not a guarantee</h3>
+
+      <p>The engine enforces the constraints you declared and nothing else. On a
+      double-entry transfer the engine's contribution is that a crash leaves both updates
+      durable or neither, and a concurrent transaction never sees money leave account 1
+      before it reaches account 2. <strong>“The total is conserved” was never checked by
+      anything</strong> — it held because two statements were written symmetrically by a
+      careful human.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — what does the “C” actually guarantee?</span>
+        <p>The trap answer is “the data is always in a consistent state”, which asserts a
+        guarantee the engine does not make. The honest answer: <strong>the engine does not
+        guarantee application-level consistency at all; it guarantees the constraints you
+        declared are never violated.</strong> If an invariant is not a single-row
+        predicate, a unique index, or a foreign key, then nothing at the database layer is
+        enforcing it — and <code>SERIALIZABLE</code> will not change that.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>A transaction protects <em>atomicity, isolation and durability</em>
+        mechanically. It protects <em>consistency</em> only as far as your constraints
+        reach. An invariant that is not a <code>CHECK</code>, a <code>UNIQUE</code> index,
+        or a <code>FOREIGN KEY</code> is a comment in a design doc and a
+        <code>throw</code> in Java.</p>
+      </div>
+    </section>
+
+    <!-- ============ 2 ============ -->
+    <section id="ch2" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">02</span>
+        <h2>Anomalies &amp; write skew</h2>
+      </div>
+
+      <p>Isolation levels are named after what they prevent, so the fastest way to be useful
+      in an interview is to know the four anomalies by name and know <em>why</em> each one
+      survives a level. “Dirty read” is the one everybody has. Write skew is the one that
+      separates a senior answer from a staff answer, because it needs the observation that
+      <strong>isolation levels describe what a transaction sees, not what a set of
+      transactions may collectively decide.</strong></p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The four anomalies, what each reader observes, and the level that removes it</caption>
+          <thead>
+            <tr><th>Anomaly</th><th>What the reader sees</th><th>Why it survives below the fix</th><th>Removed at</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Lost update</td>
+              <td>Two read-modify-writes of the same row; one write is silently overwritten</td>
+              <td>Nothing about visibility — each transaction saw a valid state and wrote a valid value</td>
+              <td><strong>No standard level.</strong> Fix the SQL: one atomic statement, a version column, or <code>FOR UPDATE</code></td>
+            </tr>
+            <tr>
+              <td>Dirty read</td>
+              <td>Another transaction's uncommitted data, which may yet be rolled back</td>
+              <td>Only <code>READ UNCOMMITTED</code> has no visibility filter at all</td>
+              <td><code>READ COMMITTED</code> and above</td>
+            </tr>
+            <tr>
+              <td>Non-repeatable read</td>
+              <td>The same row read twice in one transaction returns two values</td>
+              <td>Under <code>READ COMMITTED</code> each statement takes a fresh snapshot</td>
+              <td><code>REPEATABLE READ</code> and above</td>
+            </tr>
+            <tr>
+              <td>Phantom read</td>
+              <td>A second <code>SELECT</code> returns <em>new rows</em> matching a predicate the first one evaluated</td>
+              <td>Snapshot stability pins <em>rows</em>, not ranges. Row locks cannot lock a row that does not exist yet</td>
+              <td>Range or predicate locking, or <code>SERIALIZABLE</code></td>
+            </tr>
+            <tr>
+              <td>Write skew</td>
+              <td>Nothing. Each transaction's own view is stable and correct; the <em>combination</em> is invalid</td>
+              <td>Each transaction writes a <em>different</em> row, so there is no write-write conflict to detect</td>
+              <td><code>SERIALIZABLE</code> — or restructure so the invariant is single-row</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — “is <code>UPDATE accounts SET balance = balance - 100</code> atomic?”</span>
+        <p>The trap is answering “yes, because it is one statement”. The load-bearing word
+        is not <em>statement</em> — it is <strong>under the row lock</strong>. The engine
+        locates the row, takes a write lock, waits if another transaction holds one, then
+        evaluates <code>balance - 100</code> <em>against the version it just locked, not the
+        version that existed when the statement was sent</em>. That re-evaluation is the
+        entire mechanism. It stops being safe the moment the value is computed anywhere
+        else — in Java, in a detached entity, behind a cache.</p>
+      </div>
+
+      <h3>Write skew, worked through</h3>
+
+      <p>The business rule is “every <code>(day, shift)</code> must have at least two
+      doctors on call”. It is an aggregate over a set, so it is not a
+      <code>CHECK</code> on a doctors table; it is enforced today by a service-layer
+      assertion, which is exactly the situation write skew exists to expose. The shift
+      starts with one doctor, Dr Chen — already short, so two people are cancelling.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The two-doctor appointment — two transactions, one shared constraint, no error raised</caption>
+          <thead>
+            <tr><th>Step</th><th>T1 &mdash; Dr Chen cancels</th><th>T2 &mdash; Dr Okafor cancels</th><th>Doctors on call</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td><code>BEGIN</code></td><td><code>BEGIN</code></td><td><code>{Chen, Okafor}</code></td></tr>
+            <tr><td>2</td><td><code>SELECT count(*) ... WHERE day = '2026-04-01' AND shift = 'morning'</code> &rarr; <strong>1</strong></td><td>&mdash;</td><td><code>{Chen, Okafor}</code></td></tr>
+            <tr><td>3</td><td>&mdash;</td><td>The same query &rarr; <strong>1</strong></td><td><code>{Chen, Okafor}</code></td></tr>
+            <tr><td>4</td><td>1 is already below 2, so this shift is short. My removal is safe.</td><td>1 is already below 2, so this shift is short. My removal is safe.</td><td><code>{Chen, Okafor}</code></td></tr>
+            <tr><td>5</td><td><code>DELETE ... AND doctor_id = 1</code></td><td><code>DELETE ... AND doctor_id = 2</code></td><td><code>{Chen, Okafor}</code></td></tr>
+            <tr><td>6</td><td><code>COMMIT</code></td><td><code>COMMIT</code></td><td><strong><code>{}</code> — 0 doctors, rule says &ge; 2</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 700 430" role="img" aria-label="Two cancelling transactions each read a roster of one doctor, each decide independently that cancelling is safe, each delete a different row, and the final state has zero doctors on call against a rule requiring two.">
+          <defs>
+            <marker id="arw-d5-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node" x="20" y="24" width="290" height="34" rx="6"/>
+          <text class="label" x="36" y="46">T1 &mdash; Dr Chen cancels</text>
+          <rect class="node" x="390" y="24" width="290" height="34" rx="6"/>
+          <text class="label" x="406" y="46">T2 &mdash; Dr Okafor cancels</text>
+
+          <rect class="node node--warn" x="20" y="90" width="290" height="76" rx="6"/>
+          <text class="label" x="36" y="112">READ</text>
+          <text class="label--sub" x="36" y="132">count(*) on 2026-04-01 morning &rarr; 1</text>
+          <text class="label--sub" x="36" y="150">rule needs 2, so the shift is short</text>
+          <rect class="node node--warn" x="390" y="90" width="290" height="76" rx="6"/>
+          <text class="label" x="406" y="112">READ</text>
+          <text class="label--sub" x="406" y="132">count(*) on 2026-04-01 morning &rarr; 1</text>
+          <text class="label--sub" x="406" y="150">the same answer, from the same state</text>
+
+          <path class="edge edge--warn edge--return" d="M 310 128 L 390 128" marker-end="url(#arw-d5-a)"/>
+          <text class="edge-label" x="350" y="118" text-anchor="middle">same read</text>
+
+          <rect class="node" x="20" y="196" width="290" height="60" rx="6"/>
+          <text class="label" x="36" y="218">DECIDE</text>
+          <text class="label--sub" x="36" y="238">already short, so my cancellation</text>
+          <text class="label--sub" x="36" y="254">cannot make it worse. Locally correct.</text>
+          <rect class="node" x="390" y="196" width="290" height="60" rx="6"/>
+          <text class="label" x="406" y="218">DECIDE</text>
+          <text class="label--sub" x="406" y="238">identically. Neither decision consults</text>
+          <text class="label--sub" x="406" y="254">the other transaction.</text>
+
+          <rect class="node" x="20" y="286" width="290" height="60" rx="6"/>
+          <text class="label" x="36" y="308">WRITE</text>
+          <text class="label--sub" x="36" y="328">DELETE ... WHERE doctor_id = 1</text>
+          <text class="label--sub" x="36" y="344">a different row from T2's</text>
+          <rect class="node" x="390" y="286" width="290" height="60" rx="6"/>
+          <text class="label" x="406" y="308">WRITE</text>
+          <text class="label--sub" x="406" y="328">DELETE ... WHERE doctor_id = 2</text>
+          <text class="label--sub" x="406" y="344">so there is no write-write conflict</text>
+
+          <path class="edge" d="M 165 166 L 165 196" marker-end="url(#arw-d5-a)"/>
+          <path class="edge" d="M 535 166 L 535 196" marker-end="url(#arw-d5-a)"/>
+          <path class="edge" d="M 165 256 L 165 286" marker-end="url(#arw-d5-a)"/>
+          <path class="edge" d="M 535 256 L 535 286" marker-end="url(#arw-d5-a)"/>
+
+          <path class="edge edge--bad" d="M 165 346 L 300 386" marker-end="url(#arw-d5-a)"/>
+          <path class="edge edge--bad" d="M 535 346 L 400 386" marker-end="url(#arw-d5-a)"/>
+
+          <rect class="node node--bad" x="20" y="386" width="660" height="34" rx="6"/>
+          <text class="label" x="36" y="408">FINAL STATE: 0 doctors on call. Rule says &ge; 2. No error was raised, because no constraint was ever declared.</text>
+        </svg>
+        <figcaption><strong>Write skew is four steps, and all four are necessary:</strong>
+        read, read the same thing, decide independently, write without conflicting. Remove
+        any one and it is not write skew. The high-yield move in an interview is to name
+        <em>which</em> step a proposed fix removes.</figcaption>
+      </figure>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — “at what isolation level does write skew go away?”</span>
+        <p>The trap answer is <code>REPEATABLE READ</code>, and it ends the interview
+        early, because it confuses <em>repeatable reads</em> with <em>repeatable
+        decisions</em>. <code>REPEATABLE READ</code> guarantees a transaction sees the same
+        version of every row <em>it</em> reads, twice. It says nothing about T2 — and here
+        it makes the bug <strong>more</strong> deterministic, because pinning both
+        transactions to one snapshot guarantees both see “1 doctor” and both conclude they
+        are safe.</p>
+      </div>
+
+      <p>The correct answer has a second half that is usually missing: <strong>the better
+      answer is often not an isolation level at all.</strong> A counter row with
+      <code>CHECK (doctor_count &gt;= 2)</code> makes the invariant single-row, so both
+      cancellations contend on it and one fails its <code>CHECK</code>. A
+      <code>SELECT ... FOR UPDATE</code> on a shared anchor row before the read serialises
+      the two explicitly. Only when the schema genuinely cannot express the rule does
+      <code>SERIALIZABLE</code> become the right tool — and it is a throughput tax plus a
+      retry loop, not a free fix.</p>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>Write skew needs all four steps. A version column removes step 4's freedom; a
+        <code>FOR UPDATE</code> on a shared anchor removes step 1's freedom; a
+        <code>CHECK</code>-enforced counter row collapses steps 1&ndash;3 into one contended
+        write; <code>SERIALIZABLE</code> removes the ability of the <em>set</em> of
+        transactions to run in an order that violates the rule.</p>
+      </div>
+    </section>
+
+    <!-- ============ 3 ============ -->
+    <section id="ch3" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">03</span>
+        <h2>Isolation levels</h2>
+      </div>
+
+      <p>The four levels are <strong>four bundles of guarantees, not a ladder</strong>. They
+      do not nest, because each one is a different trade of what is prevented against what
+      is paid for. The table below is the one to be able to draw from memory, including the
+      footnotes — a candidate who gets the InnoDB row right is demonstrating mechanics
+      rather than slogans.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The anomaly matrix — every anomaly, every level, permitted or not</caption>
+          <thead>
+            <tr><th>Level</th><th>Dirty read</th><th>Non-repeatable read</th><th>Phantom read</th><th>Write skew</th><th>Mechanism</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>READ UNCOMMITTED</code></td>
+              <td>possible</td><td>possible</td><td>possible</td><td>possible</td>
+              <td>No visibility filter</td>
+            </tr>
+            <tr>
+              <td><code>READ COMMITTED</code></td>
+              <td>prevented</td><td>possible</td><td>possible</td><td>possible</td>
+              <td>Snapshot per <em>statement</em></td>
+            </tr>
+            <tr>
+              <td><code>REPEATABLE READ</code> (snapshot)</td>
+              <td>prevented</td><td>prevented</td><td>possible</td><td><strong>possible</strong></td>
+              <td>Snapshot per <em>transaction</em></td>
+            </tr>
+            <tr>
+              <td><code>REPEATABLE READ</code> (InnoDB)</td>
+              <td>prevented</td><td>prevented</td>
+              <td>prevented for <code>UPDATE</code>/<code>DELETE</code>; <strong>not</strong> for plain <code>SELECT</code></td>
+              <td><strong>possible</strong></td>
+              <td>Snapshot reads + next-key (record and gap-before) locks on writes</td>
+            </tr>
+            <tr>
+              <td><code>SERIALIZABLE</code> (strict)</td>
+              <td>prevented</td><td>prevented</td><td>prevented</td><td>prevented</td>
+              <td>Locks on everything</td>
+            </tr>
+            <tr>
+              <td><code>SERIALIZABLE</code> (SSI)</td>
+              <td>prevented</td><td>prevented</td><td>prevented</td><td>prevented <em>by aborting one</em></td>
+              <td>Optimistic; commit-time check, <code>40001</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>Write skew is possible at every level below <code>SERIALIZABLE</code>, in every
+        engine, without exception. This is not an implementation gap — it follows from the
+        definition: the lower levels constrain what each transaction may <em>see</em>, and
+        write skew is a violation invisible in any individual transaction's view. The two
+        <code>SERIALIZABLE</code> rows are the same <em>guarantee</em> by completely
+        different <em>mechanisms</em>: strict makes bad interleavings impossible, SSI allows
+        them and makes them fail at commit. One costs contention, the other costs
+        retries.</p>
+      </div>
+
+      <h3>PostgreSQL: four levels, two really used</h3>
+
+      <pre class="snippet" data-lang="sql" data-title="PostgreSQL level matrix" data-hl-line="3,4"><code>SHOW default_transaction_isolation;   -- read committed
+
+BEGIN TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;  -- accepted, == READ COMMITTED
+BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;    -- the default
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;   -- == SNAPSHOT. There is no
+                                                       -- separate SNAPSHOT level name.
+BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;      -- SSI: aborts at COMMIT</code></pre>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Same level name, different mechanism — the per-engine default trap</caption>
+          <thead>
+            <tr><th>Engine</th><th>Default</th><th>What its <code>REPEATABLE READ</code> actually is</th><th>Surprise</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>PostgreSQL</td>
+              <td><code>READ COMMITTED</code></td>
+              <td>Pure snapshot isolation. No range locking at all; inserts are never blocked by readers. Predicate ranges are locked only at <code>SERIALIZABLE</code></td>
+              <td><code>READ UNCOMMITTED</code> is silently mapped to <code>READ COMMITTED</code> — it is a no-op that only misdescribes what you have</td>
+            </tr>
+            <tr>
+              <td>MySQL / InnoDB</td>
+              <td><code>REPEATABLE READ</code></td>
+              <td>A <strong>hybrid</strong>: snapshot reads from the undo log for plain <code>SELECT</code>, next-key locks on writes</td>
+              <td>It stops <code>UPDATE</code>/<code>DELETE</code> phantoms but not plain-<code>SELECT</code> phantoms, and a read view can end up blocking an insert</td>
+            </tr>
+            <tr>
+              <td>MySQL / InnoDB</td>
+              <td><code>SERIALIZABLE</code> is strict</td>
+              <td>Table-level locks; every plain <code>SELECT</code> becomes a locking read</td>
+              <td>Under <code>SERIALIZABLE</code> InnoDB takes table locks, so the cost is concurrency, not retries</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — “PostgreSQL's <code>REPEATABLE READ</code> is weaker, so it is the same as MySQL's”</span>
+        <p>It is the reverse, and this is the single most common cross-engine error. In
+        PostgreSQL <code>REPEATABLE READ</code> <em>is</em> snapshot isolation and there is
+        no separate <code>SNAPSHOT</code> name. In InnoDB it is a hybrid of snapshot reads
+        and gap-locking writes — which is why InnoDB's <code>REPEATABLE READ</code> blocks
+        an <code>UPDATE</code> phantom that PostgreSQL's does not, and why a plain
+        <code>SELECT</code> phantom slips through in both. Code tuned against one engine
+        and deployed against the other gets different <em>blocking</em> behaviour with
+        identical guarantees, which is the worst kind of portability bug.</p>
+      </div>
+
+      <h3>Choosing a level</h3>
+
+      <p>The honest framing in a design review is not “which level” but <em>which anomalies
+      does this transaction's correctness argument depend on, and what is the cheapest
+      mechanism that denies them?</em></p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>From transaction shape to level — and the failure mode of getting it wrong</caption>
+          <thead>
+            <tr><th>What the transaction does</th><th>Start from</th><th>Why</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Idempotent single-row read for display</td><td><code>READ COMMITTED</code></td><td>No cross-statement invariant, so no stability needed</td></tr>
+            <tr><td>Read several rows and <em>sum</em> them into a report</td><td><code>SERIALIZABLE</code> + retry</td><td>Read skew — stable rows are not a stable set</td></tr>
+            <tr><td>Read a set, decide, then write to that same set</td><td><code>SERIALIZABLE</code>, or restructure</td><td>Write skew, invisible below <code>SERIALIZABLE</code></td></tr>
+            <tr><td>Increment a counter with <code>SET n = n + 1</code></td><td><code>READ COMMITTED</code></td><td>The write is atomic; the read is irrelevant</td></tr>
+            <tr><td>Read-modify-write of one row</td><td><code>READ COMMITTED</code> + <code>SELECT ... FOR UPDATE</code>, or a version column</td><td>Section 6</td></tr>
+            <tr><td>Queue consumer claiming a job</td><td><code>READ COMMITTED</code> + <code>FOR UPDATE SKIP LOCKED</code></td><td>It needs to <em>not</em> block — the opposite requirement</td></tr>
+            <tr><td>Cross-row invariant (“&ge; 2 per shift”)</td><td>A single-row <code>CHECK</code> if at all possible</td><td>The isolation level is the fallback, not the first move</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — why isn't the default level <code>SERIALIZABLE</code>?</span>
+        <p>The condition that flips the answer is <strong>whether the workload is
+        contended</strong>. Under <code>SERIALIZABLE</code> you buy a guarantee whose cost
+        is paid by whichever transaction loses the race, as either a lock wait (strict) or
+        a full rollback after all the work is done (SSI). On a table with one writer and
+        thousands of readers it costs almost nothing; on fifty writers on the same rows it
+        converts correctness into a throughput collapse, with the retry loop adding load to
+        the exact rows that are already the bottleneck. A database-wide
+        <code>SERIALIZABLE</code> is almost always a sign nobody worked out which
+        <em>transaction</em> needed it.</p>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p>SSI aborts scale with the number of concurrent read-write dependency edges, not
+        with transaction count alone. On a hot row, every transaction is a candidate to
+        abort every other one and the abort rate climbs toward the arrival rate — the
+        retries add load to the contention that caused them, which raises the abort rate,
+        which produces more retries. The design response is to remove the contention
+        structurally (shard the hot rows, or serialise them deliberately), not to keep the
+        retry loop and hope.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — migrating a codebase up a level</span>
+        <p>A codebase with no retry logic cannot be safely moved to
+        <code>REPEATABLE READ</code> or <code>SERIALIZABLE</code> overnight, because
+        raising the level is a <strong>global, database-wide</strong> setting: the
+        transactions that cannot tolerate the new aborts break for everyone. The migration
+        therefore requires a retry path for <code>40001</code> <em>before</em> the level
+        changes, not after. Flipping the setting first converts a latent design gap into a
+        production error rate.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p><code>SQLSTATE 40001</code> is a <em>correct</em> error; treating it as a failure
+        is a design mistake that hides real bugs. The operational distinction is between a
+        serialization failure on a transaction that did milliseconds of work — normal, cheap
+        to retry — and one on a transaction that held a connection for forty minutes, which
+        is an architectural problem the retry is <em>hiding</em>. A global retry policy with
+        no attempt cap and no alert on the retry rate converts a correctness bug into
+        connection-pool exhaustion, because every retried transaction holds its connection
+        for the whole backoff.</p>
+      </div>
+    </section>
+
+    <!-- ============ 4 ============ -->
+    <section id="ch4" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">04</span>
+        <h2>MVCC</h2>
+      </div>
+
+      <p>Multi-version concurrency control is the one-sentence version — <strong>readers
+      never block writers and writers never block readers, because a writer never changes
+      what a reader will see</strong> — and it is implemented by never destroying anything.
+      An <code>UPDATE</code> in an MVCC engine is three operations: copy a new row version,
+      mark the old one as superseded, and chain them with a back-pointer.</p>
+
+      <p>The most instructive consequence is rollback. <strong>Nothing has to be
+      undone.</strong> The new version is discarded and the old one — still physically
+      present, still linked, never destroyed — becomes current again. That is why MVCC
+      makes rollback nearly free, and why the engine can afford to be generous with
+      copies.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 700 360" role="img" aria-label="An update copies a new row version, marks the previous one as superseded, and chains them; a reader walking the chain against a fixed snapshot stops at the newest version that was current when the snapshot was taken, taking no locks.">
+          <defs>
+            <marker id="arw-d5-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <text class="label" x="20" y="26">THE VERSION CHAIN AFTER price 100 &rarr; 90</text>
+
+          <rect class="node node--accent" x="20" y="44" width="300" height="70" rx="6"/>
+          <text class="label" x="36" y="66">v3 &nbsp;price = 90</text>
+          <text class="label--sub" x="36" y="86">xmin = T2 (committed), xmax = 0</text>
+          <text class="label--sub" x="36" y="104">CURRENT for snapshots after T2 committed</text>
+
+          <rect class="node" x="20" y="134" width="300" height="70" rx="6"/>
+          <text class="label" x="36" y="156">v2 &nbsp;price = 100</text>
+          <text class="label--sub" x="36" y="176">xmin = T0 (committed), xmax = T2</text>
+          <text class="label--sub" x="36" y="194">superseded, but still legitimate to see</text>
+
+          <rect class="node node--warn" x="20" y="224" width="300" height="70" rx="6"/>
+          <text class="label" x="36" y="246">v1 &nbsp;price = 100</text>
+          <text class="label--sub" x="36" y="266">xmin = T0, xmax = T1</text>
+          <text class="label--sub" x="36" y="284">dead, but unreclaimable while a snapshot needs it</text>
+
+          <path class="edge" d="M 170 114 L 170 134" marker-end="url(#arw-d5-b)"/>
+          <path class="edge" d="M 170 204 L 170 224" marker-end="url(#arw-d5-b)"/>
+          <text class="edge-label" x="182" y="128">prev =</text>
+          <text class="edge-label" x="182" y="218">prev =</text>
+
+          <rect class="node" x="380" y="44" width="300" height="118" rx="6"/>
+          <text class="label" x="396" y="66">WRITER</text>
+          <text class="label--sub" x="396" y="88">copies to v3, sets v2.xmax = its own</text>
+          <text class="label--sub" x="396" y="106">transaction id, links v3.prev = v2</text>
+          <text class="label--sub" x="396" y="128">if it rolls back, v2 is current again</text>
+          <text class="label--sub" x="396" y="146">and nothing was reconstructed</text>
+
+          <rect class="node" x="380" y="182" width="300" height="112" rx="6"/>
+          <text class="label" x="396" y="204">READER</text>
+          <text class="label--sub" x="396" y="226">walks the chain newest-first and stops at</text>
+          <text class="label--sub" x="396" y="244">the newest version whose xmin committed</text>
+          <text class="label--sub" x="396" y="262">before the snapshot and whose xmax did not</text>
+          <text class="label--sub" x="396" y="280">NO LOCK, ANYWHERE IN THAT ALGORITHM</text>
+
+          <path class="edge" d="M 380 100 L 322 84" marker-end="url(#arw-d5-b)"/>
+          <path class="edge edge--return" d="M 380 236 L 322 168" marker-end="url(#arw-d5-b)"/>
+          <text class="edge-label" x="330" y="96">writes</text>
+          <text class="edge-label edge-label--strong" x="332" y="200">reads v2</text>
+
+          <rect class="node node--bad" x="20" y="316" width="660" height="34" rx="6"/>
+          <text class="label" x="36" y="338">Three physical rows, one logical row. Bloat is a READ cost, and it is the price of never blocking.</text>
+        </svg>
+        <figcaption><strong>An <code>UPDATE</code> is “insert a new version, mark the old
+        one, chain them”.</strong> That single fact is why rollback is cheap, why reads do
+        not block, and why the table grows — and the growth is what the rest of this
+        section is about.</figcaption>
+      </figure>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>The reader's decision is based on <strong>when the reader's snapshot was
+        taken</strong>, not on when the row was written. That is the whole mechanism behind
+        <code>REPEATABLE READ</code> stability: the snapshot is fixed, so the comparison
+        against every version is fixed, so the same version is selected every time. “It
+        uses a snapshot” is too vague to reason with; this is the answer that demonstrates
+        you have read the source.</p>
+      </div>
+
+      <h3>What MVCC costs</h3>
+
+      <p>The costs are not abstract — they are most of the MVCC-related operational work in a
+      real deployment, and the long-running transaction is behind nearly all of them. Bloat
+      is a <em>read</em> cost, not a space cost, which is why it shows up as “the table got
+      slower” long before anyone checks free disk.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The four costs, and what causes each one</caption>
+          <thead>
+            <tr><th>Cost</th><th>What it is</th><th>Cause</th><th>Where you see it</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Bloat</td>
+              <td>Dead versions accumulate; the physical size grows while the logical size does not. Every sequential scan reads four million physical rows to return one million logical ones</td>
+              <td>Every <code>UPDATE</code> and <code>DELETE</code> leaves at least one version nobody should see again</td>
+              <td>Sudden slow scans, index entries that must follow a chain and discard dead tuples</td>
+            </tr>
+            <tr>
+              <td>The vacuum horizon</td>
+              <td>Vacuum cannot remove a version any live snapshot might need, and cannot advance past the oldest live snapshot</td>
+              <td>One transaction open since 03:00 pins everything written since 03:00 as uncollectable</td>
+              <td>Table grows for <em>everyone</em>, not just the long transaction</td>
+            </tr>
+            <tr>
+              <td>Transaction-id wraparound</td>
+              <td>Transaction ids are 32-bit; the counter wraps at roughly <strong>2.1&nbsp; billion</strong>, and a wrap while old snapshots exist makes them appear to be in the future</td>
+              <td>Long-running transactions preventing the counter being safely advanced</td>
+              <td><code>age(datfrozenxid)</code> climbing — a correctness emergency, not just a performance one</td>
+            </tr>
+            <tr>
+              <td>Undo growth / purge stall (InnoDB)</td>
+              <td>Old versions live in the undo log and <code>purge</code> reclaims them; purge stalls behind an active read view</td>
+              <td>Same root cause: a long-running transaction or a long-running plain <code>SELECT</code></td>
+              <td>“InnoDB is consuming all our disk” — and undo growth in the system tablespace is not reclaimable by <code>TRUNCATE</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p>Bloat scales with <em>update rate &times; retention time</em>, not with table
+        size. The formula: <strong>physical &asymp; logical &times; (1 + updates per row
+        during the maximum transaction lifetime)</strong>. A table with a one-hour maximum
+        transaction lifetime and rows updated twice per hour sits near 3&times; its logical
+        size. The same table with a four-day maximum lifetime reaches 200&times; before
+        vacuum can do anything. <strong>The operational number that matters is the longest
+        transaction you permit</strong> — which is why
+        <code>statement_timeout</code> and
+        <code>idle_in_transaction_session_timeout</code> are concurrency controls, not
+        performance tuning: they are inputs to this formula.</p>
+      </div>
+
+      <pre class="snippet" data-lang="sql" data-title="Finding the culprit" data-hl-line="6"><code>-- The oldest transaction that has not been vacuumed: this is the horizon.
+SELECT pid, state, xact_start, now() - xact_start AS age,
+       left(query, 80) AS last_query
+  FROM pg_stat_activity
+ WHERE xact_start IS NOT NULL
+   AND state &lt;&gt; 'idle'
+ ORDER BY xact_start LIMIT 10;
+
+-- The metric to alert on directly, before it becomes an outage.
+SELECT datname, age(datfrozenxid) AS xid_age
+  FROM pg_database
+ WHERE age(datfrozenxid) &gt; 100000000;   -- approaching wraparound</code></pre>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — MVCC or locking concurrency control?</span>
+        <p>The condition that flips the answer is <strong>the read-to-write ratio and the
+        tolerance for blocking</strong>. MVCC wins when reads outnumber writes, when read
+        latency must be predictable, and when blocking is unacceptable — every OLTP system,
+        which is why essentially every major engine converged on it. Locking wins when the
+        working set fits in memory and the engine can afford to serialise, because it
+        produces no garbage, no vacuum and no horizon. That is why strict
+        <code>SERIALIZABLE</code> still exists inside an otherwise-MVCC engine: the right
+        tool for a nightly batch over a table nobody else is touching, the wrong tool as a
+        default. MVCC did not beat locking — <strong>it beat blocking</strong>, and
+        blocking is what shows up in a latency percentile.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — “MVCC means no locks at all”</span>
+        <p>It means no locks <em>on the read path</em>. The engine still takes
+        <code>ACCESS EXCLUSIVE</code> for DDL, still needs table-level locks for
+        <code>SERIALIZABLE</code>, and InnoDB takes next-key locks on writes even at
+        <code>REPEATABLE READ</code>. “No locks” is also why the cost moves somewhere
+        invisible — from lock waits to bloat, to a vacuum horizon, to a disk that fills with
+        data nobody is allowed to delete.</p>
+      </div>
+    </section>
+
+    <!-- ============ 5 ============ -->
+    <section id="ch5" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">05</span>
+        <h2>Locks &amp; lock waits</h2>
+      </div>
+
+      <p>Locks are the tax you pay when you chose serialisation over snapshots, and
+      someone else always sends the bill. The eight relation-level modes and their
+      compatibility matrix are the whole subject — everything else in this section is a
+      consequence of them.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The eight relation-level lock modes</caption>
+          <thead>
+            <tr><th>Mode</th><th>Abbrev.</th><th>Compatible with</th><th>Taken by</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Access Share</td><td><code>S</code></td><td><code>S</code> and any <code>RX</code> or stronger coexist</td><td><code>SELECT</code> — the weakest common denominator, held to end of transaction</td></tr>
+            <tr><td>Row Share</td><td><code>SR</code></td><td>Everything except <code>X</code></td><td><code>SELECT ... FOR UPDATE</code>, <code>FOR SHARE</code></td></tr>
+            <tr><td>Row Exclusive</td><td><code>RX</code></td><td><code>S</code>, <code>SR</code>, <code>RX</code>, <code>S</code></td><td><code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code></td></tr>
+            <tr><td>Share Update Exclusive</td><td><code>SUE</code></td><td><strong>Only itself</strong></td><td><code>VACUUM</code>, <code>ANALYZE</code>, some DDL, <code>FOR NO KEY UPDATE</code> in PostgreSQL</td></tr>
+            <tr><td>Share</td><td><code>S</code></td><td><code>S</code>, <code>SR</code>, <code>RX</code>, <code>SUE</code>, <code>S</code></td><td><code>CREATE INDEX</code>, some DDL, <code>FOR SHARE</code></td></tr>
+            <tr><td>Share Row Exclusive</td><td><code>SRX</code></td><td>Only <code>S</code> and <code>SRX</code></td><td><code>ALTER TABLE</code>, most schema changes</td></tr>
+            <tr><td>Exclusive</td><td><code>X</code></td><td><strong>Nothing</strong></td><td><code>DROP</code>, <code>TRUNCATE</code></td></tr>
+            <tr><td>Access Exclusive</td><td><code>AX</code></td><td><strong>Nothing</strong></td><td>Almost all <code>ALTER TABLE</code>, including adding a column with a default</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>Intention locks</strong> are the mechanism that makes table-level refusal
+      cheap: before taking a row lock you declare at table level which finer-grained mode
+      you are about to acquire, so a conflicting table-level requester can be refused
+      immediately instead of scanning. They do not lock rows; they advertise.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — “we added a column and the whole database stuck”</span>
+        <p>Almost every <code>ALTER TABLE</code> takes <code>ACCESS EXCLUSIVE</code>,
+        which is compatible with nothing. It does not wait politely for readers to drain —
+        it requests the one mode nobody can hold, and then <strong>every subsequent query
+        queues behind it</strong>, including plain <code>SELECT</code>s that were not there
+        when it started. The result is a table that looks frozen: existing statements
+        finish, new statements of any kind queue, and the pile grows until the connection
+        pool is exhausted and the application reports a total outage rather than a slow
+        query.</p>
+      </div>
+
+      <p>The senior answer has two halves. First, the cheap escapes: adding a column with a
+      <em>volatile</em> default rewrites the table and holds
+      <code>ACCESS EXCLUSIVE</code> throughout, while a constant default, a nullable
+      column, or a column appended at the end takes it only briefly —
+      <code>CREATE INDEX CONCURRENTLY</code> is the same idea. Second, and this is the
+      staff-level point: <strong>the real fix is not a lock timeout, it is not running DDL
+      on the live table during business hours</strong>, and a DDL lock's duration is a
+      function of table size — a number that should be discovered in a rehearsal, never
+      during a deploy.</p>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p><code>ShareUpdateExclusive</code> is how a long write starves
+        <code>VACUUM</code>: it is compatible with nothing except itself, so
+        <code>VACUUM</code> cannot run while anything modifies the table. A long
+        <code>UPDATE</code> on a large table can therefore block autovacuum indefinitely
+        — and by section 4 that is not a slow query, it is uncollected garbage for the whole
+        database. The operational pairing is a <code>statement_timeout</code> on every role
+        that is not a migration role, plus an alert on the oldest running
+        <code>xact_start</code>.</p>
+      </div>
+
+      <h3>Waits, queues, and who is actually the problem</h3>
+
+      <p>The lock queue is <strong>FIFO</strong>, and the holder is never preempted: a new
+        request queues behind everyone already waiting, and cannot jump ahead of them. The
+        consequence is that a lock queue converts one slow transaction into a queue of slow
+        transactions, and the transactions that look slow are mostly innocent.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — “the query at the top of
+        <code>pg_stat_activity</code> is the slow one”</span>
+        <p>Usually not. The <em>victim</em> is the slow query; the <em>blocker</em> is the
+        cause, and the blocker is frequently a transaction that has been open for hours and
+        is doing nothing. Start from <code>xact_start</code>, not from
+        <code>query_start</code>, and remember that an idle-in-transaction session holds
+        every lock it took — including the <code>ACCESS SHARE</code> from its last
+        <code>SELECT</code> — for the whole session.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Lock granularity — a real trade-off, not “finer is better”</caption>
+          <thead>
+            <tr><th>Granularity</th><th>Buys</th><th>Costs</th><th>Reach for it when</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Row</td>
+              <td>Maximum concurrency on a wide table</td>
+              <td>Most lock-table memory, most edges in the wait-for graph, most deadlock opportunities</td>
+              <td>Contention is on individual hot rows</td>
+            </tr>
+            <tr>
+              <td>Page</td>
+              <td>Cheaper than a row lock on some engines</td>
+              <td>A single update to a wide row still locks the whole page</td>
+              <td>The engine's page size matches the row size well</td>
+            </tr>
+            <tr>
+              <td>Table</td>
+              <td>Cheapest bookkeeping; a bulk statement takes one lock, not N</td>
+              <td>Serialises unrelated rows; <code>ALTER TABLE</code> is table-level regardless</td>
+              <td>The statement genuinely touches the whole table</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Finer is not better, and the staff-level observation is that <strong>the case
+      worth reasoning about is not the one you can tune but the one you cannot:</strong>
+      DDL and <code>TRUNCATE</code> are table-level in every engine, so no amount of
+      row-level tuning does anything for the incident that actually pages you.</p>
+    </section>
+
+    <!-- ============ 6 ============ -->
+    <section id="ch6" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">06</span>
+        <h2>Optimistic vs pessimistic</h2>
+      </div>
+
+      <p>Both detect the same condition — someone else changed the data between your read
+      and your write — by assuming opposite things about the world. Pessimistic takes a lock
+      <em>before</em> reading, so read and write are indivisible with respect to other
+      writers, and the cost is paid by the other transaction as a wait that happens even
+      when no conflict would have. Optimistic reads freely and detects the conflict at write
+      time, and the cost is paid by <em>you</em>, as a discarded transaction plus a
+      retry.</p>
+
+      <h3>Optimistic: the version column is the whole mechanism</h3>
+
+      <p>On read you remember the version; on write you put it in the
+      <code>WHERE</code> clause. <strong>“0 rows affected” is the entire detection
+      mechanism</strong> — there is nothing else to build, and nothing else to configure.</p>
+
+      <pre class="snippet" data-lang="sql" data-title="Compare-and-swap" data-hl-line="6,12"><code>ALTER TABLE products ADD COLUMN version INT NOT NULL DEFAULT 0;
+
+-- READ: note the version alongside the data you are about to decide on.
+SELECT id, name, price, version FROM products WHERE id = 7;
+--  id | name    | price | version
+--  7  | Widget  | 100   | 3
+
+-- WRITE: the version goes in the WHERE clause.
+UPDATE products
+   SET price = 90, version = version + 1
+ WHERE id = 7 AND version = 3;      -- rows affected: 1 -&gt; we won
+
+-- versus, if another transaction committed first:
+UPDATE products
+   SET price = 90, version = version + 1
+ WHERE id = 7 AND version = 3;      -- rows affected: 0 -&gt; we lost, and we know it</code></pre>
+
+      <p>Two details make it correct and both are easy to get wrong. The version must be
+      checked in the <code>WHERE</code> clause and the row must be identified by the
+      <strong>primary key</strong> — a non-unique predicate like
+      <code>WHERE name = 'Widget' AND version = 3</code> makes the update affect an
+      arbitrary matching row, which is neither a correct check nor a safe write. And
+      <code>version = version + 1</code> is what makes the <em>next</em> reader's swap
+      fail; without it two transactions could both read version 3 and both write
+      successfully, because the version never changed.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — “we added a version column. Is our update safe now?”</span>
+        <p>Not automatically, and the gap is worth drawing out. <strong>A version column only
+        protects the statements that include it in the <code>WHERE</code> clause.</strong> An
+        ORM doing dirty checking issues <code>UPDATE products SET price = ? WHERE id = ?</code>
+        — the default generated SQL for most entity states — which does not use the column
+        at all, no matter that the column exists on the entity. <strong>The protection is a
+        property of the SQL that reaches the database, not of the schema.</strong> The
+        review question that catches every variant: grep the codebase for every
+        <code>UPDATE</code> and <code>DELETE</code> against this table and confirm each one
+        either checks the version or is a documented exception.</p>
+      </div>
+
+      <h3>Pessimistic: <code>SELECT ... FOR UPDATE</code></h3>
+
+      <p>Take the lock before the read. The subtlety that trips people up is that a locking
+      read is <em>not</em> a snapshot read: it does not go through the MVCC visibility path,
+      which is why it can return a value the transaction's own snapshot would not have
+      seen.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The three lock-strength modifiers, and the specific failure each avoids</caption>
+          <thead>
+            <tr><th>Clause</th><th>Lock taken</th><th>Use when</th><th>The failure it avoids</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>FOR UPDATE</code></td>
+              <td>Exclusive row lock — blocks other writers and other <code>FOR UPDATE</code>/<code>FOR SHARE</code></td>
+              <td>You are about to change the row</td>
+              <td>Lost updates on read-modify-write</td>
+            </tr>
+            <tr>
+              <td><code>FOR NO KEY UPDATE</code></td>
+              <td>Weaker: blocks writers but <strong>not</strong> the key-share a foreign-key check takes on the parent</td>
+              <td>You are changing non-key columns only</td>
+              <td>A <code>FOR UPDATE</code> on a hot parent row blocks <em>every</em> concurrent <code>INSERT</code> into the child table — a throughput problem that appears only under load and looks inexplicable</td>
+            </tr>
+            <tr>
+              <td><code>FOR SHARE</code></td>
+              <td>Shared row lock — blocks writers, allows other readers</td>
+              <td>You are reading to validate a decision others might invalidate</td>
+              <td>Validating against a value that changes before you act on it</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="sql" data-title="Queue claim pattern" data-hl-line="8"><code>BEGIN;
+  SELECT id FROM jobs
+   WHERE status = 'PENDING'
+   ORDER BY priority DESC, created_at
+   LIMIT 1
+   FOR UPDATE SKIP LOCKED;   -- without SKIP LOCKED, a second worker BLOCKS
+                              -- here and the queue becomes single-threaded
+  -- claim it, do the work, COMMIT
+COMMIT;</code></pre>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Choosing what to do about a row that is already locked</caption>
+          <thead>
+            <tr><th>Modifier</th><th>Behaviour when the row is locked</th><th>Correct use</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Plain <code>FOR UPDATE</code></td><td>Wait indefinitely</td><td>You must process this row and nobody else will</td></tr>
+            <tr><td><code>NOWAIT</code></td><td>Raise an error immediately</td><td>An interactive request where even a short wait is unacceptable</td></tr>
+            <tr><td><code>SKIP LOCKED</code></td><td>Skip it, return the next unlocked row</td><td>A worker draining a shared queue, where <em>someone else</em> is handling the locked row</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p><code>SKIP LOCKED</code> is not a performance feature; it is a
+        <strong>correctness requirement for a multi-consumer queue.</strong> Without it,
+        eight workers pulling from one queue are not eight workers — they are eight
+        processes serialised behind whichever one holds the head-of-queue row, which is
+        strictly <em>worse</em> than a single worker because the serialisation point is
+        nondeterministic. With it, <code>FOR UPDATE SKIP LOCKED</code> is the standard shape
+        for <code>SELECT ... LIMIT 1</code> work distribution.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — the snapshot gap under a plain
+        <code>FOR UPDATE</code></span>
+        <p>Under snapshot isolation, locking a row does not lock the <em>range</em> around
+        it. PostgreSQL's <code>REPEATABLE READ</code> is a pure snapshot with no range
+        locking at all — inserts are never blocked by readers, and predicate ranges are
+        locked only at <code>SERIALIZABLE</code>. So a transaction that
+        <code>SELECT ... FOR UPDATE</code>s the rows it found can still be surprised by a
+        row that matches its predicate but was not in the result, inserted concurrently
+        afterwards. Locking the rows you found closes write skew on <em>those rows</em>; it
+        does not close phantom reads.</p>
+      </div>
+
+      <h3>Retry loops</h3>
+
+      <p>Every retry path in this chapter — optimistic conflict, <code>40001</code>,
+      deadlock — has the same three requirements, and getting any one wrong turns a
+      resilience mechanism into a load amplifier.</p>
+
+      <pre class="snippet" data-lang="java" data-title="Retry requirements" data-hl-line="9,15"><code>private static final int MAX_ATTEMPTS = 5;   // 1. BOUNDED. Unbounded is a hang
+                                           //    with extra steps.
+
+// 2. EXPONENTIAL BACKOFF WITH FULL JITTER. The jitter is load-bearing,
+//    not the growth. Without it, every client that failed at the same
+//    moment retries at the same moment, forever, in lockstep.
+private Duration backoffWithJitter(int attempt) {
+    long cap = Math.min(MAX_BACKOFF.toMillis(), BASE_BACKOFF.toMillis() * (1L &lt;&lt; attempt));
+    return Duration.ofMillis(ThreadLocalRandom.current().nextLong(cap + 1));
+}
+
+// 3. RETRY ONLY WHAT IS TRANSIENT.
+private boolean isTransient(SQLException e) {
+    if (e instanceof SQLTransientException) return true;
+    String sqlState = e.getSQLState();
+    return "40001".equals(sqlState) || "40P01".equals(sqlState);
+}</code></pre>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p>Optimistic concurrency degrades non-linearly and then falls off a cliff. With
+        few contenders the expected attempts per success is near 1. As contenders on one
+        row increase, attempts per success approaches the number of contenders — <em>N</em>
+        writers on one row means on average <em>N</em>/2 attempts per success, and every
+        failed attempt is a full transaction that did real work and was rolled back. Beyond
+        a handful of genuinely concurrent writers on a single row, the wasted work itself
+        becomes the load. <strong>The fix is never a better retry loop; it is to remove the
+        contention</strong> — partition the counter, or design the workflow so <em>N</em>
+        writers do not all need the same row.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — pessimistic or optimistic for this workflow?</span>
+        <p>The condition that flips the answer is <strong>the conflict rate, and it is
+        measurable rather than theoretical.</strong> Optimistic is right when conflicts are
+        rare — most user-facing CRUD — because it costs nothing in the common case and
+        needs no lock table, no deadlock handling and no wait. Pessimistic is right when
+        conflicts are frequent <em>and</em> the work per conflict is expensive: a
+        claim-the-next-job queue, an inventory decrement with a multi-step pricing
+        calculation, anywhere a failed attempt would mean discarding seconds of work. The
+        middle case most teams actually have is usually <strong>neither</strong> —
+        restructure the contended operation into one atomic conditional statement and
+        check the affected-row count, which is strictly better than both.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — “a retry that reuses the value it read”</span>
+        <p>Not a retry. The <strong>entire read&ndash;decide&ndash;write must be inside the
+        loop</strong>, not just the write. A loop that retries the
+        <code>UPDATE</code> while reusing the value from the failed attempt's
+        <code>SELECT</code> re-asserts a stale fact — and because the affected-row count
+        will be zero again, it burns every attempt and then reports a failure that was
+        never actually contended.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>Three retry failure modes to name unprompted: <strong>no jitter</strong> (a
+        thousand clients fail together, retry together, and the retry loop <em>is</em> the
+        outage — invisible in a test with one client); <strong>unbounded attempts</strong>
+        (a permanently failing transaction holds its connection, its snapshot, and under
+        <code>REPEATABLE READ</code> the vacuum horizon for as long as it keeps trying —
+        that is the long-running transaction from section 4 wearing a different hat); and
+        <strong>retrying at several layers at once</strong>, where the effective attempt
+        count is the <em>product</em> and the team believes it is the sum.</p>
+      </div>
+    </section>
+
+    <!-- ============ 7 ============ -->
+    <section id="ch7" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">07</span>
+        <h2>Deadlocks</h2>
+      </div>
+
+      <p>A deadlock is a <strong>cycle in a wait-for graph</strong>, and that is the whole
+      definition. Vertices are transactions and locks; an edge points from a waiter to the
+      holder it is blocked on; a deadlock is a cycle in that graph. Nothing about the cycle
+      is exotic, and no timeout can break it, because in a cycle <em>no</em> transaction is
+      making progress — there is no one whose timeout has merely not fired yet.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 700 330" role="img" aria-label="Three transactions form a closed cycle in the wait-for graph: T1 waits for T2, T2 waits for T3, and T3 waits for T1, so none can proceed and the engine must abort one of them.">
+          <defs>
+            <marker id="arw-d5-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <text class="label" x="20" y="24">THE WAIT-FOR GRAPH</text>
+
+          <rect class="node node--accent" x="40" y="48" width="180" height="56" rx="6"/>
+          <text class="label" x="60" y="72">T1</text>
+          <text class="label--sub" x="60" y="92">holds row 1, wants row 2</text>
+
+          <rect class="node node--accent" x="480" y="48" width="180" height="56" rx="6"/>
+          <text class="label" x="500" y="72">T2</text>
+          <text class="label--sub" x="500" y="92">holds row 2, wants row 3</text>
+
+          <rect class="node node--accent" x="260" y="212" width="180" height="56" rx="6"/>
+          <text class="label" x="280" y="236">T3</text>
+          <text class="label--sub" x="280" y="256">holds row 3, wants row 1</text>
+
+          <path class="edge edge--bad" d="M 220 66 L 478 66" marker-end="url(#arw-d5-c)"/>
+          <text class="edge-label edge-label--strong" x="349" y="56" text-anchor="middle">T1 waits for T2</text>
+
+          <path class="edge edge--bad" d="M 510 104 L 420 208" marker-end="url(#arw-d5-c)"/>
+          <text class="edge-label edge-label--strong" x="500" y="158" text-anchor="middle">T2 waits</text>
+          <text class="edge-label edge-label--strong" x="500" y="174" text-anchor="middle">for T3</text>
+
+          <path class="edge edge--bad" d="M 260 232 L 106 108" marker-end="url(#arw-d5-c)"/>
+          <text class="edge-label edge-label--strong" x="160" y="158" text-anchor="middle">T3 waits</text>
+          <text class="edge-label edge-label--strong" x="160" y="174" text-anchor="middle">for T1</text>
+
+          <text class="fill-bad" x="350" y="140" text-anchor="middle"
+                font-family="ui-monospace, monospace" font-size="13" font-weight="600">A CLOSED CYCLE</text>
+          <text class="edge-label" x="350" y="160" text-anchor="middle">nobody is making progress,</text>
+          <text class="edge-label" x="350" y="176" text-anchor="middle">so no timeout can break it</text>
+
+          <rect class="node node--bad" x="20" y="288" width="660" height="34" rx="6"/>
+          <text class="label" x="36" y="310">The engine must abort a victim: 40P01 in PostgreSQL, error 1213 in InnoDB. The application retries the whole transaction.</text>
+        </svg>
+        <figcaption><strong>Detection is graph traversal, and the resolution is a
+        sacrifice.</strong> The engine waits <code>deadlock_timeout</code> — one second by
+        default — for the graph to be free of short cycles, then aborts the transaction
+        that has done the least work. The number that matters operationally is not the
+        count of deadlocks but their <em>rate</em>.</figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Three prevention techniques, in order of preference</caption>
+          <thead>
+            <tr><th>Technique</th><th>Rule</th><th>Why it is better than the alternative</th><th>When it is the wrong answer</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Global lock order</td>
+              <td>Sort the ids being locked ascending and lock them in that order, everywhere</td>
+              <td>Makes the bug <em>impossible</em> rather than less likely. One line of code, and it is enforceable in review</td>
+              <td>Almost never — reach for it first</td>
+            </tr>
+            <tr>
+              <td>Single-row transactions</td>
+              <td>Each unit of work touches one row and commits immediately</td>
+              <td>The wait-for graph becomes a set of isolated nodes instead of a web. This is why <code>SKIP LOCKED</code> claim loops are deadlock-resistant</td>
+              <td>When the items are genuinely <em>not</em> independent, because you lose atomicity across the batch</td>
+            </tr>
+            <tr>
+              <td>Reduce the lock surface</td>
+              <td>Every lock is an edge, so removing locks removes cycles: lock only what you will write, and never hold a lock across a remote call</td>
+              <td>Cheap, local, and usually the actual fix in a microservice codebase</td>
+              <td>Never — it is strictly better than the other two as a first pass</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Global lock order" data-hl-line="3,4"><code>@Transactional
+public void applyBatch(Collection&lt;Long&gt; itemIds) {
+    List&lt;Long&gt; ordered = itemIds.stream().distinct().sorted().toList();
+    for (Long id : ordered) {
+        repository.lockById(id);   // SELECT ... FOR UPDATE
+        processor.process(id);
+    }
+    // Every batch job in the system locks in the same order, so no two
+    // of them can ever build a cycle. Two such jobs that disagreed on
+    // order were the deadlock; this line is the whole fix.
+}</code></pre>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — “how do you fix deadlocks?”</span>
+        <p>The trap answer is “retry on failure” or “lower the lock timeout”, and both are
+        wrong in a way that matters. <strong>Lowering the lock timeout does not resolve a
+        deadlock at all</strong> — a cycle means nobody is progressing, so there is no
+        timeout that can break it; the engine must abort a victim, and it already does. And
+        retrying without fixing the ordering produces a system that deadlocks <em>more</em>
+        often under load, because the retries add load to the exact contention that caused
+        it.</p>
+      </div>
+
+      <p>The senior answer: <strong>a deadlock is a symptom of inconsistent lock
+      ordering.</strong> Enumerate the rows each transaction acquires and the order it
+      acquires them in; find two whose sets overlap and whose orders differ; apply a global
+      total order to every multi-lock path. Then <em>additionally</em> implement a bounded,
+      jittered retry — because even with perfect ordering a three-way cycle you did not
+      enumerate will still occur. <strong>The ordering is the fix; the retry is the
+      seatbelt.</strong> Confusing the two is the mistake.</p>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p>Detecting a cycle costs a wait, and the default
+        <code>deadlock_timeout</code> of <strong>one second</strong> is deliberately longer
+        than ordinary lock waits so short cycles never trigger an abort. The consequence is
+        operational: a deadlock is not a fast failure, it is a
+        <strong>one-second penalty on top of the aborted work</strong>, and a code path
+        that deadlocks on a fraction of requests is a p99 problem long before it is an
+        error-rate problem. If the rate is rising, the ordering is wrong; if the rate is
+        small and flat, the retry is a seatbelt doing its job.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>Never hold a database lock across a remote call. A
+        <code>SELECT ... FOR UPDATE</code> followed by an HTTP request to a payment gateway
+        holds a row lock for the duration of a network round trip to a third party — the
+        single most common cause of deadlock escalation in a microservices codebase, and
+        the fix is architectural (a saga step with the lock released between steps), not
+        a shorter timeout.</p>
+      </div>
+    </section>
+
+    <!-- ============ 8 ============ -->
+    <section id="ch8" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">08</span>
+        <h2>Distributed transactions</h2>
+      </div>
+
+      <p>ACID stops being a property of anything the moment the work crosses a process
+      boundary. Two-phase commit is the protocol that genuinely extends it, and the reason
+      it is nearly absent from modern service architectures is not that it is slow or legacy
+      — it is one specific failure mode.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 700 330" role="img" aria-label="A coordinator sends prepare to two participants, both vote yes and durably commit to their own logs, and the coordinator then dies before the commit phase; both participants are left in-doubt, unable to abort unilaterally, holding their locks indefinitely.">
+          <defs>
+            <marker id="arw-d5-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <text class="label" x="20" y="24">PHASE 1 &mdash; PREPARE (the vote)</text>
+
+          <rect class="node node--accent" x="255" y="40" width="190" height="56" rx="6"/>
+          <text class="label" x="275" y="64">Coordinator</text>
+          <text class="label--sub" x="275" y="84">single process, can be OOM-killed</text>
+
+          <path class="edge" d="M 300 96 L 180 168" marker-end="url(#arw-d5-d)"/>
+          <text class="edge-label" x="196" y="126">PREPARE</text>
+          <path class="edge edge--return" d="M 200 160 L 320 100" marker-end="url(#arw-d5-d)"/>
+          <text class="edge-label" x="196" y="152">YES</text>
+
+          <path class="edge" d="M 400 96 L 520 168" marker-end="url(#arw-d5-d)"/>
+          <text class="edge-label" x="470" y="126">PREPARE</text>
+          <path class="edge edge--return" d="M 500 160 L 380 100" marker-end="url(#arw-d5-d)"/>
+          <text class="edge-label" x="470" y="152">YES</text>
+
+          <path class="edge edge--bad" d="M 322 42 L 372 90" marker-end="url(#arw-d5-d)"/>
+          <path class="edge edge--bad" d="M 372 42 L 322 90"/>
+
+          <rect class="node node--bad" x="60" y="170" width="240" height="70" rx="6"/>
+          <text class="label" x="76" y="192">Participant A</text>
+          <text class="label--sub" x="76" y="212">prepared to its own durable log,</text>
+          <text class="label--sub" x="76" y="230">promised, and holding its locks</text>
+
+          <rect class="node node--bad" x="400" y="170" width="240" height="70" rx="6"/>
+          <text class="label" x="416" y="192">Participant B</text>
+          <text class="label--sub" x="416" y="212">prepared to its own durable log,</text>
+          <text class="label--sub" x="416" y="230">promised, and holding its locks</text>
+
+          <rect class="node node--warn" x="20" y="262" width="660" height="60" rx="6"/>
+          <text class="label" x="36" y="284">The coordinator died between the phases. Neither participant knows whether the transaction committed.</text>
+          <text class="label--sub" x="36" y="306">Neither can abort unilaterally: it already voted yes, and the coordinator may have told the others “commit”.</text>
+        </svg>
+        <figcaption><strong>2PC is <em>blocking</em> 2PC, and the reason is a logical
+        constraint, not an implementation gap.</strong> A participant that has voted yes has
+        durably promised. It must remember a decision it was never told. Every subsequent
+        transaction touching the same resources queues behind it — two participants in-doubt
+        is a partial outage of two services.</figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>2PC, XA, saga, or outbox — the condition that picks the answer</caption>
+          <thead>
+            <tr><th>Pattern</th><th>Use when</th><th>What it costs</th><th>Failure mode</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>2PC / XA</td>
+              <td>You need true atomicity across resources <em>and</em> cannot change how the far side handles retries and duplicates — a mainframe, a vendor database, a broker with no idempotence</td>
+              <td>A coordinator you must trust more than your architecture lets you trust anything</td>
+              <td><strong>Blocking.</strong> Coordinator death leaves participants in-doubt and unavailable</td>
+            </tr>
+            <tr>
+              <td>Saga</td>
+              <td>The process is a sequence of steps with a <em>semantic</em> inverse each — refund, release, cancel</td>
+              <td>Designing the compensations, which is real business logic and cannot be generated</td>
+              <td>A compensation fails, so you need a human-replayable state, not a retry</td>
+            </tr>
+            <tr>
+              <td>Outbox + idempotent consumer</td>
+              <td>The far side is a service <em>you own</em> and the requirement is “this event must not be lost”</td>
+              <td>A relay, a table, and consumer-side dedup</td>
+              <td>A duplicate, not an outage — detectable and suppressible at the consumer</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — “just use 2PC across the services”</span>
+        <p>The reflex is right about the problem and wrong about the cost. The argument
+        against 2PC is not speed and not age — it is that <strong>a prepared participant
+        cannot unilaterally abort</strong>, so a single coordinator process becomes a
+        availability dependency for every resource it touches. The honest counter-question
+        is: <em>who owns the far side's behaviour?</em> If you own it, the outbox satisfies
+        the same “must not be lost” requirement with a failure mode of a duplicate rather
+        than an outage.</p>
+      </div>
+
+      <p>The outbox exists to kill the <strong>dual write</strong> — writing to your
+      database and publishing a message are two systems with no transaction spanning them,
+      so one of them will eventually be wrong, and the application genuinely cannot tell
+      which. Three outcomes are all reachable and none is detectable from the app: publish
+      throws before the broker got it (event lost forever), throws after (retry duplicates
+        it), or succeeds and the app crashes before recording that (retry duplicates it).
+      Only removing the dual write resolves it.</p>
+
+      <pre class="snippet" data-lang="sql" data-title="Outbox and dedup" data-hl-line="4,20"><code>-- The outbox row and the business row are one atomic unit. There is no
+-- window in which the order exists and the event does not.
+BEGIN;
+  INSERT INTO orders (...) VALUES (...);
+  INSERT INTO outbox (id, topic, payload, created_at)
+    VALUES (gen_id(), 'orders', '{...}', now());
+COMMIT;
+
+-- The consumer side. The dedup record and the effect are one
+-- transaction, so a redelivery cannot apply the effect twice.
+CREATE TABLE processed_messages (
+  message_key   TEXT PRIMARY KEY,
+  consumer_name TEXT NOT NULL,
+  processed_at  TIMESTAMPTZ NOT NULL,
+  CONSTRAINT dedup_identity UNIQUE (consumer_name, message_key)
+);
+
+BEGIN;
+  INSERT INTO processed_messages (message_key, consumer_name, processed_at)
+    VALUES (:key, :consumer, now());
+  -- A duplicate raises a unique violation, rolling the whole
+  -- transaction back, so the effect below is never applied twice.
+  UPDATE orders SET status = 'CONFIRMED' WHERE id = :order_id;
+COMMIT;</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>Claiming “exactly-once” from an outbox is the trap. What you have is
+        <strong>at-least-once delivery with exactly-once <em>effect</em></strong>, and the
+        second half comes entirely from the consumer. The argument for accepting
+        at-least-once is not that duplicates are harmless — it is that they are
+        <em>detectable and suppressible</em> at the consumer, whereas a lost event is
+        neither.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — the dedup key, and the pruning bug</span>
+        <p>Two properties are load-bearing and both are commonly wrong. <strong>The dedup key
+        must be derived from the message</strong> — a consumer-generated UUID is unique on
+        every delivery and deduplicates nothing. And <strong>the retention of the dedup
+        table must exceed the broker's maximum redelivery window</strong>; a table pruned
+        too aggressively resurrects old duplicates, which presents weeks after the pattern
+        was deployed and working.</p>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p>The outbox is a database table, so it has every operational property of one.
+        <strong>Relay lag</strong> is the delay between commit and publication and is
+        user-visible for anything time-sensitive — alert on outbox <em>age</em>, not count.
+        Table size grows without bound unless published rows are deleted, and marking then
+        deleting in separate steps leaves the rows to be vacuumed. And the relay is a
+        serialisation point: publishing in key order to preserve per-aggregate ordering caps
+        throughput per key at the relay's publish rate, which is why partitioning the outbox
+        by aggregate id is the design most teams converge on once the numbers matter.</p>
+      </div>
+    </section>
+
+    <!-- ============ numbers ============ -->
+    <section id="numbers" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">&nbsp;</span>
+        <h2>Numbers worth memorising</h2>
+      </div>
+
+      <div class="numbers">
+        <div class="number">
+          <span class="number__value">0.5&ndash;10 ms</span>
+          <span class="number__label">A single <code>fsync</code> on fast NVMe, against a
+          single-threaded ceiling of 100&ndash;2,000 commits per second. Group commit scales
+          throughput with transactions in flight per flush</span>
+        </div>
+        <div class="number">
+          <span class="number__value">~1 second</span>
+          <span class="number__label">Lost on power loss with
+          <code>innodb_flush_log_at_trx_commit = 2</code>. At <code>0</code> InnoDB can be
+          corrupted rather than merely lossy</span>
+        </div>
+        <div class="number">
+          <span class="number__value">8 modes</span>
+          <span class="number__label">Relation-level lock modes. <code>AX</code> is
+          compatible with nothing, and nearly every <code>ALTER TABLE</code> takes
+          it</span>
+        </div>
+        <div class="number">
+          <span class="number__value">2.1 billion</span>
+          <span class="number__label">PostgreSQL transaction-id wraparound. A wrap while old
+          snapshots exist makes them appear to be in the future — a correctness emergency,
+          not just a slow one</span>
+        </div>
+        <div class="number">
+          <span class="number__value">1&times; updates</span>
+          <span class="number__label">Bloat formula: physical &asymp; logical &times; (1 +
+          updates per row during the <em>maximum</em> transaction lifetime). One hour gives
+          ~3&times;; four days reaches 200&times;</span>
+        </div>
+        <div class="number">
+          <span class="number__value">40001 / 40P01</span>
+          <span class="number__label">The only two SQLSTATEs worth retrying:
+          serialization failure and deadlock detected. Error 1213 is InnoDB's deadlock
+          equivalent</span>
+        </div>
+        <div class="number">
+          <span class="number__value">1 second</span>
+          <span class="number__label">PostgreSQL's <code>deadlock_timeout</code>, longer than
+          ordinary waits so short cycles never abort. A deadlock is a one-second penalty on
+          top of the aborted work</span>
+        </div>
+        <div class="number">
+          <span class="number__value">N/2</span>
+          <span class="number__label">Expected optimistic attempts per success with
+          <em>N</em> writers on one row. Past a handful of concurrent writers the wasted
+          work becomes the load — remove contention, do not tune the loop</span>
+        </div>
+      </div>
+    </section>
+
+    <footer class="pagefoot">
+      <span>Volume 5 of 11 &mdash; Database Complete Deep-Dive</span>
+      <span>From <a href="../../database/database-deep-dive-volume-05-transactions-isolation-concurrency.md">the source volume</a></span>
+      <div class="pager">
+        <a href="04-indexes-query-planning-execution.html">&larr; Prev</a>
+        <a href="06-schema-design-partitioning-scaling.html">Next &rarr;</a>
+      </div>
+    </footer>
+
+</main>
+
+</div>
+
+<script src="../search.js"></script>
+<script src="../highlight.js"></script>
+</body>
+</html>

@@ -3,6 +3,10 @@
 A curated study collection for technical interview preparation — concept notes, deep-dive
 volumes, and printable PDF editions.
 
+> **Looking to revise rather than learn?** [Cheatsheets](cheatsheets/index.html) condense all 34
+> volumes to one scannable page each — the decisions, the traps, and the numbers, for use
+> under interview pressure. Read a volume properly first; use these to revise.
+
 ## Available Topics
 
 ### Java — "The Java Complete Deep-Dive"
@@ -131,12 +135,26 @@ Volume 5's isolation material underpins the Microservices set's Volume 2.
 │   └── spring-deep-dive-volume-01..11-*.md  # Markdown source for each volume
 ├── microservices/
 │   └── microservices-deep-dive-volume-01..03-*.md  # Markdown source for each volume
-└── database/
-    ├── README.md                                     # Authoring format contract
-    └── database-deep-dive-volume-01..11-*.md        # Markdown source for each volume
+├── database/
+│   ├── README.md                                     # Authoring format contract
+│   └── database-deep-dive-volume-01..11-*.md        # Markdown source for each volume
+└── cheatsheets/
+    ├── index.html                            # All 34 cheatsheets, grouped by track
+    ├── README.md                             # Cheatsheet authoring contract
+    ├── cheatsheet.css                        # Shared stylesheet
+    ├── search.js                             # Shared filtering
+    ├── highlight.js                          # Code block labelling + highlighting
+    ├── java/          01..09-*.html           # One condensed page per volume
+    ├── spring/        01..11-*.html
+    ├── microservices/ 01..03-*.html
+    └── database/      01..11-*.html
 ```
 
 ## Contributing
 
 Add new material as Markdown under a topic folder, and link it from this README so it
 stays discoverable.
+
+Cheatsheets live in [`cheatsheets/`](cheatsheets/README.md) and follow their own authoring
+contract. Each one is hand-authored from its source volume rather than generated, and
+carries a link back to that volume so any claim on the page is traceable.

@@ -1,0 +1,1546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spring Data JPA &amp; Persistence — Cheatsheet</title>
+<meta name="description" content="Condensed cheatsheet for Spring Deep-Dive Volume 6: the persistence context, N+1 selects, fetch strategies, ddl-auto's damage, bulk operations, and the JPA failure modes that only show up in production.">
+<link rel="stylesheet" href="../cheatsheet.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="page">
+
+  <nav class="sidebar" aria-label="Contents">
+    <h2>On this page</h2>
+    <ol>
+      <li><a href="#ch1">1 — JPA &amp; Hibernate basics</a></li>
+      <li><a href="#ch2">2 — Spring Data repositories</a></li>
+      <li><a href="#ch3">3 — Relationships &amp; fetch</a></li>
+      <li><a href="#ch4">4 — The N+1 problem</a></li>
+      <li><a href="#ch5">5 — Persistence context</a></li>
+      <li><a href="#ch6">6 — Querying &amp; pagination</a></li>
+      <li><a href="#ch7">7 — Schema, batching, sizing</a></li>
+      <li><a href="#numbers">Numbers</a></li>
+    </ol>
+    <h2>Series</h2>
+    <ul>
+      <li><a href="01-spring-core-ioc.html">01 — Core &amp; IoC</a></li>
+      <li><a href="02-bean-lifecycle-scopes-di.html">02 — Lifecycle &amp; DI</a></li>
+      <li><a href="03-aop-proxying.html">03 — AOP &amp; Proxying</a></li>
+      <li><a href="04-transaction-management.html">04 — Transactions</a></li>
+      <li><a href="05-spring-mvc-web-layer.html">05 — Spring MVC</a></li>
+      <li><a href="06-spring-data-jpa-persistence.html">06 — Data JPA</a></li>
+      <li><a href="07-spring-boot-auto-configuration.html">07 — Boot &amp; Auto-Config</a></li>
+      <li><a href="08-spring-security.html">08 — Security</a></li>
+      <li><a href="09-testing-production-troubleshooting.html">09 — Testing &amp; Ops</a></li>
+      <li><a href="10-webflux-project-reactor.html">10 — WebFlux</a></li>
+      <li><a href="11-spring-cloud-distributed-systems.html">11 — Spring Cloud</a></li>
+    </ul>
+    <h2>Repository</h2>
+    <ul>
+      <li><a href="../index.html">All cheatsheets</a></li>
+      <li><a href="../../spring/spring-deep-dive-volume-06-spring-data-jpa-persistence.md">Source volume</a></li>
+    </ul>
+  </nav>
+
+  <main class="main" id="main">
+
+    <header class="masthead">
+      <p class="masthead__eyebrow">Spring — The Spring Complete Deep-Dive</p>
+      <h1>Volume 6 — Spring Data JPA &amp; Persistence</h1>
+      <p class="masthead__sub">
+        Why the ORM's default behaviour is more dangerous than most frameworks': the defaults are
+        silently correct-looking, and JPA's usual failure mode is a right answer that came from
+        somewhere other than where you thought.
+      </p>
+      <ul class="masthead__meta">
+        <li>8 sections</li>
+        <li>From <a href="../../spring/spring-deep-dive-volume-06-spring-data-jpa-persistence.md">the source volume</a></li>
+      </ul>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <input type="search" data-filter-input placeholder="Filter sections — press /" aria-label="Filter sections">
+        <span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span>
+      </div>
+      <div class="pager">
+        <a href="05-spring-mvc-web-layer.html">&larr; Prev</a>
+        <a href="07-spring-boot-auto-configuration.html">Next &rarr;</a>
+      </div>
+    </div>
+
+    <div class="keyfacts">
+      <h2>If you only remember five things</h2>
+      <ol>
+        <li><strong>The persistence context is a mandated identity map, scoped to one
+        transaction.</strong> Same row, same Java object; mutating a managed entity is a write at
+        flush; and the rule that follows is share the <code>EntityManagerFactory</code> and never
+        an <code>EntityManager</code>.</li>
+        <li><strong><code>merge</code> returns a <em>different</em> object.</strong> It copies
+        state onto a managed copy and hands that back, so mutating what you passed in writes
+        nothing. The fix is "always use <code>merge</code>'s return value"; the durable one is a
+        DTO at every boundary.</li>
+        <li><strong>An N+1 costs round trips, not query time.</strong> Every statement is indexed
+        and fast, which is why it hides from database monitoring. The only reliable detector is a
+        query-count assertion in CI, and the fix that is usually right is a DTO projection.</li>
+        <li><strong>Bulk <code>@Modifying</code> operations bypass the persistence context</strong>
+        and leave it holding stale entities, which dirty checking then writes back over the bulk
+        result. <code>clearAutomatically = true</code> is close to mandatory, and this is the one
+        bug on the page that corrupts data rather than returning wrong numbers.</li>
+        <li><strong><code>ddl-auto</code> defaults to <code>none</code> for a real database</strong>
+        and <code>create-drop</code> for an embedded one, and <em>no</em> value of it is a
+        migration tool. Production is Flyway or Liquibase plus <code>validate</code>.</li>
+      </ol>
+    </div>
+
+    <p class="empty" data-filter-empty hidden>No section matches that filter.</p>
+
+    <!-- ============ 1 ============ -->
+    <section id="ch1" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">01</span>
+        <h2>JPA &amp; Hibernate fundamentals</h2>
+      </div>
+
+      <p>JPA is a specification and Hibernate is one implementation of it. Knowing the seam is
+      what separates a portable data layer from one that only runs on one database &mdash; and
+      Hibernate's additions are where the behaviour nobody can derive from the annotations
+      actually lives.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The seam, and why it decides your failure modes</caption>
+          <thead><tr><th></th><th>JPA specifies</th><th>Hibernate adds</th></tr></thead>
+          <tbody>
+            <tr><td>Identity</td><td>The persistence context as a mandated identity map</td>
+              <td>The dirty-tracking snapshot array behind it &mdash; not in the spec</td></tr>
+            <tr><td>Writes</td><td>Explicit <code>persist</code>, <code>merge</code>, <code>remove</code></td>
+              <td><strong>Dirty checking</strong>: an <code>UPDATE</code> at flush with no <code>save()</code> call anywhere</td></tr>
+            <tr><td>Query language</td><td>JPQL, over <em>entity and attribute names</em></td>
+              <td>HQL superset, a transformable SQL AST, statement inspectors</td></tr>
+            <tr><td>Fetching</td><td><code>FetchType</code>, JPQL <code>join fetch</code></td>
+              <td><code>@BatchSize</code>, <code>@Fetch</code>, <code>@FetchProfile</code>, bytecode proxies</td></tr>
+            <tr><td>Caching</td><td>Nothing</td><td>Second-level cache and query cache, with pluggable consistency strategies</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "JPQL means it's database-independent"</span>
+        <p>The accepted answer is half-wrong in the direction that costs the point. JPQL is
+        portable only inside the <strong>spec's subset</strong>: a function the provider doesn't
+        know fails to translate, and the moment you use <code>left join fetch</code> semantics, a
+        <code>@SqlResultSetMapping</code>, a <code>queryHint</code> name, or a Criteria node the
+        spec doesn't have, you've left it. The sharp version is that JPQL operates on entity and
+        attribute names, never table and column names &mdash; which is the entire argument for the
+        query language existing, and the entire reason a native query needs an explicit result
+        mapping.</p>
+        <p>The honest flip: portability is worth exactly zero if you never run on two databases,
+        which is true of most teams and is a legitimate reason to use vendor features freely.</p>
+      </div>
+
+      <h3>The identity map, and where its edge is</h3>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 330" role="img" aria-label="The persistence context sits inside the transaction as an identity map, a dirty-checking snapshot per entity, and a queue of pending actions. Flush sends the SQL and commit ends the transaction. After the transaction ends the entity is detached: a proxy cannot initialise and there is no dirty check at commit.">
+          <defs>
+            <marker id="arw-s6-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node" x="25" y="14" width="300" height="42" rx="6"/>
+          <text class="label" x="175" y="32" text-anchor="middle">EntityManagerFactory</text>
+          <text class="label label--sub" x="175" y="48" text-anchor="middle">singleton · thread-safe · expensive</text>
+
+          <path class="edge" d="M 175 56 L 175 82" marker-end="url(#arw-s6-a)"/>
+          <text class="edge-label" x="185" y="74" text-anchor="start">one per transaction</text>
+
+          <rect class="node node--accent" x="30" y="84" width="290" height="142" rx="6"/>
+          <text class="label" x="175" y="106" text-anchor="middle">PERSISTENCE CONTEXT</text>
+          <text class="label" x="46" y="130">id=1 &rarr; Customer&#64;3f2a</text>
+          <text class="label" x="46" y="150">id=7 &rarr; Order&#64;8b41</text>
+          <text class="label" x="46" y="170">deep-copy snapshot per entity</text>
+          <text class="label" x="46" y="190">queue: insert / update / delete</text>
+          <text class="label label--sub" x="175" y="212" text-anchor="middle">not thread-safe · one unit of work</text>
+
+          <path class="edge edge--bad" d="M 320 155 L 386 155" marker-end="url(#arw-s6-a)"/>
+          <text class="edge-label" x="353" y="145" text-anchor="middle">commit</text>
+
+          <rect class="node node--bad" x="390" y="84" width="250" height="142" rx="6"/>
+          <text class="label" x="515" y="106" text-anchor="middle">DETACHED</text>
+          <text class="label" x="406" y="130">entity outlives the context</text>
+          <text class="label" x="406" y="150">proxy cannot initialise</text>
+          <text class="label" x="406" y="170">LazyInitializationException</text>
+          <text class="label" x="406" y="190">no dirty check, no rollback</text>
+
+          <path class="edge" d="M 175 226 L 175 278" marker-end="url(#arw-s6-a)"/>
+          <text class="edge-label" x="185" y="256" text-anchor="start">flush() then commit()</text>
+
+          <rect class="node" x="30" y="280" width="290" height="40" rx="6"/>
+          <text class="label" x="175" y="305" text-anchor="middle">Database (via the connection pool)</text>
+        </svg>
+        <figcaption>
+          <strong>The context is bound to the unit of work, not to the application.</strong>
+          Everything arbitrary in JPA falls out of this one box: <code>find()</code> returning
+          the same instance, a setter being a write, and a context that outlives its transaction
+          going stale against concurrent writers. Everything that bites &mdash; the
+          <code>LazyInitializationException</code>, the OSIV debate &mdash; is a question of
+          which side of that vertical line a piece of code is on.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Which object you may share, and what happens if you get it wrong</caption>
+          <thead><tr><th></th><th><code>EntityManagerFactory</code></th><th><code>EntityManager</code></th></tr></thead>
+          <tbody>
+            <tr><td>Holds</td><td>Parsed mapping model, connection provider, query plan cache, L2 cache</td>
+              <td>One persistence context &mdash; identity map, snapshots, pending actions</td></tr>
+            <tr><td>Cost to create</td><td>Expensive: parse every mapping, build metadata, open the pool</td>
+              <td>Cheap: allocate a session, bind a JDBC connection</td></tr>
+            <tr><td>Thread safety</td><td><strong>Thread-safe</strong> &mdash; the intended singleton</td>
+              <td><strong>Not thread-safe</strong> &mdash; one per thread at a time</td></tr>
+            <tr><td>Lifetime</td><td>One per application, one per persistence unit</td>
+              <td>One per transaction &mdash; or one per request under OSIV</td></tr>
+            <tr><td>Failure mode</td><td>Missing bean: the context will not start</td>
+              <td>Shared across threads: <code>IllegalStateException</code> or silent corruption</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — what Spring actually injects</span>
+        <p>Spring never injects a real <code>EntityManager</code>. It injects a
+        <code>SharedEntityManagerCreator</code> <strong>proxy</strong> that resolves the
+        transaction-bound session per call, which is exactly why injecting one into a singleton is
+        safe. The subtlety: <em>outside</em> a transaction the proxy opens a temporary context,
+        does the work, and closes it at method exit. So <code>em.find()</code> in a
+        non-transactional method succeeds, returns managed entities, and silently detaches them
+        &mdash; the mechanism behind "the lazy load worked in the service but not in the
+        controller".</p>
+        <p>How the proxy binds to the thread, and what <code>JpaTransactionManager</code> does with
+        it, is Volume 4's material &mdash; this page owns what happens <em>inside</em> the
+        context.</p>
+      </div>
+
+      <h3><code>persist</code> vs <code>merge</code>, and <code>save()</code></h3>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">The most-asked question in a JPA interview</span>
+        <p><code>persist</code> needs a <em>new</em> object, makes that same instance managed, and
+        throws <code>EntityExistsException</code> on a detached one. <code>merge</code> copies
+        state onto a managed instance and returns <strong>that</strong> &mdash; a different object
+        from the one you passed in. So <code>em.merge(x)</code> followed by a mutation of
+        <code>x</code> writes nothing, silently, because the context never saw the later
+        mutation. After a merge, <code>em.contains(x)</code> is <code>false</code>, and the
+        managed copy carries the <em>database's</em> field values &mdash; which is why
+        <code>merge</code> will happily overwrite a field your detached object left populated
+        with the row's <code>null</code>.</p>
+        <p>Always use the return value. And never let a detached entity reach code that mutates
+        it: anything crossing a serialisation, queue, cache or thread boundary is exactly where
+        this bug is born.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>What <code>save()</code> does, decided by the <code>isNew</code> check</caption>
+          <thead><tr><th>Situation</th><th><code>isNew</code></th><th>Branch</th><th>What bites</th></tr></thead>
+          <tbody>
+            <tr><td>New entity, <code>Long id</code> null</td><td>new</td><td><code>persist</code></td><td>Correct</td></tr>
+            <tr><td>New entity, primitive <code>long</code> defaulting to <code>0</code></td><td>new</td><td><code>persist</code></td><td>Correct &mdash; primitives get a special check</td></tr>
+            <tr><td>Loaded entity, ID set</td><td>not new</td><td><code>merge</code></td><td>Correct</td></tr>
+            <tr><td><strong>Application-assigned ID</strong> &mdash; <code>&#64;UuidId</code>, natural key, hand-set <code>UUID</code></td>
+              <td><strong>not new</strong></td><td><code>merge</code></td>
+              <td>A wasted <code>SELECT</code>, and <code>save</code> returns a <strong>different</strong> instance &mdash; everything the caller sets afterwards is invisible</td></tr>
+            <tr><td>Entity copied from a DTO with <code>&#64;Version</code> already non-null</td><td>not new</td><td><code>merge</code></td><td>Same class of surprise</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Mapping defaults that hurt</h3>
+
+      <div class="table-wrap">
+        <table>
+          <caption>ID generation, and what each one actually costs</caption>
+          <thead><tr><th>Strategy</th><th>How it works</th><th>Batches?</th><th>Portable?</th><th>The cost</th></tr></thead>
+          <tbody>
+            <tr><td><code>IDENTITY</code></td><td>DB auto-increment; Hibernate must <code>INSERT</code> <em>and read the key back</em> immediately</td>
+              <td><strong>No</strong></td><td>Widely</td><td><strong>Disables JDBC insert batching entirely</strong>. One round trip per insert</td></tr>
+            <tr><td><code>SEQUENCE</code></td><td><code>SELECT nextval</code>, or a pre-allocated block, before the <code>INSERT</code></td>
+              <td><strong>Yes</strong></td><td>Not on MySQL &lt; 8.0 / MariaDB &lt; 10.3</td><td>A sequence read per insert unless pooled; leaves gaps on rollback</td></tr>
+            <tr><td><code>TABLE</code></td><td>A one-row counter table, read and incremented under a lock</td>
+              <td>Yes</td><td>Fully</td><td>A write lock on a single row &mdash; a global serialisation point</td></tr>
+            <tr><td><code>AUTO</code></td><td>Provider picks</td>
+              <td>Provider</td><td>Provider</td><td>You don't know which failure mode you got</td></tr>
+            <tr><td>Assigned / <code>UUID</code></td><td>Application-generated</td>
+              <td>&mdash;</td><td>&mdash;</td><td>Index fragmentation; and the <code>isNew</code> row above</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — <code>IDENTITY</code> against <code>SEQUENCE</code></span>
+        <p><code>IDENTITY</code> wins when inserts are rare and you want gap-free, monotonic,
+        human-readable IDs that sort in insertion order, on a table with one writer anyway.
+        <code>SEQUENCE</code> wins the moment insert throughput is the problem, because the ID is
+        known before the statement and the batch goes out as one round trip. Hibernate 6's default
+        sequence allocation size is <strong>50</strong> &mdash; a reasonable compromise, and
+        raising it to 1,000 in a high-churn service just moves the ID waste around.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — the default <code>&#64;Enumerated</code></span>
+        <p>Leaving it off means <code>ORDINAL</code>, which persists the enum constant's
+        <strong>position in the declaration</strong>. Insert a constant in the middle and every
+        existing row silently changes meaning &mdash; <code>status = 1</code> was
+        <code>PENDING</code> and is now <code>SHIPPED</code> &mdash; and it is unrecoverable
+        without a manual <code>UPDATE</code>, because the database was never told what the numbers
+        meant. <code>EnumType.STRING</code> costs a few bytes and makes the data self-describing.
+        <code>ORDINAL</code> is defensible only for a closed, never-changing, strictly internal
+        enum.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Lombok <code>&#64;Data</code> on an entity</span>
+        <p>Two of the generated methods are actively harmful and one is a runtime bomb.
+        <code>equals</code>/<code>hashCode</code> over mutable fields means an entity in a
+        <code>HashSet</code> becomes <em>unfindable</em> the moment dirty checking updates one of
+        them. <code>toString</code> over associations gives
+        <code>StackOverflowError</code> on any bidirectional mapping, from a log line. And
+        <code>&#64;Data</code> suppresses the no-args constructor that Hibernate needs, so the
+        next person to add <code>&#64;Builder</code> gets a runtime
+        <code>HibernateException: Unable to invoke no-args constructor</code> rather than a
+        compile error. The fix is an ArchUnit rule banning <code>&#64;Data</code> on
+        <code>&#64;Entity</code> &mdash; enforceable in seconds, and the incident is not.</p>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Entity equals and hashCode" data-hl-line="5,10"><code>&#64;Override
+public boolean equals(Object o) {
+    if (this == o) return true;
+    if (!(o instanceof Product other)) return false;
+    return id != null &amp;&amp; id.equals(other.id);   // null guard: two transient products are not equal
+}
+
+&#64;Override
+public int hashCode() {
+    return getClass().hashCode();      // CONSTANT — the ID doesn't exist until persist
+}</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — <code>&#64;Version</code> is the only thing that makes staleness loud</span>
+        <p>Without a <code>&#64;Version</code> field, Hibernate's update is
+        <code>UPDATE ... WHERE id = ?</code> with no version predicate, so last-writer-wins is
+        silent &mdash; data loss, discovered by a customer. With one it becomes
+        <code>WHERE id = ? AND version = ?</code> and a zero-row result raises
+        <code>OptimisticLockingFailureException</code>, which is <em>retryable</em> and therefore
+        the right failure mode. The cost is one <code>BIGINT</code> column and one predicate; the
+        exception worth naming is genuine last-write-wins data (a view counter, a heartbeat), where
+        a version column is pure cost. That is a convention to document, not a library setting.</p>
+      </div>
+    </section>
+
+    <!-- ============ 2 ============ -->
+    <section id="ch2" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">02</span>
+        <h2>Spring Data repositories</h2>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The interface hierarchy, and what each level actually buys</caption>
+          <thead><tr><th>Interface</th><th>Adds</th><th>Use it when</th></tr></thead>
+          <tbody>
+            <tr><td><code>Repository</code></td><td>Nothing &mdash; a marker</td>
+              <td>You want to declare the dependency without exposing persistence operations</td></tr>
+            <tr><td><code>CrudRepository</code></td><td><code>save</code>, <code>findById</code>, <code>existsById</code>, <code>findAll</code>, <code>count</code>, <code>deleteById</code></td>
+              <td>Whole-aggregate operations only</td></tr>
+            <tr><td><code>PagingAndSortingRepository</code></td><td><code>findAll(Sort)</code>, <code>findAll(Pageable)</code></td>
+              <td>A list endpoint you never write to</td></tr>
+            <tr><td><code>ListCrudRepository</code> / <code>ListPagingAndSortingRepository</code></td>
+              <td><code>List</code>-returning variants, <code>findAllBy(Sort)</code></td>
+              <td>Spring Data 3.0+ (Boot 3). The pre-2.x non-<code>Iterable</code> API</td></tr>
+            <tr><td><code>JpaRepository</code></td>
+              <td><code>flush</code>, <code>saveAndFlush</code>, <code>deleteAllInBatch</code>, <code>getReferenceById</code>, <code>&#64;Lock</code>, <code>JpaSpecificationExecutor</code></td>
+              <td>Almost always &mdash; and the cost is that your service layer now names JPA types</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">"Use <code>CrudRepository</code> to stay persistence-agnostic"</span>
+        <p>Scores about zero, because the abstraction is a lie at the level that matters.
+        <code>CrudRepository.save</code> returns <code>void</code> and hands you <strong>no ID
+        back</strong> for a new entity with a non-<code>IDENTITY</code> generator &mdash; the most
+        common complaint about it. The moment you need <code>getReferenceById</code> to avoid a
+        query, <code>&#64;Lock</code>, or a <code>Specification</code>, you are on
+        <code>JpaRepository</code> anyway. The honest framing: the repository abstraction is
+        genuinely good at <strong>CRUD on a single aggregate</strong> and is the wrong tool for
+        everything else, and the interface you pick is a smaller decision than the queries you
+        write.</p>
+        <p>Spring Data 3.0 deprecated <code>getOne()</code> and <code>getById()</code> in favour of
+        <code>getReferenceById()</code>. <code>getOne()</code> returned a proxy that threw
+        <code>EntityNotFoundException</code> on dereference &mdash; a behaviour that produced a lot
+        of 404s that were 500s.</p>
+      </div>
+
+      <h3>Derived query methods</h3>
+
+      <pre class="snippet" data-lang="java" data-title="Derived query grammar" data-hl-line="8,9"><code>public interface ProductRepository extends JpaRepository&lt;Product, Long&gt; {
+
+    // [subject][Distinct][Top N][By][conditions][OrderBy ...][Asc|Desc]
+    Optional&lt;Product&gt; findBySku(String sku);                        // subject: find|read|get|query|count|exists|delete
+    List&lt;Product&gt;     findByNameContainingIgnoreCase(String f);    // LIKE %f% on lower(name)
+    List&lt;Product&gt;     findByPriceBetween(BigDecimal lo, BigDecimal hi);  // BETWEEN, inclusive
+    List&lt;Product&gt;     findByCategoryParentName(String n);          // "." means an implicit JOIN
+    List&lt;Product&gt;     findTop5ByStatus(ProductStatus s);            // limiting
+    Page&lt;Product&gt;     findByStatus(ProductStatus s, Pageable p);
+
+    // A derived name CANNOT express a fetch join — it compiles, it parses,
+    // and the N+1 you were trying to fix is still there.
+    &#64;Query("select distinct o from Order o join fetch o.lines where o.id = :id")
+    Optional&lt;Order&gt; findWithLines(&#64;Param("id") Long id);
+}</code></pre>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Two traps in the grammar</span>
+        <p><strong>The parse happens at context startup, not at compile time.</strong> A broken
+        method name takes the application down at boot, and CI only catches it if the test slice
+        actually boots a context. The error is good, though: it names the unparsed fragment, so
+        diagnosis is mechanical &mdash; the parser stopped at the first token it could not resolve
+        to a property, a keyword, or an <code>And</code> boundary.</p>
+        <p><strong>A null argument becomes <code>IS NULL</code>, silently.</strong>
+        <code>findByStatusAndDateGreaterThan(s, null)</code> is not an error and not a no-op; it is
+        an <code>IS NULL</code> comparison that returns a plausible set of wrong rows and looks
+        like a data problem when it is an argument problem. This is the strongest argument for
+        <code>&#64;Query</code> in anything with an optional filter.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — derived names against <code>&#64;Query</code></span>
+        <p>Derived methods are compile-time invisible, IDE-unindexable, and reviewable only by
+        someone who knows the grammar. <code>&#64;Query</code> is greppable, refactor-safe, and
+        <strong>validated at startup on property names</strong> &mdash; a real safety net no amount
+        of "derived is more readable" dismisses &mdash; and it is the only option for anything the
+        grammar can't express. It also binds by name only with <code>&#64;Param</code> or a
+        <code>-parameters</code> build; without one you get
+        <code>Name for parameter binding must not be null</code> at startup. The rule that holds up:
+        <strong>derived for single-property lookups, <code>&#64;Query</code> from the second
+        association traversal onward</strong> &mdash; the point where a reader has to hold the whole
+        name in their head is where the abstraction starts costing you.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — <code>countQuery</code> is not optional when a count is shown</span>
+        <p>Spring Data derives the count by cloning the main query and replacing the select clause.
+        That is right for most JPQL and <strong>wrong for any query with a <code>join fetch</code>
+        of a collection</strong> &mdash; it counts joined rows, so an order with 5 line items
+        counts 5 times &mdash; and wrong for a <code>distinct</code> it cannot translate. Both give
+        a total that is too high and a UI showing "1,247 results" for 340 real ones. The page
+        content is right and only the total is inflated, which is why it looks plausible rather
+        than obviously broken. The same trap has a name in <code>Specification</code>: joining a
+        to-many without <code>query.distinct(true)</code> makes
+        <code>getTotalElements()</code> disagree with <code>getNumberOfElements()</code>.</p>
+      </div>
+
+      <h3>Bulk operations: fast, and dangerous</h3>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 285" role="img" aria-label="A bulk UPDATE sets status to SHIPPED in the database while bypassing the persistence context. A managed entity still holds the old status PENDING, a setter marks a different field dirty, and at flush Hibernate writes status back as PENDING together with the changed field, undoing the bulk update.">
+          <defs>
+            <marker id="arw-s6-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node node--warn" x="40" y="14" width="250" height="48" rx="6"/>
+          <text class="label" x="165" y="34" text-anchor="middle">bulk UPDATE &#64;Modifying</text>
+          <text class="label label--sub" x="165" y="52" text-anchor="middle">bypasses the context</text>
+
+          <path class="edge" d="M 292 38 L 336 38" marker-end="url(#arw-s6-b)"/>
+          <text class="edge-label" x="314" y="28" text-anchor="middle">1</text>
+
+          <rect class="node node--good" x="340" y="14" width="280" height="48" rx="6"/>
+          <text class="label" x="480" y="34" text-anchor="middle">row: status = 'SHIPPED'</text>
+          <text class="label label--sub" x="480" y="52" text-anchor="middle">the database is correct</text>
+
+          <rect class="node" x="40" y="96" width="250" height="48" rx="6"/>
+          <text class="label" x="165" y="116" text-anchor="middle">Product&#64;… still managed</text>
+          <text class="label label--sub" x="165" y="134" text-anchor="middle">status = 'PENDING' (stale)</text>
+
+          <path class="edge" d="M 292 120 L 336 120" marker-end="url(#arw-s6-b)"/>
+          <text class="edge-label" x="314" y="110" text-anchor="middle">2</text>
+
+          <rect class="node node--accent" x="340" y="96" width="280" height="48" rx="6"/>
+          <text class="label" x="480" y="116" text-anchor="middle">p.setTier('GOLD')</text>
+          <text class="label label--sub" x="480" y="134" text-anchor="middle">field differs from the snapshot</text>
+
+          <path class="edge edge--bad" d="M 480 144 L 480 172" marker-end="url(#arw-s6-b)"/>
+          <text class="edge-label" x="490" y="164" text-anchor="start">3 &mdash; flush</text>
+
+          <rect class="node node--bad" x="40" y="174" width="580" height="58" rx="6"/>
+          <text class="label" x="330" y="196" text-anchor="middle">UPDATE products SET status = 'PENDING', tier = 'GOLD' WHERE id = ?</text>
+          <text class="label label--sub" x="330" y="218" text-anchor="middle">the bulk update is undone for every entity the same transaction had loaded</text>
+
+          <text class="edge-label edge-label--strong fill-warn" x="330" y="262" text-anchor="middle">Fix: clearAutomatically = true &mdash; the entities are still managed until the context is dropped.</text>
+        </svg>
+        <figcaption>
+          <strong>This is the one interaction on the page that corrupts data rather than returning
+          a wrong number.</strong> It reproduces only when the same transaction both runs the bulk
+          statement and <em>loads</em> rows it touched &mdash; which is why it passes review, passes
+          unit tests, and reaches production. The rule of thumb: bulk for a large set you will not
+          touch again; the managed, versioned, lifecycle-correct path for anything sharing a
+          transaction with a read of the same rows.
+        </figcaption>
+      </figure>
+
+      <pre class="snippet" data-lang="java" data-title="Modifying bulk update" data-hl-line="2,3"><code>&#64;Transactional
+&#64;Modifying(clearAutomatically = true,   // detaches everything AFTER — the fix for the stale write-back
+           flushAutomatically = true)   // flushes BEFORE, so the query sees this transaction's own inserts
+&#64;Query("update Product p set p.status = :to where p.status = :from")
+int bulkRetire(&#64;Param("from") ProductStatus from, &#64;Param("to") ProductStatus to);</code></pre>
+
+      <p>You need both flags for different reasons and only one of them prevents the corruption.
+      <code>flushAutomatically</code> is for when the bulk statement's target rows include rows this
+      transaction just inserted and has not flushed. <code>clearAutomatically</code> is the one
+      that stops the write-back &mdash; and its own cost is that every entity in the context is
+      detached afterwards, so a caller iterating managed entities gets detached ones.
+      <code>&#64;Modifying</code> methods are transactional and throw
+      <code>TransactionRequiredException</code> outside one, which a broad
+      <code>catch (Exception)</code> will turn into a silent zero-row nightly job.</p>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — <code>Specification</code> is not plan-cached</span>
+        <p>A JPQL string is parsed once into a query plan keyed by the string and looked up
+        thereafter. A <code>Specification</code> builds a <strong>new criteria tree on every
+        invocation</strong>, so the key is effectively unique, the Hibernate plan cache never hits
+        and grows unboundedly, and the <em>database's</em> plan cache misses too because the SQL
+        shape varies. Ten thousand invocations is roughly ten thousand cache entries. At a few
+        calls per request this is irrelevant and you will not measure a difference; it is real for
+        a search endpoint at thousands of calls per second with a different filter each time. The
+        mitigation is not "ban <code>Specification</code>" &mdash; it is naming the top few
+        filter combinations as <code>&#64;Query</code> and keeping the specification for the long
+        tail.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">The real cost of the repository pattern is observability</span>
+        <p>Not verbosity &mdash; <strong>observability</strong>. A DBA asked "which queries touch
+        <code>products</code> in the last hour" cannot answer it from Java. A log analyser cannot
+        aggregate them. An APM tool cannot build a per-endpoint latency histogram because the SQL
+        is a runtime-generated string it has never seen. The database's own
+        <code>pg_stat_statements</code> can, and it will show you queries your repository interfaces
+        do not know exist.</p>
+        <p>The rule that decides the design point: the abstraction traded a shared, queryable
+        language for per-query encapsulation, and the trade is only good while the queries are
+        simple. Single-aggregate CRUD through Spring Data; anything with a fetch join, a
+        projection or a report shape through a named query layer with a hand-written mapping.</p>
+      </div>
+    </section>
+
+    <!-- ============ 3 ============ -->
+    <section id="ch3" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">03</span>
+        <h2>Relationships &amp; fetch strategies</h2>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">A bidirectional association is two fields, and one is fake</span>
+        <p>The owning side holds the <code>&#64;JoinColumn</code> (or the <code>&#64;JoinTable</code>,
+        or the plain FK field) and is the only side Hibernate writes. The inverse side carries
+        <code>mappedBy</code> and is never written. Setting only the inverse side is not a partial
+        write &mdash; it is a <strong>complete no-op</strong>: the collection looks correct in
+        memory, the transaction succeeds, the row lands with a null foreign key, and nothing
+        throws. That is why the <code>addChild</code> helper pattern exists. It is an
+        <em>enforcement mechanism</em>, not a convenience &mdash; it makes the two-sided update
+        the only way to express the operation, so the failure becomes a review comment rather
+        than a silent data bug.</p>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Owning side and helper" data-hl-line="5,13"><code>&#64;Entity
+public class Customer {
+
+    &#64;OneToOne(fetch = FetchType.LAZY)          // spec default is EAGER — override it deliberately
+    &#64;JoinColumn(name = "passport_id", unique = true)   // unique, or it is a ManyToOne with extra steps
+    private Passport passport;
+
+    &#64;OneToMany(mappedBy = "customer", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List&lt;Order&gt; orders = new ArrayList&lt;&gt;();   // inverse: Hibernate never writes this
+
+    public void addOrder(Order order) {
+        orders.add(order);
+        order.setCustomer(this);     // the owning side — without this the FK inserts as null
+    }
+}</code></pre>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — <code>cascade = REMOVE</code> is not <code>orphanRemoval</code></span>
+        <p><code>cascade = REMOVE</code> means "when the parent is deleted, delete the children"
+        &mdash; all or nothing. <code>orphanRemoval</code> means "when a child <em>leaves the
+        collection</em>, delete the row" &mdash; one at a time. Many real mappings need both and
+        they are not alternatives. <code>cascade = ALL</code> alone does <strong>not</strong>
+        delete an orphaned child: removing it from the collection is a no-op and the row stays
+        with a dangling FK, which is the "deleted rows come back" bug. <code>orphanRemoval</code>
+        is only valid on the owning side, and only for <code>&#64;OneToOne</code> and
+        <code>&#64;OneToMany</code> &mdash; a <code>&#64;ManyToMany</code> cannot use it, because
+        a row missing from the join table isn't orphaned, it's just absent.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>The spec's fetch-type defaults, and what each costs in practice</caption>
+          <thead><tr><th>Association</th><th>Spec default</th><th>What it actually does</th><th>Make it</th></tr></thead>
+          <tbody>
+            <tr><td><code>&#64;ManyToOne</code></td><td><strong>EAGER</strong></td>
+              <td>Every <code>find</code> on the owner issues an extra <code>SELECT</code> for the target, whether or not the caller touches it</td>
+              <td><code>LAZY</code> &mdash; it is the most common association in a typical model, so the default is the expensive one</td></tr>
+            <tr><td><code>&#64;OneToOne</code></td><td><strong>EAGER</strong></td>
+              <td>Same, plus a unique-constraint requirement people trip over. Without the constraint it is a <code>ManyToOne</code> with extra steps &mdash; and Hibernate's eager <code>SELECT</code> then finds two rows and throws <code>NonUniqueResultException</code></td>
+              <td><code>LAZY</code>, and add the unique constraint in a migration</td></tr>
+            <tr><td><code>&#64;OneToMany</code></td><td>LAZY</td>
+              <td>A <code>PersistentBag</code> proxy; one <code>SELECT</code> on first touch</td>
+              <td>LAZY is already right</td></tr>
+            <tr><td><code>&#64;ManyToMany</code></td><td>LAZY</td>
+              <td>A proxy over the join table</td>
+              <td>LAZY is already right</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — is EAGER ever the right answer?</span>
+        <p>Yes, for a small, immutable reference that is genuinely part of the owner's identity and
+        needed on every read &mdash; a <code>Currency</code>, a <code>CountryCode</code>, a fixed
+        <code>FeeSchedule</code> &mdash; and it stops being defensible the moment the association is
+        nullable, large, or itself an aggregate root, because the eager load then cascades.
+        <strong>Flips on scale:</strong> below roughly ten thousand requests a second an extra
+        indexed join is cheap and eager is simpler; above it the multiplication is real.</p>
+        <p>The argument that settles most discussions is neither: a fetch strategy is a
+        <em>default for the mapping</em> while the need is a <em>property of the caller</em>, so
+        every value of the annotation is a compromise. The mature position is all-LAZY mappings,
+        deliberate fetching at each call site, and a query-count assertion to stop "deliberate"
+        decaying back into "whatever the defaults did".</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — <code>LAZY</code> on a to-one still issues a query</span>
+        <p>The folk memory is "associations are lazy by default" and it is wrong in the expensive
+        direction: <code>&#64;ManyToOne</code> is <strong>EAGER</strong>, so a single
+        <code>find()</code> on an entity with three to-one associations issues four queries before
+        the caller has touched anything. The three real costs of a lazy proxy: it throws
+        <code>LazyInitializationException</code> when touched outside a session; a lazy load inside
+        a loop is an N+1 wearing a disguise, with no fetch join anywhere for a reviewer to spot;
+        and it is not "eventually cheaper" but <em>deferred to a worse place</em> &mdash; which is
+        precisely what Open Session in View does.</p>
+      </div>
+
+      <h3>Fetching, and the three ways it fails</h3>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 300" role="img" aria-label="A join fetch multiplies the result set: one order with five line items becomes five rows. LIMIT 20 is applied by the database to the joined rows, so a page of size 20 contains only four distinct orders and the rest are pushed to later pages. Hibernate 6 may instead fetch every row and page in memory, logging HHH000104.">
+          <defs>
+            <marker id="arw-s6-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <text class="label" x="20" y="30">joined result rows &mdash; one order with 5 line items is 5 rows</text>
+
+          <rect class="node node--accent" x="20" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="37" y="65" text-anchor="middle">A</text>
+          <rect class="node node--accent" x="58" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="75" y="65" text-anchor="middle">A</text>
+          <rect class="node node--accent" x="96" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="113" y="65" text-anchor="middle">A</text>
+          <rect class="node node--accent" x="134" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="151" y="65" text-anchor="middle">A</text>
+          <rect class="node node--accent" x="172" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="189" y="65" text-anchor="middle">A</text>
+
+          <rect class="node" x="216" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="233" y="65" text-anchor="middle">B</text>
+          <rect class="node" x="254" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="271" y="65" text-anchor="middle">B</text>
+          <rect class="node" x="292" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="309" y="65" text-anchor="middle">B</text>
+          <rect class="node" x="330" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="347" y="65" text-anchor="middle">B</text>
+          <rect class="node" x="368" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="385" y="65" text-anchor="middle">B</text>
+
+          <rect class="node" x="412" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="429" y="65" text-anchor="middle">C</text>
+          <rect class="node" x="450" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="467" y="65" text-anchor="middle">C</text>
+          <rect class="node" x="488" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="505" y="65" text-anchor="middle">C</text>
+          <rect class="node" x="526" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="543" y="65" text-anchor="middle">C</text>
+          <rect class="node" x="564" y="46" width="34" height="30" rx="4"/>
+          <text class="label" x="581" y="65" text-anchor="middle">C</text>
+
+          <path class="edge edge--bad" d="M 610 34 L 610 88"/>
+          <text class="edge-label fill-bad" x="618" y="66" text-anchor="start">LIMIT 20</text>
+
+          <path class="edge edge--warn" d="M 20 88 L 20 118" marker-end="url(#arw-s6-c)"/>
+          <rect class="node node--warn" x="20" y="120" width="200" height="52" rx="6"/>
+          <text class="label" x="120" y="142" text-anchor="middle">page 1, size 20</text>
+          <text class="label label--sub" x="120" y="160" text-anchor="middle">4 distinct orders</text>
+
+          <path class="edge edge--warn" d="M 236 146 L 274 146" marker-end="url(#arw-s6-c)"/>
+
+          <rect class="node node--bad" x="278" y="120" width="352" height="52" rx="6"/>
+          <text class="label" x="454" y="142" text-anchor="middle">HHH000104 &mdash; Hibernate 6</text>
+          <text class="label label--sub" x="454" y="160" text-anchor="middle">may fetch every row and page in memory instead</text>
+
+          <text class="edge-label" x="20" y="204" text-anchor="start">The database limits the JOINED rows, not the distinct orders.</text>
+          <text class="edge-label" x="20" y="222" text-anchor="start">Order B and C land on page 2, so page 2 is short and page 3 repeats what page 1 showed.</text>
+
+          <rect class="node node--good" x="20" y="240" width="610" height="48" rx="6"/>
+          <text class="label" x="325" y="260" text-anchor="middle">Fix: fetch the collection in a second query</text>
+          <text class="label label--sub" x="325" y="278" text-anchor="middle">&#64;BatchSize, a second &#64;Query, or paginate a subquery of IDs and fetch outside the page</text>
+        </svg>
+        <figcaption>
+          <strong>Fetch-join plus pagination is worse than the N+1 it fixes.</strong> The join
+          multiplies rows, <code>LIMIT</code> applies to the join, and the page comes back holding
+          however many <em>distinct</em> owners those twenty rows happen to represent. It is also
+          the first of three fetch-join failure modes &mdash; the review question is always
+          "does this method paginate?", and the other two are below.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>How to say "fetch it now", and what each costs</caption>
+          <thead><tr><th>Mechanism</th><th>Wins when</th><th>When it bites</th></tr></thead>
+          <tbody>
+            <tr><td><code>join fetch</code> in JPQL / HQL</td>
+              <td>One query, and you need the association for <em>every</em> row</td>
+              <td>Pagination, two <code>List</code> bags, and &mdash; on a nullable to-one &mdash; it is an <strong>inner</strong> join, so rows silently disappear. <code>left join fetch</code> keeps them</td></tr>
+            <tr><td><code>&#64;EntityGraph(attributePaths = ...)</code></td>
+              <td>The same association set is needed by several queries: name it once, override per call. Subgraphs (<code>"lines.product.category"</code>) are the only way to express a multi-level fetch</td>
+              <td>Same three hazards, plus a dynamic named graph for one chosen at runtime</td></tr>
+            <tr><td><code>&#64;BatchSize(size = n)</code></td>
+              <td>"I need this on some rows" &mdash; a list with a child count or a child name</td>
+              <td><strong>No</strong> fetch-join hazards, at the cost of <code>1 + ceil(N/n)</code> queries and an <code>IN</code> list of <em>n</em> owner IDs</td></tr>
+            <tr><td><code>&#64;Fetch(FetchMode.SUBSELECT)</code></td>
+              <td>You always need this association for this entity, across the whole session</td>
+              <td>Two queries total regardless of N &mdash; but one query for a collection half the callers don't need, returning rows for entities you don't care about</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — <code>MultipleBagFetchException</code> says "bags" on purpose</span>
+        <p>A <em>bag</em> is a <code>List</code> field with no <code>&#64;OrderColumn</code>. A
+        result set has no column identifying which collection a repeated row belongs to, so Hibernate
+        can carry one <code>List</code> per query and no more. <code>Set</code> collections don't
+        have the problem, because rows de-duplicate by primary key &mdash; so the widely-repeated
+        advice "one collection per query" is <strong>wrong</strong>: two <code>Set</code>s fetch
+        fine.</p>
+        <p>The consequence of the workaround is ordering, and it is the thing to name: a
+        <code>Set</code> is unordered unless you add <code>&#64;OrderColumn</code> (a synthetic
+        index column Hibernate maintains on <em>every write</em>) or <code>&#64;OrderBy</code> (a
+        read-time <code>ORDER BY</code>, free on write). <code>&#64;OrderBy</code> is nearly always
+        the right one.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — all-LAZY is a discipline, not an annotation</span>
+        <p>With OSIV on (the Boot default) lazy loading in the view always works, so your
+        integration tests &mdash; <code>&#64;SpringBootTest</code> + <code>MockMvc</code> included
+        &mdash; <strong>pass on code containing an N+1</strong>. Setting
+        <code>open-in-view: false</code> is therefore a <em>detector</em>, not just a policy: it
+        surfaces every place an entity crosses a boundary, and each of those is a place where the
+        response shape and the persistence model are coupled. The durable control is
+        <code>readOnly = true</code> on read services plus a DTO returned from inside the
+        transaction &mdash; test-slice mechanics and transactional test rollback are Volume 9's
+        material.</p>
+      </div>
+    </section>
+
+    <!-- ============ 4 ============ -->
+    <section id="ch4" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">04</span>
+        <h2>The N+1 problem</h2>
+      </div>
+
+      <p>An N+1 is not a Hibernate bug. It is what happens when a query returns N rows and the
+      code then does something per row that needs more information &mdash; and the ORM's laziness
+      makes it trivial to write, because the code reads like good service code.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 320" role="img" aria-label="One parent SELECT for customers returns twenty rows. Touching the order collection, then the line collection, then the status of each order inside the mapping code issues twenty order queries, eighty order_line queries and eighty status queries, for a total of 181 statements, every one of them indexed and sub-millisecond.">
+          <defs>
+            <marker id="arw-s6-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node node--accent" x="240" y="12" width="180" height="40" rx="6"/>
+          <text class="label" x="330" y="36" text-anchor="middle">SELECT customers</text>
+
+          <path class="edge" d="M 330 52 L 330 82" marker-end="url(#arw-s6-d)"/>
+          <text class="edge-label" x="340" y="72" text-anchor="start">1 query, 20 rows</text>
+
+          <path class="edge" d="M 300 82 L 115 102"/>
+          <path class="edge" d="M 330 82 L 330 102" marker-end="url(#arw-s6-d)"/>
+          <path class="edge" d="M 360 82 L 545 102"/>
+
+          <rect class="node" x="25" y="104" width="180" height="48" rx="6"/>
+          <text class="label" x="115" y="124" text-anchor="middle">orders &times; 20</text>
+          <text class="label label--sub" x="115" y="142" text-anchor="middle">where customer_id = ?</text>
+
+          <rect class="node" x="240" y="104" width="180" height="48" rx="6"/>
+          <text class="label" x="330" y="124" text-anchor="middle">order_lines &times; 80</text>
+          <text class="label label--sub" x="330" y="142" text-anchor="middle">where order_id = ?</text>
+
+          <rect class="node" x="455" y="104" width="180" height="48" rx="6"/>
+          <text class="label" x="545" y="124" text-anchor="middle">order_statuses &times; 80</text>
+          <text class="label label--sub" x="545" y="142" text-anchor="middle">where id = ?</text>
+
+          <path class="edge edge--bad" d="M 115 152 L 115 236" marker-end="url(#arw-s6-d)"/>
+          <path class="edge edge--bad" d="M 330 152 L 330 236" marker-end="url(#arw-s6-d)"/>
+          <path class="edge edge--bad" d="M 545 152 L 545 236" marker-end="url(#arw-s6-d)"/>
+
+          <text class="edge-label edge-label--strong" x="330" y="182" text-anchor="middle">one round trip each, issued from inside the mapping code</text>
+
+          <rect class="node node--bad" x="150" y="240" width="360" height="46" rx="6"/>
+          <text class="label" x="330" y="268" text-anchor="middle">181 statements &middot; 181 connection checkouts</text>
+
+          <text class="edge-label fill-bad" x="330" y="310" text-anchor="middle">Every one of them indexed and sub-millisecond — that is why it hides from database monitoring.</text>
+        </svg>
+        <figcaption>
+          <strong>The unit of cost an N+1 attacks is round trips, not query time.</strong> 181
+          hops across a 1&nbsp;ms link is 181&nbsp;ms of pure latency, and against a pool it is 181
+          connection checkouts &mdash; which is why a p99 of 2&nbsp;ms per query across 180 queries
+          is 360&nbsp;ms of latency with the database reporting a <em>low</em> mean query time. On a
+          unix socket it survives; over a 2&nbsp;ms cross-AZ link, or at 200 requests a second, it is
+          the entire latency budget.
+        </figcaption>
+      </figure>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "the queries are fast, so it isn't an N+1"</span>
+        <p>It absolutely is, and the second trap is "it's fine because there's an index": an index
+        makes each of the 180 queries fast, and 180 fast queries are still 180 queries. The
+        signature that tells you in <code>pg_stat_statements</code> is <strong>many calls, tiny
+        mean</strong> &mdash; one query shape, a high <code>calls</code> count, a high
+        <code>total_exec_time</code>, and a tiny <code>mean_exec_time</code>. In an APM it is N
+        identical short child spans; in a pool dashboard it is checkout wait time spiking while
+        query duration stays flat, which is the diagnostic that separates "the database is slow"
+        from "we made too many trips to the database".</p>
+      </div>
+
+      <h3>Detecting it</h3>
+
+      <pre class="snippet" data-lang="java" data-title="Query count assertion" data-hl-line="8,9"><code>SessionFactory sf = emf.unwrap(SessionFactory.class);
+HibernateStatistics stats = sf.getStatistics();
+stats.setStatisticsEnabled(true);
+stats.clear();
+
+List&lt;OrderDto&gt; rows = new OrderService(orderRepo).listByStatus(ACTIVE);   // the measured block
+
+// an UPPER BOUND, never an exact number — an exact one fails on every mapping change
+assertThat(stats.getPrepareStatementCount()).isLessThanOrEqualTo(3);
+assertThat(stats.getCollectionFetchCount()).isLessThanOrEqualTo(3);   // the more sensitive signal</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — the only detector that is a control</span>
+        <p>An N+1 is a property of the <em>combination</em> of a query and the code that consumes
+        it, so a unit test of either half cannot see it. The query-count assertion runs the real
+        query through the real mapping and counts the statements &mdash; and it is the only detector
+        that is a <strong>control</strong> rather than a diagnostic, because it fails a build
+        instead of explaining a graph. A diagnostic you run during an incident is a diagnostic
+        that never runs.</p>
+        <p>Two details decide whether it survives. Assert an <em>upper bound</em> with a comment
+        explaining the budget; an exact number fails on every unrelated mapping change and gets
+        deleted within a month. And check <code>getCollectionFetchCount()</code> alongside the
+        statement count &mdash; one query with 400 collections hydrated is an N+1 with a
+        clean-looking query log, and a query count of 1 with 400 loaded entities is a memory
+        problem, not a round-trip problem, with completely different fixes.</p>
+      </div>
+
+      <h3>The fixes, and the condition that picks between them</h3>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Query count for N rows, and what each fix costs you</caption>
+          <thead><tr><th>Fix</th><th>Queries for N rows</th><th>Right when</th><th>Cost</th></tr></thead>
+          <tbody>
+            <tr><td><code>JOIN FETCH</code> / <code>&#64;EntityGraph</code></td><td>1</td>
+              <td>The association is needed for <strong>every</strong> row</td>
+              <td>All three fetch-join hazards, and it makes the association mandatory in the result</td></tr>
+            <tr><td><code>&#64;BatchSize(size = n)</code></td><td><code>1 + ceil(N/n)</code></td>
+              <td>A bounded list of parents, and the query paginates or has two bags</td>
+              <td>Constant-factor only. A 200-row <code>IN</code> clause makes the plan unstable and can exceed a driver's parameter limit</td></tr>
+            <tr><td><code>&#64;Fetch(SUBSELECT)</code></td><td>2, regardless of N</td>
+              <td>Always needed, for every entity of that type in the session</td>
+              <td>Bulk and blunt &mdash; one query for a collection half the callers don't need</td></tr>
+            <tr><td><code>default_batch_fetch_size</code> (global)</td><td><code>1 + ceil(N/n)</code></td>
+              <td>The best "set once" option; covers collections <em>and</em> to-one associations</td>
+              <td>Changes the behaviour of every query you didn't write, and can hide N+1s rather than fix them</td></tr>
+            <tr><td><strong>DTO projection</strong> (constructor expression)</td><td>1</td>
+              <td><strong>Always</strong> &mdash; because you never needed the entities</td>
+              <td>You lose the persistence context, dirty checking and lazy nav. Which is the point</td></tr>
+            <tr><td>Custom repository fragment</td><td>What you write</td>
+              <td>A window function, a recursive CTE, a report shape</td>
+              <td>You own the SQL, the mapping and the portability</td></tr>
+            <tr><td>Second-level / query cache</td><td>&asymp;0 after warm</td>
+              <td>Reads that are genuinely cacheable</td>
+              <td>Doesn't reduce the count. See the trap below</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — <code>ceil(N/n) + 1</code> decides this</span>
+        <p>For 20 orders at <code>&#64;BatchSize(50)</code> that is <strong>2</strong> queries, not
+        21. At <code>&#64;BatchSize(10)</code> it is 3. For 5,000 orders at
+        <code>&#64;BatchSize(50)</code> it is <strong>101</strong> &mdash; which is the point at
+        which batching stops being a fix and becomes a slower N+1, because it is a
+        <em>constant-factor</em> improvement, not an asymptotic one. The answer there is pagination,
+        a projection with a <code>GROUP BY</code>, or a denormalised column &mdash; not a bigger
+        <em>n</em>. The failure nobody plans for is a team that raises <code>batch_size</code> to
+        100 to make a growing report faster, which works until the <code>IN</code> clause hits a
+        driver parameter limit and the query starts <em>failing</em> rather than slowing down.</p>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Batching and projection" data-hl-line="3,12"><code>&#64;OneToMany(mappedBy = "order", fetch = FetchType.LAZY)
+&#64;BatchSize(size = 50)          // 20 orders -&gt; 1 + ceil(20/50) = 2 queries
+private List&lt;OrderLine&gt; lines;
+
+// the fix that removes the REASON the N+1 existed: you never needed the entities
+&#64;Query("""
+       select new com.acme.dto.OrderRow(
+           o.id, c.name,
+           (select count(l) from OrderLine l where l.order = o))
+       from Order o join o.customer c
+       where o.status = :status
+       """)
+List&lt;OrderRow&gt; findRows(&#64;Param("status") ProductStatus status, Pageable p);</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">The fix that is usually right, and the reason isn't performance</span>
+        <p>You were rendering 20 orders. You needed four scalar columns and one count. Every other
+        fix is about loading entities you had no intention of using in fewer round trips &mdash; a
+        bet that the extra columns and hydration cost are cheaper than the queries saved. A
+        projection makes no such bet: it asks the database for exactly what the response needs.
+        <strong>The tell that you have reached it is noticing that the N+1 exists at all</strong>
+        &mdash; the loop only ran because you were mapping entities to fill in a table. The test to
+        apply: if the method returns an entity and the caller immediately converts it to a DTO, the
+        projection should have been the query.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Two cache answers, both wrong</span>
+        <p><strong>The query cache makes an N+1 worse.</strong> It is keyed on the full bind-parameter
+        set, so 180 queries with 180 different IDs are 180 distinct cache entries &mdash; all misses,
+        evicting each other.</p>
+        <p><strong>The second-level cache doesn't fix it either.</strong> It makes each of the N
+        queries cheaper, not fewer, the first cold one still hits the database, and it is
+        per-process by default, so ten instances mean ten caches and ten independently-stale
+        copies. It is genuinely right for a small, hot, read-mostly reference set &mdash; a few
+        hundred <code>Category</code> rows read on every request &mdash; but that is a different
+        decision, and the one that decides it is the consistency contract: a write in another
+        process cannot invalidate a local cache, so the staleness window is unbounded in the worst
+        case. <strong>Push caching up the stack</strong>, to HTTP or a service layer, where the TTL
+        is explicit and a bad invalidation costs one response rather than every reader in the
+        process. Enabling it needs <code>hibernate.cache.use_second_level_cache</code> plus a
+        region factory, and the per-class
+        <code>CacheConcurrencyStrategy.READ_WRITE</code> is the safe one &mdash;
+        <code>READ_ONLY</code> is faster and has an unbounded stale-read window.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Would you ban <code>join fetch</code> in review to stop N+1s?</span>
+        <p>No &mdash; it is the wrong lever for the right instinct, and it fails the requirement.
+        A ban removes a tool without replacing it, so teams compensate with a global
+        <code>default_batch_fetch_size</code> that changes every query in the application, including
+        the ones that work. The assertion catches every N+1, including the ones nobody wrote a
+        fetch join for: the ones inside loops, the ones from <code>equals</code> touching a lazy
+        association, the ones inherited from a mapping someone else wrote. Then the review comment
+        on a specific <code>join fetch</code> is about <em>this</em> method's constraints &mdash;
+        does it paginate, is more than one <code>List</code> involved, is the association provably
+        non-null. That is a review that can be done; "no fetch joins" is a rule that can't.</p>
+      </div>
+    </section>
+
+    <!-- ============ 5 ============ -->
+    <section id="ch5" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">05</span>
+        <h2>The persistence context in practice</h2>
+      </div>
+
+      <p>Section 1 drew the identity map. This section is about the four things that surprise
+      people once they have one: what triggers a write, when the in-memory state stops matching
+      the database, what it costs in memory, and what Spring does to it without telling you.</p>
+
+      <h3>Flush and commit are not the same event</h3>
+
+      <p>Commit is the transaction boundary. Flush is Hibernate synchronising the persistence
+      context with the database, and it happens at four moments:</p>
+
+      <ul>
+        <li>before any JPQL or HQL query whose query space overlaps a pending change;</li>
+        <li>before any native SQL statement, unconditionally;</li>
+        <li>at commit;</li>
+        <li>explicitly, via <code>flush()</code>.</li>
+      </ul>
+
+      <p>Native SQL is the one that bites, because the auto-flush rule only understands JPQL's
+      query spaces. A JPQL query that does not touch the table you modified will not trigger a
+      flush, and neither will a native statement &mdash; so a bulk <code>UPDATE</code> run through
+      the JDBC template can write a value that the transaction then overwrites from a stale
+      in-memory copy at commit.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap &mdash; "the <code>UPDATE</code> ran, why is the old value back?"</span>
+        <p>The write was reverted by the persistence context, not lost by the database. The
+        in-memory entity was dirty, the flush at commit issued an <code>UPDATE</code> with the
+        <em>old</em> value, and the bulk statement's row count was correct the whole time. The
+        signature is a row that reverts on a path where the same code passes in a test &mdash;
+        because in the test the bulk statement was the last thing to touch the transaction, so
+        there was nothing left to overwrite it.</p>
+      </div>
+
+      <h3>What dirty checking does that <code>save()</code> does not</h3>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Surprises from the context's snapshot, and what each costs</caption>
+          <thead><tr><th>Change</th><th>Is <code>save()</code> needed?</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>New entity, transient</td><td><strong>Yes</strong></td>
+              <td>Nothing knows it exists. Dirty checking compares against a snapshot, and there is no snapshot</td></tr>
+            <tr><td>Field on a managed entity</td><td>No</td>
+              <td>The snapshot differs at flush. This is the feature</td></tr>
+            <tr><td><code>save()</code> on a managed entity</td><td>Pointless &mdash; and it is a <code>merge</code></td>
+              <td>Returns a <em>different</em> managed instance, after a database <code>SELECT</code></td></tr>
+            <tr><td>Field on a detached entity</td><td>Yes, and it is a <code>merge</code></td>
+              <td>No snapshot exists for it any more, so nothing is tracking it</td></tr>
+            <tr><td>Mutating a <code>Set</code> while iterating it</td><td>No &mdash; and it throws</td>
+              <td><code>ConcurrentModificationException</code>; the dirty check never gets to run</td></tr>
+            <tr><td>Changing the <code>id</code> of a managed entity</td><td>No &mdash; and it silently detaches</td>
+              <td>The context keys its entry on the identifier, so the original becomes invisible</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember &mdash; the asymmetry is the whole API</span>
+        <p><strong><code>save()</code> is required on the way in and optional on the way
+        out.</strong> Transient to managed needs an explicit call, because nothing else can see the
+        object. Managed to dirty needs nothing, because the context is already watching. Every
+        confusion about Spring Data's <code>save()</code> comes from applying the first rule to
+        the second case &mdash; and the failure is invisible, because a redundant
+        <code>save()</code> on a managed entity does a <code>SELECT</code> and returns a
+        <em>different</em> object, so the code keeps mutating an instance the context is not
+        watching.</p>
+      </div>
+
+      <h3>Getting rid of it</h3>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Evicting state from the persistence context</caption>
+          <thead><tr><th>Mechanism</th><th>Scope</th><th>Use when</th><th>Loses</th></tr></thead>
+          <tbody>
+            <tr><td><code>em.detach(e)</code></td><td>One entity</td>
+              <td>You are done with one object and want it out of the context</td>
+              <td>Only that entity's snapshot; its loaded children stay</td></tr>
+            <tr><td><code>em.clear()</code></td><td>Everything</td>
+              <td>After a bulk update, or between batches in an import</td>
+              <td><strong>All</strong> managed state &mdash; every unflushed change goes with it</td></tr>
+            <tr><td><code>&#64;Modifying(clearAutomatically = true)</code></td><td>Everything, automatically</td>
+              <td>Bulk DML followed by reads in the same transaction</td>
+              <td>The same, but you did not have to remember</td></tr>
+            <tr><td><code>StatelessSession</code></td><td>Bypasses the context entirely</td>
+              <td>Bulk reads and writes where the objects are not edited</td>
+              <td>Identity map, dirty checking, first-level cache, lazy loading. Nothing is tracked</td></tr>
+            <tr><td>A short transaction</td><td>The scope of the transaction</td>
+              <td>Almost always &mdash; the context dies with the transaction</td>
+              <td>Lazy loading in the view, which is exactly what OSIV is papering over</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check &mdash; 3&times; to 5&times; per entity, then OOM</span>
+        <p>A managed entity is not the object you wrote: it is the object, plus a deep copy of
+        every loaded field for dirty checking, plus a key and an entry in the context's identity
+        map &mdash; <strong>three to five times</strong> the size of the POJO. A
+        <code>StatelessSession</code> reads a 100&nbsp;MB object graph where the managed path does
+        not fit in the heap. Around <strong>100,000 entities</strong> in a single context, the
+        answer stops being "clear more often" and becomes a stateless session or a pagination
+        loop &mdash; and the shape that produces it is the batch job that loads everything because
+        it was convenient to write.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember &mdash; the proxy is bound to the transaction, not the thread</span>
+        <p>What Spring injects is a shared proxy that opens a new <code>EntityManager</code> bound
+        to the current transaction and closes it at the end. Inside a transaction every repository
+        call joins that one context, which is why dirty checking works across repository
+        boundaries. <strong>Outside</strong> one, each call gets a fresh context that closes
+        immediately, so an entity returned from a non-transactional method is <em>detached</em>
+        and its lazy associations cannot be touched &mdash; the visible symptom is a
+        <code>LazyInitializationException</code> far from the method that caused it, usually inside
+        a serialiser. Self-invocation and transaction propagation are Volume 3's and Volume 4's
+        material; the persistence-context half of that story is the single sentence that the
+        context follows a transaction, not a thread, and never survives it.</p>
+      </div>
+
+      <h3>Open Session in View, and read-only transactions</h3>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption><code>spring.jpa.open-in-view</code></caption>
+          <thead><tr><th>Value</th><th>EntityManager lifecycle</th><th>What it costs</th></tr></thead>
+          <tbody>
+            <tr><td><code>true</code> &mdash; the Boot default, and the reason nobody fixed the <code>LazyInitializationException</code></td>
+              <td>Open for the whole request, including view rendering</td>
+              <td>Every query in the request is inside one context, including the ones in the template. An N+1 in a <code>th:each</code> is invisible to you and unbounded to the database</td></tr>
+            <tr><td><code>false</code> &mdash; what you should ship</td>
+              <td>Open only for the service transaction</td>
+              <td>Lazy loading in a view throws. That is the error you wanted, raised in development rather than in production</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap &mdash; "the tests pass, so there is no N+1"</span>
+        <p>With OSIV on, the context stays open through the test's view rendering exactly as in
+        production, so lazy loading always succeeds and the query count is never asserted. The
+        test suite's silence is produced by the same mechanism that produces the production
+        problem. The order that works: turn OSIV <em>off</em> first, let the
+        <code>LazyInitializationException</code>s appear, fix them by fetching what the response
+        needs &mdash; and what remains is the N+1s, with the query-count assertion from section 4
+        as the control. It is a one-line change that converts a class of silent defects into a
+        class of loud ones.</p>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check &mdash; <code>readOnly = true</code> needs both switches</span>
+        <p>Marking a transaction <code>readOnly = true</code> skips dirty checking: Hibernate sets
+        <code>FlushMode.MANUAL</code>, so no snapshot diffing and no accidental dirty writes. That
+        is most of the win. The part that is easy to miss is that the <em>database</em> must be
+        told too, or you have only optimised the ORM and left the driver in read-write-transactions
+        mode &mdash; pair it with
+        <code>hibernate.connection.provider_disables_autocommit</code> to put the connection into
+        read-only mode, which is also what lets read replicas and read-only routing work. The flip
+        condition: read-only is a performance hint with a correctness consequence. A genuine write
+        through a read-only context throws at flush, which is the behaviour you want &mdash; but it
+        is a behaviour change, not a free speed-up.</p>
+      </div>
+    </section>
+
+    <!-- ============ 6 ============ -->
+    <section id="ch6" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">06</span>
+        <h2>Querying &amp; pagination</h2>
+      </div>
+
+      <p>Three query languages, three levels of what the database will catch for you, and one
+      pagination decision that gets more expensive the deeper the user goes.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>JPQL, HQL and native SQL</caption>
+          <thead><tr><th></th><th>JPQL</th><th>HQL</th><th>Native</th></tr></thead>
+          <tbody>
+            <tr><td>Operates on</td><td>Entities and their fields</td><td>Same, plus Hibernate's extensions</td><td>Tables and columns</td></tr>
+            <tr><td>Who validates it</td><td>The persistence provider, at startup for named queries</td><td>The provider</td><td><strong>Nobody, until it runs</strong></td></tr>
+            <tr><td>Portability</td><td>Yes</td><td>Yes, but it is a Hibernate extension</td><td>None &mdash; and you will find out on the migration</td></tr>
+            <tr><td>Use for</td><td>Anything you want to keep portable</td><td>Lock modes, fetch hints, entity functions</td><td>The three queries a hand-tuned index wins</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap &mdash; "the native query is wrong, but it compiled"</span>
+        <p>Native SQL is a string. It is parsed by the database, not by the provider, and it is
+        parsed when it is <em>executed</em> &mdash; so a renamed column, a dropped index, or a
+        keyword that means something in one dialect and nothing in another all pass every build
+        that does not run the code path. The honest framing for an interview: native queries buy
+        you access to features the ORM cannot express (window functions, CTEs,
+        <code>INSERT ... ON CONFLICT</code>) and cost you the guarantee that a schema change
+        breaks the build. Keep them few, name them after the database feature they use, and cover
+        each with one integration test against the real engine.</p>
+      </div>
+
+      <p>Section 2 covered derived queries and <code>Specification</code>. The choice between
+      them and <code>@Query</code> is a question about who owns the query plan: a derived name is
+      parsed and cached against the entity, a <code>Specification</code> is built into criteria and
+      misses that plan cache because the criteria tree is a new object each call, and a
+      <code>@Query</code> is a string the provider parses once at startup &mdash; which is why a
+      typo in a <code>@Query</code> fails the context at boot and a typo in a method name fails it
+      too, while a typo in a native query waits for production.</p>
+
+      <h3>Projections</h3>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Three ways to get something other than an entity</caption>
+          <thead><tr><th>Kind</th><th>How it fails</th><th>Right when</th></tr></thead>
+          <tbody>
+            <tr><td>Interface projection</td>
+              <td>An alias that does not match an attribute name returns <code>null</code> &mdash; silently, every row, no error</td>
+              <td>You want a typed view and will keep the interface beside the query</td></tr>
+            <tr><td>Constructor expression</td>
+              <td>Positional: reordering the <code>select new</code> arguments silently reorders what is injected</td>
+              <td><strong>The default.</strong> A <code>record</code> makes the shape part of the type, and the compiler finds the reordering</td></tr>
+            <tr><td>Class-based projection</td>
+              <td>Requires a no-args constructor plus setters or a matching all-args constructor</td>
+              <td>Legacy DTOs you do not control</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap &mdash; the projection that returns <code>null</code> and nobody notices</span>
+        <p>With an interface projection, the alias in the <code>select</code> is matched against
+        the accessor names by convention. Miss one &mdash; <code>select o.customerName</code> against a
+        getter called <code>getCustomer()</code> &mdash; and Hibernate does not throw: it proxies the
+        interface, finds no matching property, and returns <code>null</code> for that accessor
+        while every other field is populated. <strong>It fails at the consumer</strong>, usually as
+        a blank cell in a table or a zero in a total, long after the query. A constructor
+        expression into a record cannot do this: the argument list is checked by the compiler and
+        the type carries the names. That asymmetry is the whole reason to prefer it.</p>
+      </div>
+
+      <h3>Pagination</h3>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption><code>Page</code> versus <code>Slice</code></caption>
+          <thead><tr><th></th><th><code>Page</code></th><th><code>Slice</code></th></tr></thead>
+          <tbody>
+            <tr><td>Queries</td><td><strong>2</strong> &mdash; the page, then <code>count(*)</code></td><td><strong>1</strong></td></tr>
+            <tr><td>How it gets the extra row</td><td>&mdash;</td><td>Asks for <code>size + 1</code> &mdash; <strong>21</strong> rows for a page of 20 &mdash; and discards it</td></tr>
+            <tr><td>Cost of the count query</td><td>Frequently <strong>10&times;</strong> the page query on a large table, because it reads every matching index entry</td><td>None</td></tr>
+            <tr><td>Total pages</td><td>Yes</td><td>No &mdash; you render "next" from <code>hasNext()</code></td></tr>
+            <tr><td>Use for</td><td>A paged admin grid that shows "page 4 of 61"</td><td>An infinite scroll, a search results list, a feed &mdash; anything that only needs forward and back</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The other half of the cost is that offset pagination is
+      <strong>linear in the page number</strong>, because the database must produce and discard
+      every skipped row. Page 500 of 20 asks for 10,000 rows and returns 20. And it is
+      <em>inconsistent</em> as well as slow: two requests for page 500 while a row is inserted see
+      different data, and a row that shifts position can be shown twice or skipped entirely.</p>
+
+      <pre class="snippet" data-lang="java" data-title="Keyset pagination" data-hl-line="4,7"><code>// seek pagination: no OFFSET, so page 500 costs the same as page 1
+&#64;Query("""
+       select o from Order o
+       where o.createdAt &lt; :t
+          or (o.createdAt = :t and o.id &lt; :id)     // the unique tiebreaker
+       order by o.createdAt desc, o.id desc
+       """)
+List&lt;Order&gt; findPageBefore(&#64;Param("t") Instant t, &#64;Param("id") Long id, Pageable p);</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember &mdash; every paginated query needs a unique tiebreaker</span>
+        <p>The cursor is a <em>tuple</em>, and the tiebreaker is not optional. Order by a
+        non-unique column alone and rows with equal values are skipped or repeated, because the
+        database has no defined order among them and the next page starts "after" a value that
+        several rows share. Order by <code>(created_at, id)</code> and the pair is unique because
+        the id is, so the boundary is exact. The comparison must be the same lexicographic form
+        the ordering uses &mdash; hence the
+        <code>createdAt &lt; :t or (createdAt = :t and id &lt; :id)</code> shape, not two
+        independent predicates. Two portability notes: row-value comparison
+        <code>(a, b) &lt; (:t, :id)</code> is cleaner and is supported by PostgreSQL and MySQL but
+        not by SQL Server or Oracle, so write the <code>OR</code> form; and the sort columns must
+        be indexed together, in the same order, or the seek is no cheaper than the offset.</p>
+      </div>
+    </section>
+
+    <!-- ============ 7 ============ -->
+    <section id="ch7" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">07</span>
+        <h2>Schema, batching &amp; pool sizing</h2>
+      </div>
+
+      <p>Three areas where the defaults are chosen for a single-user development machine, and
+      where the production failure is a lock, an outage, or a schema nobody can reproduce.</p>
+
+      <h3>Who creates the schema</h3>
+
+      <div class="table-wrap">
+        <table>
+          <caption><code>spring.jpa.hibernate.ddl-auto</code></caption>
+          <thead><tr><th>Value</th><th>Behaviour</th><th>Verdict</th></tr></thead>
+          <tbody>
+            <tr><td><code>none</code> &mdash; the default for a real database</td><td>Does nothing</td><td>Correct in production, and required once a migration tool exists</td></tr>
+            <tr><td><code>create-drop</code> &mdash; the default for an embedded database</td><td>Creates on start, drops on shutdown</td><td>Fine for a demo; catastrophic against anything persistent</td></tr>
+            <tr><td><code>update</code></td><td>Ad-hoc <code>ALTER TABLE</code> to close the gap</td><td>Never. It guesses, it does not drop, and its guesses are unreviewable</td></tr>
+            <tr><td><code>create</code> / <code>drop</code></td><td>Create on start, or drop on shutdown</td><td>Test fixtures only</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember &mdash; Boot does not set it, and no value is a migration</span>
+        <p>Spring Boot never sets <code>ddl-auto</code>. It reads whatever is configured, and if
+        nothing is configured it asks the
+        <code>HibernateDefaultDdlAutoProvider</code>, which returns <code>create-drop</code> for an
+        embedded database and <code>none</code> for anything else &mdash; and forces
+        <code>none</code> when Flyway or Liquibase is on the classpath. So "I set
+        <code>update</code> in the test profile and nothing happened in production" describes a
+        profile only the test profile read. The stronger point for an interview:
+        <strong>no value of <code>ddl-auto</code> is a schema migration tool.</strong>
+        <code>update</code> will not rename a column, will not drop one, will not backfill, and
+        will not tell you what it did. The schema is a versioned artefact, changed by ordered,
+        reviewed, checksummed scripts.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap &mdash; the checksum mismatch that gets "fixed" with <code>repair</code></span>
+        <p>Flyway stores a checksum per applied migration and refuses to start when a file that has
+        already run has changed &mdash; which is the feature working. Someone in a hurry runs
+        <code>flyway repair</code>, the application comes up, and the environment now claims a
+        schema state that was never deployed; the next developer reasoning about that database is
+        reasoning from a fiction. The correct response is to find out <em>who edited an applied
+        migration</em>, restore it, and write a new migration for the intended change. Applied
+        migrations are immutable, and a checksum mismatch is tamper-evidence rather than a
+        nuisance.</p>
+      </div>
+
+      <h3>Changing a schema that is already serving traffic</h3>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 250" role="img" aria-label="Expand and contract in four steps. Release one adds a nullable column and dual-writes it, release two backfills existing rows and switches reads to it, and only once every instance runs release two does contract release three drop the old column. The gap between the first and the last step is mandatory, because an instance still on release one is writing the old column.">
+          <defs>
+            <marker id="arw-s6-e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node node--good" x="15" y="14" width="140" height="52" rx="6"/>
+          <text class="label" x="85" y="34" text-anchor="middle">1 &middot; expand</text>
+          <text class="label label--sub" x="85" y="52" text-anchor="middle">add nullable column</text>
+
+          <rect class="node node--good" x="185" y="14" width="140" height="52" rx="6"/>
+          <text class="label" x="255" y="34" text-anchor="middle">1b &middot; dual write</text>
+          <text class="label label--sub" x="255" y="52" text-anchor="middle">code writes both</text>
+
+          <rect class="node node--good" x="355" y="14" width="140" height="52" rx="6"/>
+          <text class="label" x="425" y="34" text-anchor="middle">2 &middot; backfill</text>
+          <text class="label label--sub" x="425" y="52" text-anchor="middle">then read the new one</text>
+
+          <rect class="node node--bad" x="525" y="14" width="120" height="52" rx="6"/>
+          <text class="label" x="585" y="34" text-anchor="middle">3 &middot; contract</text>
+          <text class="label label--sub" x="585" y="52" text-anchor="middle">drop the old column</text>
+
+          <path class="edge edge--good" d="M 155 40 L 185 40" marker-end="url(#arw-s6-e)"/>
+          <path class="edge edge--good" d="M 325 40 L 355 40" marker-end="url(#arw-s6-e)"/>
+          <path class="edge edge--warn" d="M 495 40 L 525 40" marker-end="url(#arw-s6-e)"/>
+
+          <path class="edge edge--warn" d="M 585 66 L 585 100 L 85 100 L 85 118" marker-end="url(#arw-s6-e)"/>
+          <text class="edge-label fill-bad" x="330" y="138" text-anchor="middle">THE GAP IS MANDATORY &mdash; an instance still on release 1 is writing the old column</text>
+
+          <rect class="node" x="15" y="150" width="630" height="44" rx="6"/>
+          <text class="label" x="330" y="169" text-anchor="middle">Between 1b and 3 the code must tolerate three states: old-only, both, new-only</text>
+          <text class="label label--sub" x="330" y="187" text-anchor="middle">nullable, defaulted, or defaulted-and-backfilled &mdash; never NOT NULL in step 1</text>
+
+          <rect class="node node--warn" x="15" y="204" width="630" height="44" rx="6"/>
+          <text class="label" x="330" y="223" text-anchor="middle">DDL takes ACCESS EXCLUSIVE on PostgreSQL &mdash; every other query queues behind it</text>
+          <text class="label label--sub" x="330" y="241" text-anchor="middle">On PG 11 and later set a lock timeout, or the table is down rather than slow</text>
+        </svg>
+        <figcaption>
+          <strong>Expand and contract, and the gap between the two halves is the design.</strong>
+          The dangerous step is not the <code>ADD COLUMN</code>, which is fast &mdash; it is the
+          <code>DROP COLUMN</code>, which fails the instant an instance older than the last deploy
+          is still serving. So the contract is a separate deploy, gated on every instance having run
+          the new code long enough that no connection from an old process is still in the pool.
+          Skipping the gap is not a faster rollout; it is one that passes every test and fails on
+          the first deploy that leaves a single pod behind.
+        </figcaption>
+      </figure>
+
+      <h3>JDBC batching</h3>
+
+      <pre class="snippet" data-lang="yaml" data-title="Batching properties" data-hl-line="3,5"><code>spring:
+  jpa:
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50              # statements per JDBC batch
+          order_inserts: true         # group same-entity inserts, so the sequence is hit in id order
+          order_updates: true
+        generate_statistics: true     # off in production; the counters are not free</code></pre>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check &mdash; 50 round trips become 1, unless the ID strategy stops it</span>
+        <p>With <code>batch_size</code> set, 50 inserts are <strong>one or two</strong> round trips
+        instead of 50. But <strong>with <code>IDENTITY</code> generation the batching is
+        inert</strong> &mdash; the database assigns the id from the insert, so Hibernate must know
+        each id before the next statement, which forces a round trip per row and makes
+        <code>batch_size</code> a no-op. A <code>SEQUENCE</code> lets Hibernate fetch a block of
+        ids up front (allocation size <strong>50</strong> in Hibernate 6) and batch freely, at the
+        price of gaps after a rollback. <code>TABLE</code> also batches, but serialises every
+        writer in the whole application on one row.</p>
+        <p>Two further things decide whether batching reaches the driver. First, the driver has its
+        own rewrite setting &mdash; <code>rewriteBatchedStatements</code> on PostgreSQL,
+        <code>reWriteBatchedInserts</code> on MariaDB,
+        <code>useBulkCopyForBatchInsert</code> on SQL Server &mdash; and without it you have a
+        batch that is still N statements, merely handed over at once. Second, on MySQL the rewrite
+        conflicts with <code>useServerPrepStmts</code>: enabling batching makes Hibernate emit the
+        rewrite, which is mutually exclusive with server-side prepared statements. Check the
+        driver's own documentation for that pair before assuming a batch is one round trip.</p>
+      </div>
+
+      <h3>Locking</h3>
+
+      <pre class="snippet" data-lang="java" data-title="Optimistic and pessimistic locks" data-hl-line="4,7"><code>&#64;Version
+private long version;          // UPDATE ... WHERE id = ? AND version = ?
+
+&#64;Lock(LockModeType.PESSIMISTIC_WRITE)   // SELECT ... FOR UPDATE
+&#64;Query("select p from Product p where p.id = :id")
+Optional&lt;Product&gt; lockById(&#64;Param("id") Long id,
+        &#64;QueryHints(&#64;QueryHint(name = "jakarta.persistence.lock.timeout", value = "-1")));</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember &mdash; a pessimistic timeout of 0 waits forever</span>
+        <p>The values are the ones people get wrong, because they are the JPA ones and they run
+        counter to intuition: <code>0</code> means <strong>wait indefinitely</strong>, and
+        <code>-1</code> means <strong>fail immediately</strong>, that is <code>NOWAIT</code>. A
+        handler that assumes <code>0</code> means "no wait" does not fail fast &mdash; it parks a
+        request thread and a database connection for as long as the lock is held, which converts a
+        contention problem into an outage. The default is whatever the database does, so set it
+        explicitly.</p>
+        <p>The choice between the two is not preference. <code>@Version</code> is optimistic: no
+        lock is held, the losing writer gets an
+        <code>OptimisticLockingFailureException</code> at flush, and the <em>application</em>
+        decides whether to retry &mdash; which is why it is the right default for user-facing edits.
+        Pessimistic locking is correct when the read-modify-write is not idempotent &mdash; taking
+        a seat, decrementing stock, claiming a job &mdash; and it is a throughput ceiling wherever
+        every writer must hold the row, because the lock serialises the critical section and turns
+        a hot row into a queue. Isolation-level semantics and the anomaly table belong to the
+        Database track; what JPA adds here is only the lock mode and these two timeout values.</p>
+      </div>
+
+      <h3>Connection pool sizing</h3>
+
+      <div class="table-wrap">
+        <table>
+          <caption>HikariCP defaults and the two ways to be wrong</caption>
+          <thead><tr><th>Setting</th><th>Default</th><th>Note</th></tr></thead>
+          <tbody>
+            <tr><td><code>maximum-pool-size</code></td><td><strong>10</strong></td><td>Usually left at the default. See the failure signatures below</td></tr>
+            <tr><td><code>connection-timeout</code></td><td>30&nbsp;s</td><td>How long a caller waits for a connection before the pool throws</td></tr>
+            <tr><td><code>max-lifetime</code></td><td>30&nbsp;min</td><td>Below the database and any firewall or load-balancer idle timeout, or connections die in use</td></tr>
+            <tr><td><code>minimum-idle</code></td><td>Equal to the maximum</td><td>The pool starts full and does not shrink, which is what a bursty service wants</td></tr>
+            <tr><td><code>leak-detection-threshold</code></td><td>Off</td><td>Turn it on in development: it logs the stack trace of the connection that exceeded the threshold</td></tr>
+            <tr><td><code>poolName</code></td><td>&mdash;</td><td>Without it the pool shows up in metrics as <code>HikariPool-1</code> and pools cannot be told apart</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap &mdash; "the pool is the bottleneck" is what you say before measuring</span>
+        <p>Both failure modes are visible in metrics and they look nothing alike.
+        <strong>Pool too small:</strong> high acquisition wait, a flat <em>active</em> count well
+        below the maximum, and a database at a fraction of its capacity &mdash; the requests are
+        queuing in your JVM, not in the database. <strong>Pool too large:</strong> active pinned at
+        the maximum, database CPU and context switches at their ceiling, and total throughput
+        <em>flat</em> as the pool grows &mdash; every extra connection makes each one slower and
+        nothing arrives sooner, because the database was already saturated. A useful starting point
+        is one database instance's cores plus its spindles, divided across the instances that share
+        it; but the first time active sits at the maximum, the answer is the database, not the pool.
+        And the thing to run before changing either is the Database track's
+        <code>EXPLAIN (ANALYZE, BUFFERS)</code> on the statement that dominates the profile,
+        because no pool size fixes a sequential scan.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember &mdash; when to leave the ORM</span>
+        <p>The honest answer is that you leave it when the <em>first</em> workaround appears, not
+        when the tenth does. A custom repository fragment with a JPQL query is the first step.
+        Hand-written native SQL is the second. A <code>JdbcTemplate</code> for a reporting query is
+        the third. By then you have given up the persistence context for that path, the mapping, the
+        first-level cache and portable SQL &mdash; so the cost of continuing inside the ORM is no
+        longer obviously lower, and the benefit of staying (one dialect, identical semantics) is
+        gone.</p>
+        <p>The symptom of having decided too late is a report that is correct, takes forty seconds,
+        has three hand-tuned indexes and a bespoke chunking loop, and no test. The decision to leave
+        is cheap when the requirement arrives and expensive when the workaround is already
+        load-bearing. Volume 9 covers where to put the microbenchmark that settles the argument
+        with a number instead of an opinion.</p>
+      </div>
+    </section>
+
+    <!-- ============ numbers ============ -->
+    <section id="numbers" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">&nbsp;</span>
+        <h2>Numbers worth memorising</h2>
+      </div>
+
+      <div class="numbers">
+        <div class="number">
+          <span class="number__value">1 + ceil(N/n)</span>
+          <span class="number__label">Queries for N parents at <code>&#64;BatchSize(n)</code>. 20 at 50 &rarr; <strong>2</strong>; 5,000 at 50 &rarr; <strong>101</strong>. A constant factor, not an asymptotic fix</span>
+        </div>
+        <div class="number">
+          <span class="number__value">181</span>
+          <span class="number__label">Statements to render 20 orders with their lines and statuses &mdash; and every one indexed and sub-millisecond</span>
+        </div>
+        <div class="number">
+          <span class="number__value">4</span>
+          <span class="number__label">Queries for a single <code>find</code> on an entity with three EAGER to-one associations. The specification mandates this</span>
+        </div>
+        <div class="number">
+          <span class="number__value">50 &rarr; 1&ndash;2</span>
+          <span class="number__label">Round trips for 50 inserts: <code>IDENTITY</code> gives 50 because batching is inert; <code>SEQUENCE</code> gives 1&ndash;2. Hibernate 6 allocation size is <strong>50</strong></span>
+        </div>
+        <div class="number">
+          <span class="number__value">21</span>
+          <span class="number__label">Rows fetched for a <code>Slice</code> page of 20 &mdash; the extra row is how <code>hasNext()</code> is answered without a count</span>
+        </div>
+        <div class="number">
+          <span class="number__value">3&ndash;5&times;</span>
+          <span class="number__label">Memory cost of a managed entity over the POJO: object, dirty-check snapshot, identity-map entry. Around 100,000 entities, the heap is the limit</span>
+        </div>
+        <div class="number">
+          <span class="number__value">10</span>
+          <span class="number__label">HikariCP <code>maximum-pool-size</code> default, with <code>connection-timeout</code> 30&nbsp;s, <code>max-lifetime</code> 30&nbsp;min and <code>minimum-idle</code> equal to the maximum</span>
+        </div>
+        <div class="number">
+          <span class="number__value">0 &amp;minus;1</span>
+          <span class="number__label"><code>jakarta.persistence.lock.timeout</code>: <strong>0 waits forever</strong>, <strong>&minus;1 is NOWAIT</strong>. The intuition is inverted, which is why it is on this page</span>
+        </div>
+        <div class="number">
+          <span class="number__value">none</span>
+          <span class="number__label">The <code>ddl-auto</code> Boot effectively chooses for a real database, and <code>create-drop</code> for an embedded one. Forced to <code>none</code> when Flyway or Liquibase is present</span>
+        </div>
+      </div>
+    </section>
+
+    <footer class="pagefoot">
+      <span>Volume 6 of 11 &mdash; Spring Complete Deep-Dive</span>
+      <div class="pager">
+        <a href="05-spring-mvc-web-layer.html">&larr; Spring MVC</a>
+        <a href="07-spring-boot-auto-configuration.html">Boot &amp; Auto-Config &rarr;</a>
+      </div>
+    </footer>
+
+  </main>
+</div>
+
+<script src="../search.js"></script>
+<script src="../highlight.js"></script>
+</body>
+</html>
+
+

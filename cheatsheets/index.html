@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interview Cheatsheets — Interview Prep Guide</title>
+<meta name="description" content="Condensed one-page-per-volume cheatsheets for the Java, Spring, Microservices and Database deep-dive guides.">
+<link rel="stylesheet" href="cheatsheet.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="page">
+
+  <nav class="sidebar" aria-label="Contents">
+    <h2>Tracks</h2>
+    <ul>
+      <li><a href="#java">Java</a></li>
+      <li><a href="#spring">Spring</a></li>
+      <li><a href="#microservices">Microservices</a></li>
+      <li><a href="#database">Database</a></li>
+    </ul>
+    <h2>Repository</h2>
+    <ul>
+      <li><a href="../README.md">Study guide root</a></li>
+      <li><a href="README.md">Authoring format</a></li>
+    </ul>
+  </nav>
+
+  <main class="main" id="main">
+
+    <header class="masthead">
+      <p class="masthead__eyebrow">Interview Prep Guide</p>
+      <h1>Cheatsheets</h1>
+      <p class="masthead__sub">
+        One page per volume. The condensed half of the study guides — the decisions, the
+        traps, and the numbers, with every entry kept to what you actually need to say when
+        the question gets asked. Read a volume properly first; use these to revise the night
+        before, or to pull up mid-interview.
+      </p>
+      <ul class="masthead__meta">
+        <li>34 volumes across 4 tracks</li>
+        <li>Derived from the <a href="../README.md">deep-dive guides</a></li>
+      </ul>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <input type="search" data-filter-input placeholder="Filter by topic, concept or tool — press /" aria-label="Filter volumes">
+        <span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span>
+      </div>
+    </div>
+
+    <p class="empty" data-filter-empty hidden>No volume matches that filter.</p>
+
+    <section class="track" id="java" data-filter-group>
+      <div class="track__head">
+        <h2>Java</h2>
+        <span class="track__count">9 volumes</span>
+      </div>
+      <p class="track__hook">
+        The language and the runtime. Interviewees who get Java right talk about what the
+        compiler and the JVM are allowed to do, not just what the syntax says.
+      </p>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">01</span>
+        <span><a class="vol__title" href="java/01-java-basics.html">Java Basics<a class="vol__src" href="../java/java-deep-dive-volume-01-java-basics.md">source</a></a>
+        <span class="vol__hook">Primitives vs wrappers, integer overflow, string immutability, pass-by-value, overload vs override.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">02</span>
+        <span><a class="vol__title" href="java/02-object-oriented-programming.html">Object-Oriented Programming<a class="vol__src" href="../java/java-deep-dive-volume-02-object-oriented-programming.md">source</a></a>
+        <span class="vol__hook">Composition over inheritance, abstract classes vs interfaces, equals/hashCode contracts, SOLID.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">03</span>
+        <span><a class="vol__title" href="java/03-core-java.html">Core Java<a class="vol__src" href="../java/java-deep-dive-volume-03-core-java.md">source</a></a>
+        <span class="vol__hook">Object contract, autoboxing and the Integer cache, checked vs unchecked exceptions, type erasure.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">04</span>
+        <span><a class="vol__title" href="java/04-collections-framework.html">Collections Framework<a class="vol__src" href="../java/java-deep-dive-volume-04-collections-framework.md">source</a></a>
+        <span class="vol__hook">HashMap internals and resize, ArrayList vs LinkedList, fail-fast iterators, when each collection is wrong.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">05</span>
+        <span><a class="vol__title" href="java/05-java-8-plus.html">Java 8+<a class="vol__src" href="../java/java-deep-dive-volume-05-java-8.md">source</a></a>
+        <span class="vol__hook">Functional interfaces, stream laziness and ordering, Optional's real purpose, method references.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">06</span>
+        <span><a class="vol__title" href="java/06-multithreading-concurrency.html">Multithreading &amp; Concurrency<a class="vol__src" href="../java/java-deep-dive-volume-06-multithreading-concurrency.md">source</a></a>
+        <span class="vol__hook">Executors and bounded queues, volatile vs synchronized, atomics and CAS, deadlock vs starvation.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">07</span>
+        <span><a class="vol__title" href="java/07-jvm-internals-memory.html">JVM Internals &amp; Memory<a class="vol__src" href="../java/java-deep-dive-volume-07-jvm-internals-memory.md">source</a></a>
+        <span class="vol__hook">Class loading, heap generations, GC selection and tuning, reading a heap dump under pressure.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">08</span>
+        <span><a class="vol__title" href="java/08-advanced-java.html">Advanced Java<a class="vol__src" href="../java/java-deep-dive-volume-08-advanced-java.md">source</a></a>
+        <span class="vol__hook">Reflection and its costs, annotation processing, serialization hazards, records and sealed types.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">09</span>
+        <span><a class="vol__title" href="java/09-modern-java-production.html">Modern Java &amp; Production<a class="vol__src" href="../java/java-deep-dive-volume-09-final-volume.md">source</a></a>
+        <span class="vol__hook">Java 17/21 features, virtual threads, structured concurrency, diagnosing real incidents.</span></span>
+      </div>
+    </section>
+
+    <section class="track" id="spring" data-filter-group>
+      <div class="track__head">
+        <h2>Spring</h2>
+        <span class="track__count">11 volumes</span>
+      </div>
+      <p class="track__hook">
+        Framework behaviour, not API recall. Most Spring interviews are really asking where
+        the container, the proxy, or the transaction boundary is going to surprise you.
+      </p>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">01</span>
+        <span><a class="vol__title" href="spring/01-spring-core-ioc.html">Spring Core &amp; the IoC Container<a class="vol__src" href="../spring/spring-deep-dive-volume-01-spring-core-ioc.md">source</a></a>
+        <span class="vol__hook">BeanDefinition registration, the three DI styles, ApplicationContext events, lazy init.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">02</span>
+        <span><a class="vol__title" href="spring/02-bean-lifecycle-scopes-di.html">Bean Lifecycle, Scopes &amp; Advanced DI<a class="vol__src" href="../spring/spring-deep-dive-volume-02-bean-lifecycle-scopes-di.md">source</a></a>
+        <span class="vol__hook">Full callback sequence, singleton vs prototype, circular references, FactoryBean.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">03</span>
+        <span><a class="vol__title" href="spring/03-aop-proxying.html">AOP &amp; Proxying<a class="vol__src" href="../spring/spring-deep-dive-volume-03-aop-proxying.md">source</a></a>
+        <span class="vol__hook">JDK vs CGLIB selection, the self-invocation trap, and every proxy-related silent failure.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">04</span>
+        <span><a class="vol__title" href="spring/04-transaction-management.html">Transaction Management<a class="vol__src" href="../spring/spring-deep-dive-volume-04-transaction-management.md">source</a></a>
+        <span class="vol__hook">Propagation levels, rollback-on rules, checked vs runtime exceptions, self-invocation.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">05</span>
+        <span><a class="vol__title" href="spring/05-spring-mvc-web-layer.html">Spring MVC &amp; the Web Layer<a class="vol__src" href="../spring/spring-deep-dive-volume-05-spring-mvc-web-layer.md">source</a></a>
+        <span class="vol__hook">The DispatcherServlet request path, filters vs interceptors, async and error handling.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">06</span>
+        <span><a class="vol__title" href="spring/06-spring-data-jpa-persistence.html">Spring Data JPA &amp; Persistence<a class="vol__src" href="../spring/spring-deep-dive-volume-06-spring-data-jpa-persistence.md">source</a></a>
+        <span class="vol__hook">N+1 queries, the persistence context, lazy loading outside a session, and ddl-auto's damage.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">07</span>
+        <span><a class="vol__title" href="spring/07-spring-boot-auto-configuration.html">Spring Boot &amp; Auto-Configuration<a class="vol__src" href="../spring/spring-deep-dive-volume-07-spring-boot-auto-configuration.md">source</a></a>
+        <span class="vol__hook">@Conditional ordering, starters, externalized configuration and profile precedence.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">08</span>
+        <span><a class="vol__title" href="spring/08-spring-security.html">Spring Security<a class="vol__src" href="../spring/spring-deep-dive-volume-08-spring-security.md">source</a></a>
+        <span class="vol__hook">The filter chain, authentication vs authorization, method security, OAuth2 and JWT failure modes.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">09</span>
+        <span><a class="vol__title" href="spring/09-testing-production-troubleshooting.html">Testing &amp; Production Troubleshooting<a class="vol__src" href="../spring/spring-deep-dive-volume-09-testing-production-troubleshooting.md">source</a></a>
+        <span class="vol__hook">Slice tests vs full context, mock boundaries, and diagnosing a running application.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">10</span>
+        <span><a class="vol__title" href="spring/10-webflux-project-reactor.html">WebFlux &amp; Project Reactor<a class="vol__src" href="../spring/spring-deep-dive-volume-10-webflux-project-reactor.md">source</a></a>
+        <span class="vol__hook">Backpressure, cold vs hot streams, Schedulers, and the event-loop blocking mistake.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">11</span>
+        <span><a class="vol__title" href="spring/11-spring-cloud-distributed-systems.html">Spring Cloud &amp; Distributed Systems<a class="vol__src" href="../spring/spring-deep-dive-volume-11-spring-cloud-distributed-systems.md">source</a></a>
+        <span class="vol__hook">Circuit breakers, retries, config and discovery, gateways, and idempotency at the edge.</span></span>
+      </div>
+    </section>
+
+    <section class="track" id="microservices" data-filter-group>
+      <div class="track__head">
+        <h2>Microservices</h2>
+        <span class="track__count">3 volumes</span>
+      </div>
+      <p class="track__hook">
+        Distributed systems as a discipline rather than a Spring feature set. Every answer
+        here is expected to carry a migration cost and a failure mode, not just a pattern name.
+      </p>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">01</span>
+        <span><a class="vol__title" href="microservices/01-boundaries-decomposition.html">Foundations, Boundaries &amp; Decomposition<a class="vol__src" href="../microservices/microservices-deep-dive-volume-01-boundaries-decomposition.md">source</a></a>
+        <span class="vol__hook">When not to split, DDD and bounded contexts, the modular monolith, Conway's law.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">02</span>
+        <span><a class="vol__title" href="microservices/02-communication-data-consistency.html">Communication, Data &amp; Consistency<a class="vol__src" href="../microservices/microservices-deep-dive-volume-02-communication-data-consistency.md">source</a></a>
+        <span class="vol__hook">Sync vs async, idempotency keys, the outbox pattern, sagas, CAP as an architecture question.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">03</span>
+        <span><a class="vol__title" href="microservices/03-operations-platforms-evolution.html">Operations, Platforms &amp; Evolution<a class="vol__src" href="../microservices/microservices-deep-dive-volume-03-operations-platforms-evolution.md">source</a></a>
+        <span class="vol__hook">Observability and SLIs, resilience budgets, progressive delivery, Kubernetes and service mesh.</span></span>
+      </div>
+    </section>
+
+    <section class="track" id="database" data-filter-group>
+      <div class="track__head">
+        <h2>Database</h2>
+        <span class="track__count">11 volumes</span>
+      </div>
+      <p class="track__hook">
+        Framed around where the abstraction stops paying for itself: why <code>SELECT *</code>
+        is a page-count problem before a bandwidth one, and what a shard key costs to undo.
+      </p>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">01</span>
+        <span><a class="vol__title" href="database/01-fundamentals-relational-model.html">Fundamentals &amp; the Relational Model<a class="vol__src" href="../database/database-deep-dive-volume-01-fundamentals-relational-model.md">source</a></a>
+        <span class="vol__hook">Pages and the buffer pool, tuples and attributes, ACID and what each clause actually guarantees.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">02</span>
+        <span><a class="vol__title" href="database/02-sql-ddl-dml-constraints.html">SQL — DDL, DML &amp; Constraints<a class="vol__src" href="../database/database-deep-dive-volume-02-sql-ddl-dml-constraints.md">source</a></a>
+        <span class="vol__hook">Types and their costs, primary/foreign keys, CHECK and UNIQUE, and constraint-driven write errors.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">03</span>
+        <span><a class="vol__title" href="database/03-sql-queries-joins-window-functions.html">SQL — Queries, Joins, CTEs &amp; Window Functions<a class="vol__src" href="../database/database-deep-dive-volume-03-sql-queries-joins-window-functions.md">source</a></a>
+        <span class="vol__hook">Join semantics and NULL, the LEFT JOIN that becomes an inner one, COUNT and fan-out.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">04</span>
+        <span><a class="vol__title" href="database/04-indexes-query-planning-execution.html">Indexes, Query Planning &amp; Execution<a class="vol__src" href="../database/database-deep-dive-volume-04-indexes-query-planning-execution.md">source</a></a>
+        <span class="vol__hook">B+ trees, page splits, leftmost prefix, composite index column order, reading EXPLAIN.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">05</span>
+        <span><a class="vol__title" href="database/05-transactions-isolation-concurrency.html">Transactions, Isolation &amp; Concurrency<a class="vol__src" href="../database/database-deep-dive-volume-05-transactions-isolation-concurrency.md">source</a></a>
+        <span class="vol__hook">Every isolation anomaly by name, lost updates, write skew, and SERIALIZABLE's catch.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">06</span>
+        <span><a class="vol__title" href="database/06-schema-design-partitioning-scaling.html">Schema Design, Partitioning &amp; Scaling<a class="vol__src" href="../database/database-deep-dive-volume-06-schema-design-partitioning-scaling.md">source</a></a>
+        <span class="vol__hook">Normalisation trade-offs, vertical vs horizontal split, shard key choice, when it becomes irreversible.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">07</span>
+        <span><a class="vol__title" href="database/07-postgresql.html">PostgreSQL<a class="vol__src" href="../database/database-deep-dive-volume-07-postgresql.md">source</a></a>
+        <span class="vol__hook">MVCC snapshots, HOT updates, bloat, vacuum starvation, and the planner's costing choices.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">08</span>
+        <span><a class="vol__title" href="database/08-mysql.html">MySQL &amp; the InnoDB Engine<a class="vol__src" href="../database/database-deep-dive-volume-08-mysql.md">source</a></a>
+        <span class="vol__hook">Clustered indexes, gap and next-key locks, read views, and REPEATABLE READ's surprises.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">09</span>
+        <span><a class="vol__title" href="database/09-redis-caching.html">Redis &amp; Caching Strategies<a class="vol__src" href="../database/database-deep-dive-volume-09-redis-caching.md">source</a></a>
+        <span class="vol__hook">Eviction policies, TTL and expiry races, cache-aside, and stampede/penetration/avalanche.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">10</span>
+        <span><a class="vol__title" href="database/10-nosql-distributed-stores.html">NoSQL &amp; Distributed Stores<a class="vol__src" href="../database/database-deep-dive-volume-10-nosql-cassandra-dynamodb-mongodb.md">source</a></a>
+        <span class="vol__hook">Cassandra tombstones, DynamoDB hot partitions, MongoDB documents vs relations, consistency knobs.</span></span>
+      </div>
+      <div class="vol" data-filter-target>
+        <span class="vol__num">11</span>
+        <span><a class="vol__title" href="database/11-s3-elasticsearch-interview-bank.html">S3, Elasticsearch &amp; Interview Bank<a class="vol__src" href="../database/database-deep-dive-volume-11-s3-elasticsearch-interview-bank.md">source</a></a>
+        <span class="vol__hook">Object storage consistency and presigned URLs, inverted indexes, and the consolidated bank.</span></span>
+      </div>
+    </section>
+
+    <footer class="pagefoot">
+      <span>Every page links back to its source volume, so any claim here is traceable.</span>
+    </footer>
+
+  </main>
+</div>
+
+<script src="search.js"></script>
+</body>
+</html>

@@ -987,7 +987,7 @@ This is the practical consequence and it is worth making concrete with an exampl
 ```
 
 Case C is the one that surprises people, and it is the reason DynamoDB documents a
-700 KB item-size limit per attribute and Cassandra enforces practical partition-size limits
+400 KB item-size limit per item and Cassandra enforces practical partition-size limits
 in production guidance even though the storage layer itself does not. **A partition is a
 unit of storage as well as a unit of throughput**, and a partition that grows without
 bound is a slow-motion version of a table that never got partitioned: everything still
@@ -2042,7 +2042,7 @@ preference lists, each node using a key/value store over a log plus a RAM cache,
 quorum versions `W` and `R`, Merkle-tree anti-entropy, and vector clocks. DynamoDB's
 service documentation is consistent with that lineage — it documents that it partitions
 your data using a hash of the partition key and replicates each partition across three
-Availability Zones, and it publishes a 700 KB per-item size limit, a 10 MB per-partition
+Availability Zones, and it publishes a 400 KB per-item size limit, a 10 MB per-partition
 limit, and the per-partition throughput ceilings.
 
 **What is not a documented public interface, and should be stated as inference:** the

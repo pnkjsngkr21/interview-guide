@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Indexes, Query Planning &amp; Execution — Cheatsheet</title>
+<meta name="description" content="Condensed cheatsheet for Database Deep-Dive Volume 4: B+ tree internals, index types and their write cost, leftmost prefix and sargability, access paths, join algorithms, reading EXPLAIN ANALYZE, and optimiser statistics.">
+<link rel="stylesheet" href="../cheatsheet.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="page">
+
+  <nav class="sidebar" aria-label="Contents">
+    <h2>On this page</h2>
+    <ol>
+      <li><a href="#ch1">1 &mdash; Why indexes exist</a></li>
+      <li><a href="#ch2">2 &mdash; B+ tree internals</a></li>
+      <li><a href="#ch3">3 &mdash; Index types &amp; write cost</a></li>
+      <li><a href="#ch4">4 &mdash; Column order &amp; sargability</a></li>
+      <li><a href="#ch5">5 &mdash; Access paths &amp; cost</a></li>
+      <li><a href="#ch6">6 &mdash; Joins at runtime</a></li>
+      <li><a href="#ch7">7 &mdash; Reading EXPLAIN</a></li>
+      <li><a href="#ch8">8 &mdash; Statistics &amp; the optimiser</a></li>
+      <li><a href="#numbers">Numbers</a></li>
+    </ol>
+    <h2>Series</h2>
+    <ul>
+      <li><a href="01-fundamentals-relational-model.html">01 &mdash; Fundamentals</a></li>
+      <li><a href="02-sql-ddl-dml-constraints.html">02 &mdash; DDL &amp; Constraints</a></li>
+      <li><a href="03-sql-queries-joins-window-functions.html">03 &mdash; Queries &amp; Joins</a></li>
+      <li><a href="04-indexes-query-planning-execution.html">04 &mdash; Indexes &amp; Planning</a></li>
+      <li><a href="05-transactions-isolation-concurrency.html">05 &mdash; Transactions</a></li>
+      <li><a href="06-schema-design-partitioning-scaling.html">06 &mdash; Schema &amp; Scaling</a></li>
+      <li><a href="07-postgresql.html">07 &mdash; PostgreSQL</a></li>
+      <li><a href="08-mysql.html">08 &mdash; MySQL &amp; InnoDB</a></li>
+      <li><a href="09-redis-caching.html">09 &mdash; Redis &amp; Caching</a></li>
+      <li><a href="10-nosql-distributed-stores.html">10 &mdash; NoSQL &amp; Distributed</a></li>
+      <li><a href="11-s3-elasticsearch-interview-bank.html">11 &mdash; S3, ES &amp; Bank</a></li>
+    </ul>
+    <h2>Repository</h2>
+    <ul>
+      <li><a href="../index.html">All cheatsheets</a></li>
+      <li><a href="../../database/database-deep-dive-volume-04-indexes-query-planning-execution.md">Source volume</a></li>
+    </ul>
+  </nav>
+
+  <main class="main" id="main">
+
+    <header class="masthead">
+      <p class="masthead__eyebrow">Database — The Database Complete Deep-Dive</p>
+      <h1>Volume 4 — Indexes, Query Planning &amp; Execution</h1>
+      <p class="masthead__sub">
+        An index is not free speed, it is a permanent tax on every write and a permanent
+        claim on the buffer pool. Learn to price that tax, name the access path a predicate
+        can actually reach, and read a plan leaves-first — and the &ldquo;why is this query
+        slow&rdquo; question stops being a guess.
+      </p>
+      <ul class="masthead__meta">
+        <li>9 sections</li>
+        <li>From <a href="../../database/database-deep-dive-volume-04-indexes-query-planning-execution.md">the source volume</a></li>
+      </ul>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <input type="search" data-filter-input placeholder="Filter sections — press /" aria-label="Filter sections">
+        <span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span>
+      </div>
+      <div class="pager">
+        <a href="03-sql-queries-joins-window-functions.html">&larr; Prev</a>
+        <a href="05-transactions-isolation-concurrency.html">Next &rarr;</a>
+      </div>
+    </div>
+
+    <div class="keyfacts">
+      <h2>If you only remember five things</h2>
+      <ol>
+        <li><strong>A composite index is one sort, and the sort is lexicographic.</strong>
+        The index on <code>(a, b)</code> is ordered by <code>a</code>, then by <code>b</code>
+        <em>within</em> each <code>a</code>. So an index can seek on <code>a</code> and then
+        walk <code>b</code>, but it cannot seek on <code>b</code> at all &mdash; the
+        <code>b</code> values are scattered across every <code>a</code> run.</li>
+
+        <li><strong>An index only pays if it throws away almost the whole table.</strong>
+        An index scan costs <code>3 &times; 4.0 + k &times; 4.0 = 12 + 4k</code>; a sequential
+        scan costs <code>N</code>. Break-even is <code>4k = 0.026N</code> &mdash; a
+        <strong>0.64% match rate</strong> on spinning media, <strong>2.6% on NVMe</strong>.
+        Below it the index is a net loss for every write and every buffer-pool byte it
+        occupies, and the sequential scan is the correct plan. The one exception is the
+        covering index, whose per-row cost drops far enough to move break-even out to 11%.</li>
+
+        <li><strong>A B+ tree seek costs three page reads</strong> &mdash; root, internal,
+        leaf &mdash; and then one random heap read per surviving row. Three is the floor, and
+        it is why the break-even arithmetic above exists.</li>
+
+        <li><strong>Read <code>EXPLAIN ANALYZE</code> leaves-first, and multiply
+        <code>rows</code> by <code>loops</code>.</strong> The bad estimate is the
+        <em>deepest</em> node with a large error ratio; every error above it is inherited.
+        <code>rows=0.5 loops=1000000</code> is 500,000 rows, not zero.</li>
+
+        <li><strong>Every index is paid for twice.</strong> Once in write amplification &mdash;
+        a 12-index table costs 13 page writes per inserted row &mdash; and once in buffer-pool
+        residency, which evicts working set. Adding an index to fix one query degrades every
+        other query that reads the table.</li>
+      </ol>
+    </div>
+
+    <p class="empty" data-filter-empty hidden>No section matches that filter.</p>
+
+    <section id="ch1" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">01</span>
+        <h2>Why indexes exist: the break-even arithmetic</h2>
+      </div>
+
+      <p>A sequential scan reads every page in physical order, so readahead collapses the seek
+      cost and it is far cheaper than the arithmetic suggests &mdash; on a spinning disk,
+      roughly 80&times;. That is why the correct answer to &ldquo;why is my scan slow&rdquo; is
+      never &ldquo;it read too many pages&rdquo;. The cost is that it reads <em>all</em> of them,
+      and it evaluates the predicate on every tuple, which is CPU proportional to the table
+      size rather than to the answer size.</p>
+
+      <p>An index inverts that. It turns the answer into the address. The bill arrives at
+      write time instead, and the entire question of whether an index is worth having reduces
+      to one comparison: the three page reads plus one random heap read per matching row,
+      against reading the table.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>What a full scan of the 2 GB <code>orders</code> table costs per device</caption>
+          <thead>
+            <tr>
+              <th>Access pattern</th>
+              <th>Per-page cost</th>
+              <th>256,411 pages</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>NVMe SSD, sequential</td><td>~0.05 ms</td><td>~13 s</td><td>2 GB at ~160 MB/s effective</td></tr>
+            <tr><td>NVMe SSD, random</td><td>~0.10 ms</td><td>~26 s</td><td>10,000 IOPS ceiling, queue depth 1</td></tr>
+            <tr><td>SATA SSD, sequential</td><td>~0.5 ms</td><td>~128 s</td><td>~160 MB/s</td></tr>
+            <tr><td>SATA SSD, random</td><td>~5 ms</td><td>~1,283 s</td><td>~200 IOPS</td></tr>
+            <tr><td>Spinning disk, random</td><td>~8 ms</td><td>~2,051 s</td><td>seek dominates, ~125 IOPS</td></tr>
+            <tr><td>Spinning disk, sequential</td><td>~0.1 ms</td><td>~26 s</td><td>readahead hides the seek</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The same 256,411 pages cost 13 seconds or 34 minutes depending on nothing but the
+      drive. That is why the threshold that decides between scanning and indexing moves by a
+      factor of 40 across hardware generations, and why a hard-coded rule of thumb tuned on
+      somebody's laptop is worse than no rule of thumb.</p>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p>The table size below which the planner correctly prefers a sequential scan moves
+        with the device: roughly <strong>234 rows on NVMe</strong> and
+        <strong>9,360 rows on spinning disk</strong> &mdash; a 40&times; spread for the same
+        query on the same data. Tune the number, or the planner tunes it for you.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p>&ldquo;Add an index to make it selective&rdquo; is the reflexive answer and it is
+        often wrong. Indexing only pays when the query returns a very small fraction of the
+        table. On a table where your predicate matches 30% of the rows, the index makes the
+        query <em>slower</em>, and the plan you should be arguing for is the sequential scan
+        you already had.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off</span>
+        <p>An index buys read speed and pays in write amplification and buffer-pool residency.
+        The condition that flips it: an index on a table with a high write rate and low read
+        hit rate is pure cost. The test is not &ldquo;is this query slow&rdquo; but
+        &ldquo;does this index earn its keep across the whole workload&rdquo; &mdash; which is
+        exactly what the unused-index inventory in section 3 measures.</p>
+      </div>
+    </section>
+
+    <section id="ch2" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">02</span>
+        <h2>B+ tree internals: fan-out, height, and the leaf chain</h2>
+      </div>
+
+      <p>A B+ tree stores every record only in the leaves. Internal nodes hold
+      <em>separators</em> &mdash; the high key of the run beneath them &mdash; and nothing
+      else. That single design choice is why the fan-out is enormous and the height is 3 on a
+      ten-million-row table.</p>
+
+      <p>On an 8 kB page there are 8,152 usable bytes after the 24-byte page header. A big-endian
+      <code>int8</code> separator costs 8 bytes, so <strong>8152 / 16 &asymp; 509</strong>
+      entries fit in a leaf and half that fits in an internal node. A classic B-tree must also
+      fit an offset to each record, which drops its fan-out to 39 &mdash; a 13&times; penalty,
+      and the reason its height is <code>log(509)/log(39)</code> larger. B+ trees win because
+      the search key never moves and the leaves carry the payload.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>10M rows, 8 kB pages: fan-out decides height, and height decides everything</caption>
+          <thead>
+            <tr>
+              <th>Key definition</th>
+              <th>Entries/leaf</th>
+              <th>Leaf pages</th>
+              <th>Level 1 pages</th>
+              <th>Root</th>
+              <th>Height</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>int8</code>, no <code>INCLUDE</code></td><td>509</td><td>19,646</td><td>39</td><td>1</td><td><strong>3</strong></td></tr>
+            <tr><td><code>int8</code>, <code>INCLUDE (name)</code> 32 B</td><td>101</td><td>99,010</td><td>981</td><td>1</td><td><strong>4</strong></td></tr>
+            <tr><td><code>text(40)</code>, no <code>INCLUDE</code></td><td>169</td><td>59,172</td><td>117</td><td>1</td><td><strong>3</strong></td></tr>
+            <tr><td><code>text(40)</code>, <code>INCLUDE (name)</code> 32 B</td><td>72</td><td>138,889</td><td>1,374</td><td>2</td><td><strong>4</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Height is not linear in table size, it is logarithmic in fan-out. 509<sup>2</sup> is
+      259,081 rows; 509<sup>3</sup> is 131,950,029; 509<sup>4</sup> is 67,162,164,961. Adding
+      a level buys you seven orders of magnitude. This is the answer to &ldquo;how big do
+      tables get before indexes stop helping&rdquo; &mdash; they do not, because the level
+      count barely moves.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 760 300" role="img" aria-label="A B+ tree of height 3: one root above five internal nodes, each above one leaf, with a doubly-linked chain running through the leaves.">
+          <marker id="arw-d4-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+          </marker>
+
+          <rect class="node" x="335" y="12" width="90" height="32" rx="5"/>
+          <text class="label" x="380" y="32" text-anchor="middle">root</text>
+
+          <g class="edge">
+            <path d="M 380 44 L 100 76"/>
+            <path d="M 380 44 L 240 76"/>
+            <path d="M 380 44 L 380 76"/>
+            <path d="M 380 44 L 520 76"/>
+            <path d="M 380 44 L 660 76"/>
+          </g>
+          <g class="edge edge--good">
+            <path d="M 380 44 L 240 76" marker-end="url(#arw-d4-a)"/>
+          </g>
+
+          <rect class="node node--good" x="180" y="76" width="120" height="32" rx="5"/>
+          <text class="label" x="240" y="96" text-anchor="middle">separator</text>
+          <rect class="node" x="40" y="76" width="120" height="32" rx="5"/>
+          <rect class="node" x="320" y="76" width="120" height="32" rx="5"/>
+          <rect class="node" x="460" y="76" width="120" height="32" rx="5"/>
+          <rect class="node" x="600" y="76" width="120" height="32" rx="5"/>
+
+          <g class="edge">
+            <path d="M 100 108 L 100 190"/>
+            <path d="M 240 108 L 240 190"/>
+            <path d="M 380 108 L 380 190"/>
+            <path d="M 520 108 L 520 190"/>
+            <path d="M 660 108 L 660 190"/>
+          </g>
+          <g class="edge edge--good">
+            <path d="M 240 108 L 240 190" marker-end="url(#arw-d4-a)"/>
+          </g>
+          <text class="edge-label" x="252" y="156">seek</text>
+
+          <rect class="node" x="40" y="190" width="120" height="44" rx="5"/>
+          <text class="label" x="100" y="216" text-anchor="middle">EU</text>
+          <rect class="node node--good" x="180" y="190" width="120" height="44" rx="5"/>
+          <text class="label" x="240" y="216" text-anchor="middle">US</text>
+          <rect class="node" x="320" y="190" width="120" height="44" rx="5"/>
+          <text class="label" x="380" y="216" text-anchor="middle">APAC</text>
+          <rect class="node" x="460" y="190" width="120" height="44" rx="5"/>
+          <text class="label" x="520" y="216" text-anchor="middle">LATAM</text>
+          <rect class="node" x="600" y="190" width="120" height="44" rx="5"/>
+          <text class="label" x="660" y="216" text-anchor="middle">other</text>
+          <text class="label--sub" x="240" y="252" text-anchor="middle">leaf chain, both directions</text>
+
+          <g class="edge edge--return">
+            <path d="M 160 208 L 180 208" marker-end="url(#arw-d4-a)"/>
+            <path d="M 300 208 L 320 208" marker-end="url(#arw-d4-a)"/>
+            <path d="M 440 208 L 460 208" marker-end="url(#arw-d4-a)"/>
+            <path d="M 580 208 L 600 208" marker-end="url(#arw-d4-a)"/>
+          </g>
+          <g class="edge edge--return">
+            <path d="M 180 222 L 160 222" marker-end="url(#arw-d4-a)"/>
+            <path d="M 320 222 L 300 222" marker-end="url(#arw-d4-a)"/>
+            <path d="M 460 222 L 440 222" marker-end="url(#arw-d4-a)"/>
+            <path d="M 600 222 L 580 222" marker-end="url(#arw-d4-a)"/>
+          </g>
+
+          <rect class="node node--warn" x="40" y="256" width="680" height="34" rx="5"/>
+          <text class="label--sub" x="380" y="278" text-anchor="middle">internal levels stay resident: 39 + 1 pages &asymp; 320 kB, forever in cache</text>
+        </svg>
+        <figcaption>Height 3 over 19,646 leaf pages. The highlighted descent is one seek: root,
+        separator, leaf &mdash; three reads. Everything the seek passes through is 320 kB that
+        never leaves the cache. Everything below the leaf is a random heap read.</figcaption>
+      </figure>
+
+      <h3>The two properties that make ranges cheap</h3>
+
+      <p>First, <strong>the leaves are linked</strong>, doubly, in key order. Once the seek has
+      landed on the right leaf, a range predicate is a walk along the chain, not a second
+      descent. That is the mechanism behind &ldquo;1 descent + <code>ceil(matching / 509)</code>
+      page reads&rdquo; &mdash; the linear-in-the-answer-size cost that makes an index beat a
+      scan on large ranges and lose to it on small ones.</p>
+
+      <p>Second, <strong>all of it is sorted</strong>. That is what an <code>ORDER BY</code>
+      can be satisfied by, what makes merge joins possible without a sort node, and what makes
+      a leftmost prefix possible at all. The cost of the sorting is the index's width, and
+      width is paid in fan-out, which is paid in height.</p>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>B-tree stores records in internal nodes; B+ tree stores them only in leaves and puts
+        separators above. Almost every interview question that says &ldquo;B-tree&rdquo; when it
+        means the structure your database actually uses is answered by &ldquo;B+ tree, and here
+        is why the fan-out is 509 instead of 39&rdquo;.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p>&ldquo;The index is small so it fits in memory&rdquo; is half true in a way that
+        misleads. 157 MB does not fit in a 2 GB buffer pool alongside a working set, and the
+        180 MB version of the same index moved the pool's hit ratio from 99.1% to 88.3% in the
+        volume's worked example. Index size is measured against the <em>pool</em>, not against
+        RAM.</p>
+      </div>
+
+      <h3>Page splits and fillfactor</h3>
+
+      <p>An insert that lands between two keys splits the leaf roughly in half, and every row
+        after it moves. That is why a freshly-built index is half empty: the cost model assumes
+        pages are ~50% occupied after random inserts, which is where the 19,646 leaf pages for
+        10M rows comes from instead of the ~3,900 a perfectly packed index would need.</p>
+
+      <p>The fix is to leave slack on purpose, and it is worth knowing when it applies: a table
+      with a monotonically increasing primary key only ever appends to the rightmost leaf and
+      never splits it, so it does not need a <code>fillfactor</code>. A table with random keys
+      does.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p><code>REINDEX</code> and <code>VACUUM</code> are not interchangeable answers to
+        &ldquo;my index is bloated&rdquo;. <code>REINDEX</code> rewrites the index and
+        <code>VACUUM</code> reclaims dead space in the heap. A bloated <em>index</em> is fixed
+        by the first; running only <code>VACUUM</code> leaves the index exactly as fat.</p>
+      </div>
+    </section>
+
+    <section id="ch3" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">03</span>
+        <h2>Index types and what each one costs to maintain</h2>
+      </div>
+
+      <p>The taxonomy that matters at interview altitude is not &ldquo;which data structure is
+      this&rdquo; but <strong>which questions can this structure answer at all</strong>. A hash
+      index answers equality and nothing else. There is no order in it, so no range, no
+      <code>ORDER BY</code>, no merge join, no skip. A B-tree answers everything. Everything
+      below is a B-tree with a different internal arrangement, chosen because its
+      <em>question set</em> or its <em>write cost</em> is better.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The index taxonomy by what it can answer and what it costs per insert</caption>
+          <thead>
+            <tr>
+              <th>Index</th>
+              <th>Structure</th>
+              <th>Equality</th>
+              <th>Range</th>
+              <th>Ordering</th>
+              <th>Write cost</th>
+              <th>Use it for</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>B-tree</td><td>B+ tree</td><td>excellent</td><td>excellent</td><td>yes</td><td>1 tree insert per row</td><td>the default; everything</td></tr>
+            <tr><td>Hash</td><td>hashed buckets</td><td>excellent</td><td><strong>none</strong></td><td>no</td><td>1 bucket insert</td><td>equality-only, huge tables</td></tr>
+            <tr><td>BRIN</td><td>block-range summary</td><td>poor</td><td>on min/max</td><td>by block</td><td>~1 page per 128 pages</td><td>tiny, for physically-correlated data</td></tr>
+            <tr><td>GIN</td><td>inverted index + posting lists</td><td>good on array/text</td><td>poor</td><td>no</td><td>high, plus a pending list</td><td><code>@&gt;</code>, JSONB, arrays</td></tr>
+            <tr><td>GiST</td><td>extensible search tree</td><td>good</td><td>moderate</td><td>family-dependent</td><td>high</td><td>geometry, full-text, ranges</td></tr>
+            <tr><td>Full-text</td><td>inverted index</td><td>word-level</td><td>ranked</td><td>by score</td><td>very high</td><td>word search, not substring</td></tr>
+            <tr><td>Bitmap</td><td>bit vectors per value</td><td>good</td><td>no</td><td>no</td><td>very low</td><td>derived, rebuilt per query</td></tr>
+            <tr><td>Covering / <code>INCLUDE</code></td><td>B+ tree with payload</td><td>as B-tree</td><td>as B-tree</td><td>yes</td><td>+ payload width</td><td>index-only scans</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The same table from the write side: what one inserted row costs, by index type</caption>
+          <thead>
+            <tr>
+              <th>Index type</th>
+              <th>Cost per inserted row</th>
+              <th>Why</th>
+              <th>Batching?</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>B-tree</td><td>1 descent + occasional split; ~1 page read, ~1 page write amortised</td><td>one insertion, one path</td><td>no</td></tr>
+            <tr><td>Hash</td><td>1 bucket insert</td><td>no ordering to maintain</td><td>yes, trivially</td></tr>
+            <tr><td>BRIN</td><td><strong>1 summary update per 128 blocks</strong></td><td>only the range min/max changes</td><td>yes</td></tr>
+            <tr><td>GIN</td><td><strong>one posting-list insert per matching key</strong></td><td>a row with 12 tags writes 12 places</td><td>yes, via the pending list</td></tr>
+            <tr><td>GiST</td><td>1 tree insert, but per-key loss functions evaluated</td><td>user-defined search strategy</td><td>poorly</td></tr>
+            <tr><td>Full-text (GIN-backed)</td><td>same as GIN, on the tokenised document</td><td>one posting entry per distinct word</td><td>yes</td></tr>
+            <tr><td>Bitmap (transient)</td><td>O(distinct values) per batch</td><td>rebuilds the vector</td><td>rebuilt per query</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>GIN is the one worth dwelling on, because its cost is proportional to the <em>number
+      of keys in the row</em>, not to the number of rows. A 12-tag article writes 12 posting
+      lists. That is why GIN-backed indexes use a pending list: writes land in an unsorted
+      buffer and are merged later, trading read latency for write throughput.</p>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p>BRIN stores one summary entry per 128 blocks. For a 2 GB heap that is <strong>32 KB
+        against 2 GB &mdash; 4,900&times; smaller, at 1/128 of the write cost</strong> of a
+        B-tree. It answers min/max ranges, so it works precisely when physical order matches
+        logical order (append-only timestamps). On randomly-ordered data its min and max span
+        the whole block range and it answers nothing.</p>
+      </div>
+
+      <h3>Covering indexes: paying width for a saved heap read</h3>
+
+      <p>An <code>INCLUDE</code> column widens the entry from 16 B to 37 B, which drops
+      entries per page from 509 to 220 &mdash; and the index from 157 MB to 366 MB. It gains a
+      heap-free read and loses 209 MB of buffer pool. That is the whole trade, and it is worth
+      stating as a trade rather than a free win.</p>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off</span>
+        <p>A covering index is worth 209 MB when it removes every heap fetch from a hot query.
+        It is pure loss when the table is updated often, because an
+        <strong>index-only scan is only free if every page it references is marked
+        all-visible in the visibility map</strong> &mdash; and any page with a recently updated
+        tuple is not. The condition that flips it: on a frequently-updated table a covering
+        index still pays <code>Heap Fetches</code> on every row and you have bought 209 MB of
+        cache pressure for nothing.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p>The volume's scenario table is worth remembering as a shape: a 364 B entry gives 22
+        entries per page where a 16 B entry gives 509, so the index grows to 23&times; its
+        naive size and the height climbs from 3 to 5. Wide index entries do not cost linearly.
+        They cost the fan-out, and the fan-out is the height.</p>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p>The target engine caps index key width at <strong>3,000 bytes</strong>. Add a
+        6-byte <code>bigint</code> payload to a 3,000-byte key and a page holds 136 entries
+        instead of 509 &mdash; a fan-out of 136, where 136<sup>3</sup> = 2.5 million rows is
+        the point at which the tree needs a fourth level. An 8-column, 166 B index gives 49
+        entries per page and 49<sup>3</sup> = 117,649 rows. Wide composite indexes stop being
+        efficient well before they stop fitting.</p>
+      </div>
+
+      <h3>The inventory question</h3>
+
+      <p>The number to have ready is that in a real production estate a large share of indexes
+      are never used. The volume's worked estate &mdash; 340 indexes over 60 tables &mdash;
+      has <strong>15-25% of them unused</strong>. Over 1,100 tables, 2,400 indexes and 500 GB,
+        the first thing to do is measure usage and drop what nothing reads, because each one
+        costs a write amplification share and buffer-pool pages that a working index needs.</p>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>A table with 12 indexes costs <strong>13 page writes per inserted row</strong> for
+        the index maintenance alone. At 10,000 inserts/second that is 130,000 page writes per
+        second that exist only to keep structures nobody queries. Index count is a write-path
+        metric, not a read-path one.</p>
+      </div>
+    </section>
+
+    <section id="ch4" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">04</span>
+        <h2>Column order and sargability</h2>
+      </div>
+
+      <p>An index on <code>(a, b)</code> is <strong>one sort, lexicographic</strong>. Within a
+      single <code>a</code> value, the rows are ordered by <code>b</code>. Across different
+      <code>a</code> values, the <code>b</code> values restart. That is the whole of the
+      leftmost prefix rule, and every composite-index decision follows from it.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 760 356" role="img" aria-label="One index on (region, created_at) split into three region blocks; four queries show which blocks can be seeked and which must be walked.">
+          <marker id="arw-d4-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+          </marker>
+
+          <rect class="node" x="335" y="10" width="90" height="30" rx="5"/>
+          <text class="label" x="380" y="30" text-anchor="middle">root</text>
+          <g class="edge edge--good">
+            <path d="M 370 40 L 145 60" marker-end="url(#arw-d4-b)"/>
+            <path d="M 380 40 L 380 60" marker-end="url(#arw-d4-b)"/>
+            <path d="M 390 40 L 615 60" marker-end="url(#arw-d4-b)"/>
+          </g>
+
+          <rect class="node" x="40" y="60" width="210" height="44" rx="5"/>
+          <text class="label" x="145" y="87" text-anchor="middle">region = EU</text>
+          <rect class="node" x="275" y="60" width="210" height="44" rx="5"/>
+          <text class="label" x="380" y="87" text-anchor="middle">region = US</text>
+          <rect class="node" x="510" y="60" width="210" height="44" rx="5"/>
+          <text class="label" x="615" y="87" text-anchor="middle">region = APAC</text>
+          <text class="label--sub" x="380" y="122" text-anchor="middle">created_at restarts inside every block, so it is sorted only within a region</text>
+
+          <text class="label" x="40" y="168">region = 'EU'</text>
+          <rect class="node node--good" x="190" y="150" width="160" height="34" rx="5"/>
+          <text class="label" x="270" y="172" text-anchor="middle">seek · 197</text>
+          <rect class="node" x="380" y="150" width="160" height="34" rx="5"/>
+          <text class="label--sub" x="460" y="172" text-anchor="middle">skip</text>
+          <rect class="node" x="570" y="150" width="160" height="34" rx="5"/>
+          <text class="label--sub" x="650" y="172" text-anchor="middle">skip</text>
+
+          <text class="label" x="40" y="223">+ created_at &gt;= X</text>
+          <rect class="node node--good" x="190" y="205" width="160" height="34" rx="5"/>
+          <text class="label" x="270" y="227" text-anchor="middle">walk · 16</text>
+          <rect class="node" x="380" y="205" width="160" height="34" rx="5"/>
+          <text class="label--sub" x="460" y="227" text-anchor="middle">skip</text>
+          <rect class="node" x="570" y="205" width="160" height="34" rx="5"/>
+          <text class="label--sub" x="650" y="227" text-anchor="middle">skip</text>
+
+          <text class="label" x="40" y="278">created_at &gt;= X only</text>
+          <rect class="node node--bad" x="190" y="260" width="160" height="34" rx="5"/>
+          <text class="label" x="270" y="282" text-anchor="middle">walk all</text>
+          <rect class="node node--bad" x="380" y="260" width="160" height="34" rx="5"/>
+          <text class="label" x="460" y="282" text-anchor="middle">walk all</text>
+          <rect class="node node--bad" x="570" y="260" width="160" height="34" rx="5"/>
+          <text class="label" x="650" y="282" text-anchor="middle">walk all</text>
+
+          <text class="label" x="40" y="333">region IN ('EU','US')</text>
+          <rect class="node node--good" x="190" y="315" width="160" height="34" rx="5"/>
+          <text class="label" x="270" y="337" text-anchor="middle">seek</text>
+          <rect class="node node--good" x="380" y="315" width="160" height="34" rx="5"/>
+          <text class="label" x="460" y="337" text-anchor="middle">seek</text>
+          <rect class="node" x="570" y="315" width="160" height="34" rx="5"/>
+          <text class="label--sub" x="650" y="337" text-anchor="middle">skip</text>
+        </svg>
+        <figcaption>One index, three contiguous region runs. Constrain the leading column and
+        the engine descends to one run and walks it. Constrain only <code>created_at</code>
+        and every run must be walked in full &mdash; the same predicate, the same index, a
+        hundred-fold difference in pages read.</figcaption>
+      </figure>
+
+      <p>The worked example that makes the rule concrete, on a 10M-row <code>orders</code>:</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Order A vs Order B on <code>(region, created_at)</code> &mdash; the same five queries, two index definitions</caption>
+          <thead>
+            <tr>
+              <th>Query</th>
+              <th>Order A: <code>(region, created_at)</code></th>
+              <th>Order B: <code>(created_at, region)</code></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>region = 'EU'</code> (1%)</td><td>seek on region &mdash; 197 leaves</td><td>no seek, full index scan (1%)</td></tr>
+            <tr><td><code>created_at &gt;= '2026-01-01'</code> (8%)</td><td>no seek &mdash; full scan, 1.7M pages</td><td>seek on created_at &mdash; 1,571 leaves</td></tr>
+            <tr><td><code>region = 'EU' AND created_at &gt;= X</code> (0.08%)</td><td>seek region, walk created_at &mdash; <strong>16 leaves</strong></td><td>seek created_at, filter region &mdash; <strong>1,571 leaves, a 100&times; loss</strong></td></tr>
+            <tr><td><code>status = 'pending'</code> (2%)</td><td>needs its own index</td><td>needs its own index</td></tr>
+            <tr><td><code>customer_id = 9182</code> (10 rows)</td><td>needs its own index</td><td>needs its own index</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Ordering rules, and the query each one breaks</caption>
+          <thead>
+            <tr>
+              <th>Situation</th>
+              <th>Rule</th>
+              <th>When it bites</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Several equality columns</td><td>any order among them; all are seeks</td><td>a later range column needs one of them pinned first</td></tr>
+            <tr><td>Equality plus one range</td><td>equalities first, range last</td><td>reversing them costs 16 leaves &rarr; 1,571</td></tr>
+            <tr><td>Columns after the range</td><td>cannot narrow anything; they only filter</td><td>worth including only as <code>INCLUDE</code> payload</td></tr>
+            <tr><td>One massively selective column</td><td>put it first, even if it is an equality on a high-cardinality key</td><td>if the other queries become full index scans, this is the right trade only if the selective query dominates</td></tr>
+            <tr><td>Range on the first column</td><td>destroys the seek on every column after it</td><td>this is the Order B failure, and it is the one that costs 100&times;</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p>&ldquo;Put the most selective column first&rdquo; is the reflexive answer and it is
+        wrong. Cardinality is not the question; <strong>which query can still use the
+        index</strong> is. Order A serves the 0.08% query in 16 leaf pages and Order B serves it
+        in 1,571. Judge the order against the whole query mix, not against the one query you
+        were asked about.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off</span>
+        <p>Widening a composite index to include a third column fixes the filtering for the
+        query that has it, and still leaves the query that only constrains that column with no
+        seek at all. The condition that flips the answer: if <code>status</code> is the
+        predicate 2% of the time and nothing constrains the prefix, a
+        <strong>partial index <code>WHERE status = 'pending'</code></strong> is strictly
+        better &mdash; the volume's example makes it 52&times; smaller (394 leaf pages against
+        19,646) and permanently buffer-resident.</p>
+      </div>
+
+      <h3>Sargability</h3>
+
+      <p>A predicate is <em>sargable</em> if the planner can turn it into an index seek or
+      range walk. Most cases where it cannot are one of four things, and all four are fixed at
+      the call site rather than in the index.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Sargable and non-sargable forms, and what each costs</caption>
+          <thead>
+            <tr>
+              <th>Form</th>
+              <th>Sargable?</th>
+              <th>Why</th>
+              <th>Rewrite</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>region = 'EU'</code></td><td>yes</td><td>equality on the leading column</td><td>&mdash;</td></tr>
+            <tr><td><code>region IN ('EU','US')</code></td><td>yes</td><td>an equality set: two seeks</td><td>&mdash;</td></tr>
+            <tr><td><code>created_at BETWEEN a AND b</code></td><td>yes</td><td>range walk down the leaf chain</td><td>&mdash;</td></tr>
+            <tr><td><code>region = 'EU' OR ip = '10.0.0.7'</code></td><td>partly</td><td><code>OR</code> across different columns interleaves in the key space; a <code>BitmapOr</code> works only if <em>both</em> branches are selective</td><td><code>UNION ALL</code> of two indexed branches</td></tr>
+            <tr><td><code>user_ref = 9182</code> on a <code>VARCHAR</code> column</td><td>engine-dependent</td><td>type precedence resolves the comparison and forces a conversion; when it lands on the <em>column</em>, the index is unusable</td><td>make the literal's type match the column</td></tr>
+            <tr><td><code>date(created_at) = '2026-01-01'</code></td><td>no</td><td>the function is applied to the column</td><td>an <strong>expression index</strong> on <code>date(created_at)</code></td></tr>
+            <tr><td><code>amount &gt; 0</code> on a <code>NUMERIC</code> compared to a float</td><td>no</td><td>the float literal forces a cast of the column to text</td><td>make the literal <code>NUMERIC</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="sql" data-title="Sargable rewrite ladder" data-hl-line="8,15"><code>-- 1. Function on the column: expression index, then the query matches it exactly
+CREATE INDEX idx_orders_created_day ON orders ((date(created_at)));
+-- but the predicate must be written the same way, function included
+SELECT * FROM orders WHERE date(created_at) = '2026-01-01';
+
+-- 2. OR across columns: UNION ALL, never UNION
+--    UNION deduplicates, which forces a sort or hash over the combined
+--    result and can cost more than the OR saved.
+SELECT * FROM events WHERE user_ref = 9182
+UNION ALL
+SELECT * FROM events WHERE ip_address = '10.0.0.7';
+
+-- 3. Implicit cast: the literal's type must match the column's
+SELECT * FROM events WHERE user_ref = '9182';   -- varchar column
+SELECT * FROM events WHERE customer_id = 9182; -- integer column, no quotes</code></pre>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p>The implicit-cast trap has a direction, and getting the direction wrong is worse
+        than not knowing it. With a <code>VARCHAR</code> column compared to an integer literal,
+        PostgreSQL converts the <em>literal</em> to text and uses the index cleanly; MySQL's
+        optimiser declines the index instead. The genuine PostgreSQL failure is the reverse:
+        an <strong>index on an integer column compared to a text literal</strong>, where the
+        column must be cast to text. The general rule survives both: the index is usable only
+        if the conversion falls on the literal side.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p>An <code>OR</code> with one selective branch and one total branch is a sequential
+        scan, and <strong>that is the planner being right</strong>. <code>WHERE user_ref = 9182
+        OR user_ref IS NULL</code> has a branch matching 11,999,960 rows; the planner sees a
+        100% match, scans, and is correct. The presence of one selective branch does not help
+        if the other is total.</p>
+      </div>
+    </section>
+
+    <section id="ch5" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">05</span>
+        <h2>Access paths and the cost model</h2>
+      </div>
+
+      <p>PostgreSQL's planner does not emit milliseconds. It emits <em>relative cost units</em>,
+      calibrated to one sequential 8 kB page read on a cold spinning device. Every decision it
+      makes is a comparison of two numbers in those units, and the constants are configurable
+      &mdash; which is the lever, and the liability.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The constants the planner reasons with</caption>
+          <thead>
+            <tr>
+              <th>Knob</th>
+              <th>Default</th>
+              <th>Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>seq_page_cost</code></td><td>1.0</td><td>8 kB sequential read</td></tr>
+            <tr><td><code>random_page_cost</code></td><td><strong>4.0</strong></td><td>8 kB random read &mdash; the key ratio</td></tr>
+            <tr><td><code>cpu_tuple_cost</code></td><td>0.01</td><td>per tuple: projection + filter</td></tr>
+            <tr><td><code>cpu_index_tuple_cost</code></td><td>0.005</td><td>per index tuple</td></tr>
+            <tr><td><code>cpu_operator_cost</code></td><td>0.0025</td><td>per operator evaluation</td></tr>
+            <tr><td><code>parallel_setup_cost</code></td><td>1000</td><td>fixed cost of launching parallel workers</td></tr>
+            <tr><td><code>effective_cache_size</code></td><td>4&times; <code>shared_buffers</code></td><td>the planner's belief about RAM</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>So the arithmetic is: a sequential scan of 256,411 pages costs 256,411. An index scan
+      costing 3 page reads plus 40 heap fetches costs <code>3 &times; 4.0</code> for the
+      descent, <code>40 &times; 4.0</code> for the random fetches, and a fraction for the CPU
+      &mdash; about 12.8, which the planner will pick every time.</p>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p><strong>The 4.0 is a lie on modern hardware, in both directions.</strong> On NVMe
+        the true ratio is ~1.0 and <code>random_page_cost = 1.1</code> is the right setting;
+        on spinning or network-attached storage the true ratio is 8&ndash;20 and the default
+        understates it badly. Default cost settings therefore produce bad plans on both kinds
+        of hardware, in opposite directions &mdash; too index-scan-happy on flash, too
+        seq-scan-happy on network storage.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Access paths: what each node in a plan means and when the planner picks it</caption>
+          <thead>
+            <tr>
+              <th>Node</th>
+              <th>Reads</th>
+              <th>Chosen when</th>
+              <th>Failure mode</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Seq Scan</td><td>every page, in order</td><td>match rate high, or table small</td><td>CPU proportional to table size, not answer size</td></tr>
+            <tr><td>Index Scan</td><td>3 + 1 random read per row</td><td>match rate &le; ~25% and the table is large</td><td>40 heap fetches at 4.0 each is the real cost, not the 3</td></tr>
+            <tr><td>Index Only Scan</td><td>index pages only</td><td>match rate &le; ~25% and the index is covering</td><td><code>Heap Fetches</code> per row if the pages are not all-visible</td></tr>
+            <tr><td>Bitmap Heap Scan</td><td>index pages, then physical-order heap pages</td><td>match rate &gt; ~25% and the index is not covering</td><td>loses the ordering, so it cannot feed a merge join or avoid a sort</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The ~25% switch is a heuristic with a real mechanism behind it: once more than about a
+      quarter of the rows is going to be visited in random order, the physical-order advantage
+      of a sequential scan is worth more than the random-read saving, and a bitmap &mdash; which
+      collects the matching rows as a bit vector and then reads the heap in
+      <em>physical</em> order &mdash; wins both ways. The volume's example has 1,180,233 rows
+      collapsing to a 147 kB bitmap, which is the size argument for why this is even
+      possible.</p>
+
+      <pre class="snippet" data-lang="sql" data-title="Same query, two plans" data-hl-line="6,14"><code>EXPLAIN ANALYZE SELECT * FROM orders WHERE region = 'EU';
+
+  Seq Scan on orders  (cost=0.00..384120.00 rows=1200000 width=64)
+                    (actual time=0.019..29184.553 rows=1180233 loops=1)
+    Filter: (region = 'EU'::text)
+    Rows Removed by Filter: 8819767
+    Buffers: shared hit=256411
+  Planning Time: 0.142 ms
+  Execution Time: 29190.881 ms
+  ─────────────────────────────────────────────────────────────────────
+  29 seconds. 8.8M rows evaluated to return 1.18M. The plan is right:
+  8.3% of the table, but 256,411 random reads would be far worse.
+
+  -- and the same shape after ANALYZE has the right statistics
+  -- (region's row count is the only thing that moved):
+
+  Index Scan using idx_orders_region on orders
+        (cost=0.42..1918.44 rows=1180000 width=64)
+        (actual time=0.041..1874.221 rows=1180233 loops=1)
+    Index Cond: (region = 'EU'::text)
+    Buffers: shared hit=1204</code></pre>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p><code>Buffers: shared hit=256411</code> is 29 seconds. <strong>&ldquo;All from
+        cache&rdquo; is not &ldquo;fast&rdquo;</strong> &mdash; <code>hit</code> is RAM at
+        ~100 ns, so the whole scan cost about 26 ms of I/O and the rest was CPU: 8,819,767
+        rows removed by filter, each an <code>cpu_operator_cost</code> evaluation. The
+        corollary is the one people miss: a high hit ratio alongside large
+        <code>temp read</code>/<code>temp written</code> figures means the I/O is not fine at
+        all &mdash; that work went through a temp file because a sort or hash exceeded
+        <code>work_mem</code>.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>A sequential scan is not a failure and an index scan is not a success. Both appear
+        as <em>the planner being right</em>. The judgement is: does the estimate match reality,
+        and is the shape proportional to the answer or to the table?</p>
+      </div>
+    </section>
+
+    <section id="ch6" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">06</span>
+        <h2>Joins at runtime</h2>
+      </div>
+
+      <p>Three algorithms, and the choice between them is almost entirely about the size of
+      the outer relation and whether the inner has an index. Nothing about the query's
+      <em>shape</em> is relevant, which is why &ldquo;why did it pick a nested loop&rdquo; has
+      a numeric answer.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Which algorithm wins, from the volume's worked crossover (inner = 1.2M rows)</caption>
+          <thead>
+            <tr>
+              <th>Outer rows</th>
+              <th>Inner rows</th>
+              <th>Inner index?</th>
+              <th>Chosen</th>
+              <th>Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>40</td><td>1,200,000</td><td>yes</td><td><strong>nested loop</strong></td><td>160 reads vs 1.2M for hash</td></tr>
+            <tr><td>40</td><td>1,200,000</td><td>no</td><td>nested loop (seq inner)</td><td>40 &times; 30,769 = 1.2M &mdash; a tie</td></tr>
+            <tr><td>5,000</td><td>1,200,000</td><td>yes</td><td><strong>hash join</strong></td><td>15,020 vs 1.2M + 5,000</td></tr>
+            <tr><td>10,000,000</td><td>1,200,000</td><td>yes</td><td><strong>hash join</strong></td><td>30M vs 1.2M + 10M</td></tr>
+            <tr><td>10,000,000</td><td>1,200,000</td><td>no</td><td><strong>hash join</strong></td><td>3.08&times;10<sup>11</sup> vs 1.2M + 10M</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 760 260" role="img" aria-label="Three join regimes: a nested loop with an indexed inner costing 160 reads, a nested loop with a sequential inner costing 3.08 times ten to the eleven reads, and a hash join costing 1.2 million build plus 10 million probes.">
+          <marker id="arw-d4-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+          </marker>
+
+          <rect class="node node--good" x="20" y="10" width="230" height="30" rx="5"/>
+          <text class="label" x="135" y="30" text-anchor="middle">nested loop, indexed inner</text>
+          <rect class="node" x="20" y="62" width="230" height="40" rx="5"/>
+          <text class="label" x="135" y="79" text-anchor="middle">outer</text>
+          <text class="label--sub" x="135" y="94" text-anchor="middle">40 rows</text>
+          <rect class="node node--good" x="20" y="150" width="230" height="40" rx="5"/>
+          <text class="label" x="135" y="167" text-anchor="middle">inner</text>
+          <text class="label--sub" x="135" y="182" text-anchor="middle">1.2M rows, indexed</text>
+          <path class="edge edge--good" d="M 135 102 L 135 148" marker-end="url(#arw-d4-d)"/>
+          <text class="edge-label edge-label--strong" x="135" y="130" text-anchor="middle">40 &times; 4 = 160</text>
+          <text class="edge-label" x="135" y="215" text-anchor="middle">one 3-page seek per outer row</text>
+
+          <rect class="node node--bad" x="265" y="10" width="230" height="30" rx="5"/>
+          <text class="label" x="380" y="30" text-anchor="middle">nested loop, sequential inner</text>
+          <rect class="node" x="265" y="62" width="230" height="40" rx="5"/>
+          <text class="label" x="380" y="79" text-anchor="middle">outer</text>
+          <text class="label--sub" x="380" y="94" text-anchor="middle">10,000,000 rows</text>
+          <rect class="node node--bad" x="265" y="150" width="230" height="40" rx="5"/>
+          <text class="label" x="380" y="167" text-anchor="middle">inner</text>
+          <text class="label--sub" x="380" y="182" text-anchor="middle">1.2M rows, no index</text>
+          <path class="edge edge--bad" d="M 380 102 L 380 148" marker-end="url(#arw-d4-d)"/>
+          <text class="edge-label edge-label--strong" x="380" y="130" text-anchor="middle">3.08 &times; 10<sup>11</sup></text>
+          <text class="edge-label" x="380" y="215" text-anchor="middle">a full rescan per outer row</text>
+
+          <rect class="node node--good" x="510" y="10" width="230" height="30" rx="5"/>
+          <text class="label" x="625" y="30" text-anchor="middle">hash join</text>
+          <rect class="node" x="510" y="62" width="230" height="40" rx="5"/>
+          <text class="label" x="625" y="79" text-anchor="middle">build side</text>
+          <text class="label--sub" x="625" y="94" text-anchor="middle">1.2M rows, hashed once</text>
+          <rect class="node" x="510" y="150" width="230" height="40" rx="5"/>
+          <text class="label" x="625" y="167" text-anchor="middle">probe side</text>
+          <text class="label--sub" x="625" y="182" text-anchor="middle">10,000,000 rows</text>
+          <path class="edge edge--good" d="M 625 102 L 625 148" marker-end="url(#arw-d4-d)"/>
+          <text class="edge-label edge-label--strong" x="625" y="130" text-anchor="middle">1.2M + 10M</text>
+          <text class="edge-label" x="625" y="215" text-anchor="middle">probes are sequential, not seeks</text>
+
+          <text class="label--sub" x="380" y="248" text-anchor="middle">the outer size at which the answer flips is roughly 25,000 rows for a 1.2M inner</text>
+        </svg>
+        <figcaption>The same two relations, three regimes. A nested loop is not a plan smell
+        &mdash; at 40 outer rows with an indexed inner it is 160 reads against 1.2M for a hash
+        join. It becomes an outage the moment the outer grows and the inner index disappears.</figcaption>
+      </figure>
+
+      <p>A sequential inner makes the nested loop read <code>10,000,000 &times; 30,769 =
+      3.08 &times; 10<sup>11</sup></code> pages. At 200 IOPS that is <strong>178 days</strong>.
+      The ratio against the good nested loop is 1.9&times;10<sup>9</sup> &mdash; and both plans
+      are nested loops. That is the point: the algorithm is not the variable, the inner access
+      path is.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p>&ldquo;Nested loop join&rdquo; is not by itself a red flag. The volume says it
+        directly: at 40 outer rows against a 1.2M inner with an index, 160 reads is the correct
+        plan and a hash join would be 1.2M reads to build a table you will probe four times.
+        Name the crossover number and the answer stops being a heuristic.</p>
+      </div>
+
+      <h3>Merge join and the sort it avoids</h3>
+
+      <p>Merge join wins when both inputs arrive already sorted, when the output must be sorted
+      anyway, or when both relations are large and neither fits in <code>work_mem</code>. The
+      third case is the one people quote and the one that costs: sorting 1.2M rows of 180 bytes
+      is <strong>216 MB against a 4 MB <code>work_mem</code></strong>, so it spills into 54
+      disk batches and 108 random 8 kB I/Os &mdash; 0.54 s of pure sort cost before a single row
+      joins.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p>A <code>Merge Join</code> <em>with</em> a <code>Sort</code> node under it has
+        already lost. The whole practical argument for indexing is to make the sort disappear:
+        <strong>Merge Join without a Sort node</strong>, which requires the join predicate to
+        match the index's leading column in the same order. An index on a column you join on is
+        often a sort-elimination index, not a lookup index.</p>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p><code>work_mem</code> defaults to <strong>4 MB per sort or hash node, per
+        connection</strong>. The volume's build-side case is a 254 MB hash table that spilled
+        into 139 batches and 556 random I/Os, costing 2.78 s of pure spill. Raising
+        <code>work_mem</code> is a per-query decision with a memory ceiling multiplier
+        attached; setting it globally on a busy server is an outage generator.</p>
+      </div>
+
+      <pre class="snippet" data-lang="sql" data-title="LATERAL, the real nested loop" data-hl-line="6"><code>-- The 5 rows-per-outer form the planner cannot infer on its own.
+-- For each region, find its top 5 orders by total.
+SELECT r.region, o.id, o.total
+  FROM regions r
+  LEFT JOIN LATERAL (
+        SELECT o.id, o.total
+          FROM orders o
+         WHERE o.region = r.region      -- the inner gets the outer row
+         ORDER BY o.total DESC
+         LIMIT 5
+       ) o ON true
+ ORDER BY o.total DESC;</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p><code>LATERAL</code> is how you express an index-nested-loop deliberately. It is
+        also the shape that silently becomes a disaster: remove the <code>LIMIT</code> and it
+        is a correlated subquery the planner must evaluate per outer row, and with no inner
+        index it is the 3.08&times;10<sup>11</sup> regime.</p>
+      </div>
+    </section>
+
+    <section id="ch7" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">07</span>
+        <h2>Reading EXPLAIN and EXPLAIN ANALYZE</h2>
+      </div>
+
+      <p><code>EXPLAIN</code> without <code>ANALYZE</code> is a <em>claim</em> &mdash; a cost
+      computed from statistics on a model calibrated for different hardware. <code>EXPLAIN
+      ANALYZE</code> is a <em>measurement</em>, and it runs the query. Conflating them is the
+      first mistake; running <code>EXPLAIN ANALYZE</code> on a long query in a production
+      console is the second.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Field by field: what each part of a plan line is telling you</caption>
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Means</th>
+              <th>Read it as</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>cost=0.00..384120.00</code></td><td>startup cost .. total cost, in relative units</td><td>total, not startup, unless a <code>LIMIT</code> exists above</td></tr>
+            <tr><td><code>rows=1200000</code></td><td>estimated rows <em>per loop</em></td><td>multiply by <code>loops</code> before comparing to anything</td></tr>
+            <tr><td><code>width=64</code></td><td>estimated bytes per row</td><td>multiply by rows to get the real volume moved</td></tr>
+            <tr><td><code>actual time=0.019..29184</code></td><td>time to first row .. time to last row, per loop</td><td>a huge spread means the row came late, not that the node is slow</td></tr>
+            <tr><td><code>Rows Removed by Filter</code></td><td>rows the predicate rejected</td><td>the CPU cost the plan chose to pay</td></tr>
+            <tr><td><code>Buffers: shared hit=</code></td><td>pages read from shared buffers</td><td>high hit + high temp read = not fine</td></tr>
+            <tr><td><code>Heap Fetches</code></td><td>heap pages visited by an index-only scan</td><td>must be 0 for the index-only scan to be free</td></tr>
+            <tr><td><code>Planning Time</code> / <code>Execution Time</code></td><td>the two phases, in ms</td><td><code>Execution Time</code> is the wall clock &mdash; unless a <code>LIMIT</code> truncates it</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Read leaves to root, and multiply by loops</h3>
+
+      <pre class="snippet" data-lang="sql" data-title="EXPLAIN ANALYZE, nested loop" data-hl-line="7,9"><code>EXPLAIN (ANALYZE, BUFFERS)
+SELECT c.name, sum(o.total)
+  FROM orders o JOIN customers c ON c.id = o.customer_id
+ WHERE o.region = 'EU'
+ GROUP BY c.name;
+
+-&gt;  Aggregate  (actual time=8120.112..8120.401 rows=40000 loops=1)
+      -&gt;  Nested Loop  (actual time=8118.902..8110.442 rows=40000 loops=1)
+            -&gt;  Index Only Scan using orders_covering on orders o
+                  (cost=0.43..4.12 rows=42 width=28)
+                  (actual time=0.041..0.187 rows=40 loops=1000)   &lt;-- read this
+                  Index Cond: (region = 'EU'::text)     Heap Fetches: 0
+                  -&gt;  Index Only Scan using customers_pkey on customers c
+                        (cost=0.43..8.31 rows=1 width=180)
+                        (actual time=0.003..0.004 rows=1 loops=40000) &lt;-- and this
+                        Index Cond: (c.id = o.customer_id)
+
+  Planning Time: 0.312 ms       Execution Time: 8122.556 ms</code></pre>
+
+      <p>Neither <code>rows=40</code> nor <code>rows=1</code> is the total. 40 &times; 1,000 =
+      40,000 and 1 &times; 40,000 = 40,000. The sub-1 form is the same point made nastier:
+      <code>rows=0.5 loops=1000000</code> is <strong>500,000 rows</strong>, and reading it as
+      &ldquo;no rows&rdquo; is how a million-row nested loop gets reported as an empty result.</p>
+
+      <p>Where the time went here is the useful part: the inner lookup, performed 40,000 times,
+      is <strong>160 ms of 8,110 ms &mdash; 2%</strong>. The outer per-loop overhead is 7,750 ms
+      of executor bookkeeping, buffer lookups and visibility checks. And the estimates are
+      <em>good</em>: the outer was estimated at 42 and produced 40 (5% error), the inner at 1
+      and produced 1. This plan is not a victim of a cardinality error, so the answer is to
+      change its shape, not to reach for <code>ANALYZE</code> or a plan hint.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p>Finding the bad estimate at the <em>top</em> of the tree. The optimiser's cost for a
+        parent is derived from its children's estimates, so a child that estimated 10,000 and
+        produced 1,000,000 makes the parent wrong, the grandparent wrong, and so on to the
+        root. <strong>The top node's error is a symptom; the deepest node's error is the
+        disease.</strong></p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember</span>
+        <p>A parent's <code>actual time</code> <em>includes</em> its children's. Always read the
+        tree leaves-up, and subtract to find the node doing local work. In the plan above the
+        <code>Sort</code> shows 8,120 ms because it is the root &mdash; its own cost is a
+        4,212 kB in-memory quicksort, about 180 ms.</p>
+      </div>
+
+      <h3>Estimates over 1000&times; wrong: the diagnosis</h3>
+
+      <figure class="figure">
+        <svg viewBox="0 0 760 250" role="img" aria-label="An Aggregate and Hash Join each estimated 2,000 rows but producing 1,180,000, above a Hash node with the same error, above three correctly estimated base scans.">
+          <marker id="arw-d4-e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+          </marker>
+
+          <rect class="node node--bad" x="290" y="8" width="180" height="38" rx="5"/>
+          <text class="label" x="380" y="25" text-anchor="middle">Aggregate</text>
+          <text class="label--sub" x="380" y="40" text-anchor="middle">est 2,000 &middot; act 1.18M</text>
+
+          <rect class="node node--bad" x="290" y="70" width="180" height="38" rx="5"/>
+          <text class="label" x="380" y="87" text-anchor="middle">Hash Join</text>
+          <text class="label--sub" x="380" y="102" text-anchor="middle">est 2,000 &middot; act 1.18M</text>
+
+          <rect class="node node--bad" x="290" y="132" width="180" height="38" rx="5"/>
+          <text class="label" x="380" y="149" text-anchor="middle">Hash</text>
+          <text class="label--sub" x="380" y="164" text-anchor="middle">est 2,000 &middot; act 1.18M</text>
+
+          <path class="edge edge--bad" d="M 380 46 L 380 68" marker-end="url(#arw-d4-e)"/>
+          <path class="edge edge--bad" d="M 380 108 L 380 130" marker-end="url(#arw-d4-e)"/>
+
+          <path class="edge edge--good" d="M 340 170 L 160 206" marker-end="url(#arw-d4-e)"/>
+          <path class="edge edge--good" d="M 380 170 L 380 206" marker-end="url(#arw-d4-e)"/>
+          <path class="edge edge--good" d="M 420 170 L 640 206" marker-end="url(#arw-d4-e)"/>
+
+          <rect class="node node--good" x="60" y="208" width="200" height="36" rx="5"/>
+          <text class="label" x="160" y="230" text-anchor="middle">Seq Scan orders</text>
+          <rect class="node node--good" x="280" y="208" width="200" height="36" rx="5"/>
+          <text class="label" x="380" y="230" text-anchor="middle">Index Scan customers</text>
+          <rect class="node node--good" x="540" y="208" width="200" height="36" rx="5"/>
+          <text class="label" x="640" y="230" text-anchor="middle">Index Scan countries</text>
+
+          <text class="label--sub" x="160" y="256" text-anchor="middle">1.0&times;</text>
+          <text class="label--sub" x="380" y="256" text-anchor="middle">1.0&times;</text>
+          <text class="label--sub" x="640" y="256" text-anchor="middle">1.0&times;</text>
+        </svg>
+        <figcaption>Every base relation is estimated correctly and both leaf access paths are
+        right. The 590&times; error lives in the <code>Hash</code> node alone &mdash; so no
+        amount of <code>ANALYZE</code> fixes it. The data is being measured accurately and
+        interpreted incorrectly.</figcaption>
+      </figure>
+
+      <p>The mechanism is that a join's output cardinality assumes <strong>independence</strong>
+      between the join predicates unless extended statistics declare otherwise. If
+      <code>customers.country_id</code> and <code>customers.active</code> are correlated &mdash;
+      99% of active customers in 3 countries &mdash; the true result is 590&times; larger than
+      the product of the two selectivities, and the planner costed a 2,000-row join as cheap and
+      got 1,180,000.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p>Actual <em>lower</em> than estimated is the direction people forget, and it is a bug
+        too. A node estimated at 1,000,000 that produced 40 means the planner chose a
+        sequential scan over an index scan and the query is doing far more work than it needed.
+        The same deepest-large-ratio-node diagnostic finds it.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off</span>
+        <p><code>EXPLAIN ANALYZE</code> in the review template versus in production. The
+        condition that flips it: <code>EXPLAIN ANALYZE</code> executes the query, so on a
+        write statement or a <code>LIMIT</code>-truncated one it has side effects and timings.
+        Safe form is a transaction you roll back, or <code>EXPLAIN</code> alone for planning
+        review and <code>ANALYZE</code> only in staging.</p>
+      </div>
+    </section>
+
+    <section id="ch8" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">08</span>
+        <h2>Statistics and the optimiser</h2>
+      </div>
+
+      <p>Every estimate in a plan comes from four numbers per column. Knowing which four, and
+      which one nobody looks at, is most of what &ldquo;why did the planner do that&rdquo;
+      actually requires.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The four statistics that determine every row estimate</caption>
+          <thead>
+            <tr>
+              <th>Statistic</th>
+              <th>Answers</th>
+              <th>Watch for</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Row count</td><td>how many rows the relation has</td><td>stale after a bulk load; the planner's most-used number</td></tr>
+            <tr><td><code>ndistinct</code></td><td>how many distinct values</td><td><code>0</code> means unique &mdash; it is a flag, not a count</td></tr>
+            <tr><td>MCV list + histogram</td><td>the skew</td><td>a column where 62% sits in one bucket cannot be fixed by indexing</td></tr>
+            <tr><td><code>correlation</code></td><td>does physical order match logical order, -1 to +1</td><td>the number nobody looks at, and the one that decides whether a range predicate on an unindexed column reads 1 page or 500</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="sql" data-title="The diagnostic to run first" data-hl-line="2,3"><code>SELECT attname, n_distinct, correlation, most_common_freqs
+  FROM pg_stats
+ WHERE tablename = 'orders'
+   AND attname IN ('region','status','created_at');
+
+   attname     | n_distinct | correlation | most_common_freqs
+  -------------+------------+-------------+----------------------
+   region      |        140 |      -0.42  | {0.31,0.28,0.14,...}
+   status      |          6 |       0.03  | {0.62,0.11,0.09,...}
+   created_at  |          0 |       0.998 | {}
+  -- region: 140 values, correlation -0.42. A range predicate on it reads
+  --   hundreds of scattered pages. There is no index. Genuine problem.
+  -- status: 62% in one bucket. The planner knows, which is why indexing
+  --   status does not help a 60%-matching query.
+  -- created_at: correlation 0.998 = physically ordered, so a "last 7 days"
+  --   predicate reads a contiguous tail. The planner knows. Do not index.</code></pre>
+
+      <p><code>ANALYZE</code> does not read the table &mdash; it samples it, and the sample
+      size is the accuracy limit for everything downstream. The default is
+      <strong>300 &times; <code>default_statistics_target</code> = 30,000 rows</strong>, which
+      on a 40M-row table is a 0.075% sample. Raising the target to 1000 gives a 300,000-row
+      sample.</p>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check</span>
+        <p>A table that has never been <code>ANALYZE</code>d gets the fallback assumption of
+        <strong>200 distinct values</strong> for every column, and a uniform distribution. That
+        is the origin of the &ldquo;planner is stupid&rdquo; anecdote: it is not wrong, it is
+        answering with the only number it was given. The condition that flips it &mdash; if the
+        fallback is fine, the table is small enough that 30,000 rows is most of it.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p><code>ANALYZE</code> fixes stale statistics and nothing else. The volume is explicit
+        that the 590&times; join error survives it, because the data is measured accurately and
+        interpreted incorrectly. Re-running <code>ANALYZE</code> against an independence
+        assumption is treating the symptom; extended statistics are the fix.</p>
+      </div>
+
+      <h3>Extended statistics: declaring the correlation</h3>
+
+      <pre class="snippet" data-lang="sql" data-title="Extended statistics" data-hl-line="2,4"><code>-- 99% of active customers are in 3 countries. The planner multiplies
+-- the two selectivities and gets an answer 590x too small.
+CREATE STATISTICS stat_customer_country_active
+    (dependencies, ndistinct, mcv)
+    ON country_id, active
+    FROM customers;
+
+ANALYZE customers;</code></pre>
+
+      <p><code>dependencies</code> is the 590&times; fix: it declares a functional dependency
+      (<code>a &rarr; b</code>) and switches the estimator from multiplying two independent
+      selectivities to using the MCV list of pairs. <code>ndistinct</code> fixes selectivity for
+      multi-column <code>GROUP BY</code>, where the planner otherwise sums the per-column
+      distinct counts and over-counts when the columns are correlated. <code>mcv</code> supplies
+      a real multi-column most-common-values list, which is what makes the other two accurate
+      on skewed data &mdash; without it, <code>dependencies</code> only helps for pairs where
+      one functionally determines the other.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p><code>CREATE STATISTICS</code> is <strong>per-table</strong>. It cannot express that
+        <code>orders.customer_id</code> and <code>customers.id</code> are related, so the
+        estimator still assumes independence <em>across</em> the join &mdash; which is the most
+        common source of a catastrophic join cardinality estimate, and the one extended
+        statistics cannot reach. Saying so is the mark of someone who has read the
+        documentation rather than the blog post.</p>
+      </div>
+
+      <h3>Parameter sniffing: a cached plan is a bet</h3>
+
+      <p>A prepared statement's plan is chosen from the first few executions and applied to
+      all the rest. Any parameter whose distribution is skewed relative to those first calls is
+      a live grenade, and the failure is one staging can never reproduce.</p>
+
+      <pre class="snippet" data-lang="sql" data-title="Plan cache diagnostics" data-hl-line="9,12"><code>SELECT * FROM pg_prepared_statements;
+
+PREPARE q AS SELECT * FROM orders WHERE region = $1;
+EXECUTE q('EU');      -- 0.41 ms    Index Scan
+EXECUTE q('APAC');    -- 29,184 ms Seq Scan, the same plan for both
+EXECUTE q('LATAM');   -- 29,184 ms and 292 MB read, for the 10th tenant
+
+-- force custom plans, always
+SET plan_cache_mode = force_custom_plan;
+
+-- or make the generic plan safe by declaring the distribution
+CREATE STATISTICS (dependencies, ndistinct) ON region, status FROM orders;</code></pre>
+
+      <p>The mechanism, with numbers: <code>region</code> is <code>EU</code> 1.1%,
+      <code>US</code> 8.2%, <code>APAC</code> 0.6%, <code>LATAM</code> 0.05%. The first five
+      callers were the <code>US</code> dashboard, so the planner costed a custom plan at
+      1,918.44 against a generic plan at 2,091.03. The ratio is <strong>1.09, which is under
+      the <code>generic_plan_cost_ratio</code> of 1.10, so the generic plan was adopted</strong>.
+      Every subsequent tenant, including one 0.05% of the table, got the scan designed for the
+      common case.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap</span>
+        <p>How narrow the margin was: had the first five callers been the <code>EU</code>
+        dashboard instead, the ratio would have been 1,043.19/892.10 = <strong>1.17</strong>,
+        the generic plan would not have been adopted, and none of this would have happened.
+        The production bug was decided by a 0.01 difference in a cost ratio and by which user
+        clicked first. That is why &ldquo;we tested it in staging&rdquo; is not evidence here:
+        staging has 30,000 rows, one tenant, and the same value every time, so every plan is
+        trivially correct.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off</span>
+        <p>Cached plans save planning time; custom plans re-plan every execution. The
+        condition that flips it: when the parameter's distribution is <em>stable</em>, caching
+        is free and worth it; when it is skewed across tenants, regions or tenants-of-tenants,
+        the generic plan is a bet that pays 164&times; on the median tenant and loses 29 seconds
+        on the tail. The engine-level equivalents are SQL Server's
+        <code>OPTION (RECOMPILE)</code> and Oracle's adaptive cursor sharing &mdash; the same
+        decision with different names.</p>
+      </div>
+    </section>
+
+    <section id="numbers" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">&nbsp;</span>
+        <h2>Numbers worth memorising</h2>
+      </div>
+
+      <div class="numbers">
+        <div class="number">
+          <span class="number__value">8152 / 16 = 509</span>
+          <span class="number__label">Usable bytes per 8 kB page divided by the <code>int8</code> key width &mdash; the fan-out that makes height 3</span>
+        </div>
+        <div class="number">
+          <span class="number__value">3</span>
+          <span class="number__label">Height of a 10M-row <code>int8</code> B+ tree: root, 39 level-1 pages, 19,646 leaves</span>
+        </div>
+        <div class="number">
+          <span class="number__value">3 page reads</span>
+          <span class="number__label">The floor for any seek: root, internal node, leaf &mdash; before a single heap fetch</span>
+        </div>
+        <div class="number">
+          <span class="number__value">0.64% / 2.6%</span>
+          <span class="number__label">Break-even match rate, spinning media / NVMe. Below it the sequential scan is correct</span>
+        </div>
+        <div class="number">
+          <span class="number__value">234 / 9,360</span>
+          <span class="number__label">Table size below which the planner prefers a scan: NVMe / spinning &mdash; a 40&times; spread</span>
+        </div>
+        <div class="number">
+          <span class="number__value">~25%</span>
+          <span class="number__label">Match rate at which an index scan gives way to a bitmap heap scan (or an index-only scan, if covering)</span>
+        </div>
+        <div class="number">
+          <span class="number__value">4.0 &rarr; 1.1</span>
+          <span class="number__label"><code>random_page_cost</code>: the default is 4&times; too high for NVMe and 4&times; too low for network storage</span>
+        </div>
+        <div class="number">
+          <span class="number__value">25,000</span>
+          <span class="number__label">Outer rows at which a nested loop over a 1.2M-row inner stops winning</span>
+        </div>
+        <div class="number">
+          <span class="number__value">178 days</span>
+          <span class="number__label">A 10M-row outer over a sequential 1.2M inner: 3.08&times;10<sup>11</sup> reads at 200 IOPS</span>
+        </div>
+        <div class="number">
+          <span class="number__value">4 MB</span>
+          <span class="number__label">Default <code>work_mem</code>, per sort or hash node, per connection</span>
+        </div>
+        <div class="number">
+          <span class="number__value">30,000 rows</span>
+          <span class="number__label"><code>ANALYZE</code> sample: 300 &times; <code>default_statistics_target</code> of 100</span>
+        </div>
+        <div class="number">
+          <span class="number__value">200</span>
+          <span class="number__label">Distinct values assumed for a column on a table that has never been <code>ANALYZE</code>d</span>
+        </div>
+        <div class="number">
+          <span class="number__value">16 B / 128 blocks</span>
+          <span class="number__label">BRIN: one summary entry per 128 pages &mdash; 32 KB against a 2 GB heap</span>
+        </div>
+        <div class="number">
+          <span class="number__value">13 page writes</span>
+          <span class="number__label">Per inserted row on a table with 12 indexes; 130,000/second at 10k inserts/sec</span>
+        </div>
+        <div class="number">
+          <span class="number__value">5 executions, 1.10</span>
+          <span class="number__label">Custom plans before a generic plan is adopted, and the cost-ratio threshold that decides it</span>
+        </div>
+      </div>
+
+      <p>Two of these deserve their emphasis restated once more. <strong>509</strong> is not a
+      number to memorise for its own sake &mdash; it is the input to <em>height</em>, and height
+      is what a seek costs. <strong>25,000</strong> is the join crossover, and quoting it is
+      what separates &ldquo;nested loops are bad&rdquo; from an answer.</p>
+    </section>
+
+    <footer class="pagefoot">
+      <span>Database Volume 4 — Indexes, Query Planning &amp; Execution</span>
+      <div class="pager">
+        <a href="03-sql-queries-joins-window-functions.html">&larr; Prev</a>
+        <a href="05-transactions-isolation-concurrency.html">Next &rarr;</a>
+      </div>
+    </footer>
+
+  </main>
+
+</div>
+
+<script src="../search.js"></script>
+<script src="../highlight.js"></script>
+</body>
+</html>
+
+
+
