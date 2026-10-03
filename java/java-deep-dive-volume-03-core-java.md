@@ -1,7 +1,5 @@
 # Part 3 — Core Java
 
-has to go somewhere, and every collection you'll build in Volume 4 depends on the generics rules in this book.
-
 ## Chapter 1 — The Object Class
 
 ### 1.1 Every Class Extends Object

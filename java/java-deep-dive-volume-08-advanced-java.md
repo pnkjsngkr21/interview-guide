@@ -1,6 +1,6 @@
 # Part 8 — Advanced Java
 
-discovery, and Hibernate's ORM mapping are all reflection and annotations underneath — this volume is where "magic" framework behavior stops being magic.
+This volume is where "magic" framework behavior stops being magic.
 
 ## Chapter 1 — Reflection
 

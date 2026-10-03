@@ -1,7 +1,5 @@
 # Part 1 — Java Basics
 
-you "already know" Java; the internals and interview traps here are what separate junior answers from senior ones.
-
 ## Chapter 1 — Java Introduction
 
 ### 1.1 What Is Java?

@@ -1,7 +1,5 @@
 # Part 6 — Multithreading & Concurrency
 
-one specific problem — visibility, atomicity, ordering, or coordination — and interviews reward knowing exactly which problem each one solves, not just that it exists.
-
 ## Chapter 1 — Threads: Fundamentals & Lifecycle
 
 ### 1.1 Process vs Thread

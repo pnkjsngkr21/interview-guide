@@ -2,8 +2,6 @@
 
 # Mastery
 
-incidents, the exact reasoning path from symptom to root cause, and the newest tools (virtual threads, structured concurrency) that are actively reshaping how that reasoning applies in production Java systems today.
-
 ## Chapter 1 — Java 17 & 21: Modern Language Features
 
 Records, sealed classes, and pattern matching were covered in depth in Volume 8. This chapter covers the remaining modern features most relevant to backend work: text blocks, switch expressions (revisited with full context), and the modern collection factory APIs — plus a quick reference of what shipped in each LTS release.

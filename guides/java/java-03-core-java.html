@@ -23,8 +23,6 @@
 
 <p class="empty" data-filter-empty hidden>No chapter matches that filter.</p>
 
-<section class="vol__preamble" data-filter-target><p>has to go somewhere, and every collection you'll build in Volume 4 depends on the generics rules in this book.</p></section>
-
 <section id="chapter-1-the-object-class" data-filter-target><h2 class="vol__h2">Chapter 1 — The Object Class</h2><h3 class="vol__h3" id="11-every-class-extends-object">1.1 Every Class Extends Object</h3><p>Every class in Java — even if you don't write <code>extends Object</code> — implicitly extends <code>java.lang.Object</code>, either directly or transitively through its superclass chain. This means every object you ever create automatically has <code>equals()</code>, <code>hashCode()</code>, <code>toString()</code>, <code>getClass()</code>, <code>clone()</code>, <code>finalize()</code> (deprecated), and the wait/notify family of methods, whether you asked for them or not.</p><h3 class="vol__h3" id="12-equals-and-hashcode-the-contract">1.2 equals() and hashCode() — The Contract</h3><p>Default behavior: <code>Object.equals()</code> is just reference comparison (equivalent to <code>==</code> ). <code>Object.hashCode()</code> returns an implementation-specific integer typically derived from the object's memory address (not guaranteed, but that's the practical HotSpot behavior). Most classes that represent values (not identities) override both.</p><pre class="snippet" data-lang="java"><code>class Point {
 int x, y;
 Point(int x, int y) { this.x = x; this.y = y; }

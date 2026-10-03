@@ -1,7 +1,5 @@
 # Part 2 — Object-Oriented Programming
 
-justify design decisions: why composition over inheritance, when an interface beats an abstract class, what actually happens on the heap when a subclass overrides a method.
-
 ## Chapter 1 — Classes, Objects, Constructors & this
 
 ### 1.1 Classes and Objects

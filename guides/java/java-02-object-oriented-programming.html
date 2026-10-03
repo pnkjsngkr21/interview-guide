@@ -23,8 +23,6 @@
 
 <p class="empty" data-filter-empty hidden>No chapter matches that filter.</p>
 
-<section class="vol__preamble" data-filter-target><p>justify design decisions: why composition over inheritance, when an interface beats an abstract class, what actually happens on the heap when a subclass overrides a method.</p></section>
-
 <section id="chapter-1-classes-objects-constructors-and-this" data-filter-target><h2 class="vol__h2">Chapter 1 — Classes, Objects, Constructors &amp; this</h2><h3 class="vol__h3" id="11-classes-and-objects">1.1 Classes and Objects</h3><p>Internal behavior: When you write <code>new Employee()</code>, the JVM: (1) resolves the <code>Employee</code> class via the class loader if not already loaded, (2) allocates a block of heap memory sized to hold all instance fields, (3) zeroes it (defaults: 0/null/false), (4) runs the constructor chain (implicit <code>super()</code> call first, then field initializers, then the constructor body), (5) returns a reference to the new object.</p><pre class="snippet" data-lang="java"><code>public class Employee {
 String name;      // instance field — belongs to each object
 double salary;

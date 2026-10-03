@@ -1,6 +1,6 @@
 # Part 5 — Java 8+
 
-lazy, composable pipeline over collections. Understanding what's happening underneath the sugar is exactly what separates "I can use streams" from "I can explain why this stream doesn't do what you'd expect."
+Understanding what's happening underneath the sugar is exactly what separates "I can use streams" from "I can explain why this stream doesn't do what you'd expect."
 
 ## Chapter 1 — Lambda Expressions & Functional
 

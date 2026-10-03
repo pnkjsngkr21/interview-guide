@@ -23,8 +23,6 @@
 
 <p class="empty" data-filter-empty hidden>No chapter matches that filter.</p>
 
-<section class="vol__preamble" data-filter-target><p>one specific problem — visibility, atomicity, ordering, or coordination — and interviews reward knowing exactly which problem each one solves, not just that it exists.</p></section>
-
 <section id="chapter-1-threads-fundamentals-and-lifecycle" data-filter-target><h2 class="vol__h2">Chapter 1 — Threads: Fundamentals &amp; Lifecycle</h2><h3 class="vol__h3" id="11-process-vs-thread">1.1 Process vs Thread</h3><div class="table-wrap"><table><thead><tr><th></th><th>Process</th><th>Thread</th></tr></thead><tbody><tr><td>Memory</td><td>Own isolated address space</td><td>Shares the process's heap and static memory with all sibling threads</td></tr><tr><td>Own stack?</td><td>Yes (whole process)</td><td>Yes — each thread has its own stack, PC register, and local variables</td></tr><tr><td>Communication</td><td>Needs IPC (sockets, pipes, shared files)</td><td>Direct — shared heap means threads can read/write the same objects</td></tr><tr><td>Creation cost</td><td>Expensive (new address space)</td><td>Much cheaper — reuses the process's memory space</td></tr><tr><td>Failure isolation</td><td>One process crashing doesn't crash another</td><td>An uncaught exception in one thread doesn't kill the JVM, but corrupted shared state can affect other threads</td></tr></tbody></table></div><p>This shared-heap property is the entire reason concurrency is hard: threads get parallelism essentially for free, but any shared mutable object is a potential race condition unless deliberately protected.</p><h3 class="vol__h3" id="12-thread-lifecycle">1.2 Thread Lifecycle</h3><pre class="diagram"><code>new Thread()
 │
 ▼

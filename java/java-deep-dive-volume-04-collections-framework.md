@@ -1,7 +1,5 @@
 # Part 4 — The Collections Framework
 
-what happens inside a HashMap on collision, why TreeSet needs Comparable, and why ConcurrentModificationException exists at all. That's what this volume is built around.
-
 ## Chapter 1 — The Collection Hierarchy
 
 ### 1.1 The Core Interfaces

@@ -2,7 +2,7 @@
 
 # Management
 
-the JVM's memory model. This volume is what lets you read a heap dump, explain a GC pause, and diagnose an OutOfMemoryError instead of just restarting the pod and hoping.
+This volume is what lets you read a heap dump, explain a GC pause, and diagnose an OutOfMemoryError instead of just restarting the pod and hoping.
 
 ## Chapter 1 — JVM Architecture & Runtime Data Areas
 
