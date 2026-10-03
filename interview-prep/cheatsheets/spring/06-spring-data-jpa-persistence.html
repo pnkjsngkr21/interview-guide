@@ -970,6 +970,75 @@ List&lt;OrderRow&gt; findRows(&#64;Param("status") ProductStatus status, Pageabl
         does it paginate, is more than one <code>List</code> involved, is the association provably
         non-null. That is a review that can be done; "no fetch joins" is a rule that can't.</p>
       </div>
+
+      <h3>The three cache layers, and which one a question means</h3>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>The layer is decided by who can invalidate it, not by what it stores</caption>
+          <thead><tr><th>Layer</th><th>Scope</th><th>Invalidated by</th><th>Says "cache" and means</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>@Cacheable</code></td><td>Your key, across the cluster if Redis</td>
+              <td>You — an <code>&#64;CacheEvict</code>, a TTL, or nothing</td>
+              <td>Service-layer read caching. Knows nothing about JPA</td></tr>
+
+            <tr><td>Persistence context (L1)</td><td>One transaction</td>
+              <td>Flush and clear. Non-repeatable by construction</td>
+              <td>"The same entity twice in one request"</td></tr>
+
+            <tr><td>Hibernate L2</td><td>One <code>SessionFactory</code> = one process</td>
+              <td>Hibernate, on entity changes <em>it can see</em></td>
+              <td><code>@Cache</code> on an entity. Needs a region factory</td></tr>
+
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — the Spring Cache is not a cache, and the default one leaks</span>
+        <p><strong>It is an AOP layer, not storage.</strong> It decides whether to call your method; a
+        <code>CacheManager</code> supplies the place. Add <code>&#64;EnableCaching</code> and nothing
+        else and Boot hands you <code>ConcurrentMapCacheManager</code> — a
+        <code>ConcurrentHashMap</code> per name, with <strong>no TTL and no size bound</strong>. Boot's
+        own words: <em>"The simple provider is not really recommended for production usage."</em> Entries
+        live until evicted or the JVM restarts, so a key built from request input is a heap ceiling, and
+        at ten instances it is ten of them. <code>spring.cache.type</code> takes
+        <code>caffeine</code>, <code>redis</code>, <code>hazelcast</code> &hellip; or
+        <code>none</code>, which is how you A/B a cache change with the annotations still in place.</p>
+
+        <p><strong>Four errors to be able to name cold.</strong> (1) An unnamed
+        <code>&#64;Cacheable</code> gets <em>no</em> generated name — it throws
+        <code>IllegalStateException: No cache could be resolved</code>; the name must come from
+        <code>value</code>/<code>cacheNames</code> or class-level <code>&#64;CacheConfig</code>.
+        (2) A name the manager doesn't know gives <code>IllegalArgumentException: Cannot find cache
+        named '...'</code> — a typo, not a missing name. (3) The default
+        <code>SimpleKeyGenerator</code> gives the <em>argument itself</em> as the key for one
+        non-array argument, so an array or several arguments fall to <code>SimpleKey</code> and never
+        match — write <code>key</code> explicitly. (4) <code>sync = true</code> rejects
+        <code>unless</code>, rejects more than one cache name, and cannot be combined with another
+        cache operation.</p>
+
+        <p><strong>Never cache the entity — cache the DTO.</strong> A cached entity is detached from
+        any persistence context, so its lazy associations throw
+        <code>LazyInitializationException</code> on first touch, and it carries no version check.
+        And <code>&#64;CacheEvict</code> on a <code>&#64;Transactional</code> method has
+        <strong>no guaranteed order against the commit</strong>: both advisors default to
+        <code>LOWEST_PRECEDENCE</code>, so eviction can run first and a reader can repopulate from
+        pre-commit data. Wrap the manager in <code>TransactionAwareCacheManagerProxy</code>.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — which cache to reach for, in one line each</span>
+        <p>Same request, same entity? That's the persistence context, and it is already there — do not
+        cache it. Small, hot, read-mostly reference rows everyone reads?
+        <code>&#64;Cacheable</code> on the service. An expensive aggregate only a few users request?
+        A projection. Something a whole cluster must agree on? Redis, with a TTL, and accept the
+        staleness you have chosen. Full treatment in
+        <a href="../../spring/spring-06-spring-data-jpa-persistence.html#46-the-spring-cache-abstraction-the-layer-above">Volume&nbsp;6 &sect;4.6</a>;
+        the stampede itself belongs to
+        <a href="../../database/database-09-redis-caching.html">Database Volume 9</a>.</p>
+      </div>
     </section>
 
     <!-- ============ 5 ============ -->

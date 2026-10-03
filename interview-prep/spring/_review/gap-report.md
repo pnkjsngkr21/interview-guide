@@ -80,7 +80,7 @@ backticks and zero bold leaks outside `<pre>`, with only legitimate `/**` glob p
 
 | Topic | Rating | Decision |
 | --- | --- | --- |
-| **Spring Cache abstraction** (`CacheManager`, `@Cacheable`, `@EnableCaching`, self-invocation trap, key generation) | High | **Gap. Not added this pass.** `CacheManager` occurs 0 times site-wide. Belongs in vol06 (which owns JPA caching) or vol09. See "Not done" below. |
+| **Spring Cache abstraction** (`CacheManager`, `@Cacheable`, `@EnableCaching`, self-invocation trap, key generation) | High | **Closed 2026-10-03 — added as vol06 §4.6**, plus cheat06 ch4. Placed immediately after §4.5 because the interview question is almost always "how do these two interact?", and the answer is that the Spring Cache, the persistence context and the Hibernate L2 cache are three layers with three different invalidation models. Stampede was left to Database Vol 9 per the linking-not-restating rule. |
 | **`RestClient`** (Framework 6.1) | High | **Gap. Not added this pass.** vol05 §7.5 owns outbound HTTP and compares only `RestTemplate` vs `WebClient`; `RestClient` appears once, as a Further Reading link label. |
 | **Messaging — `KafkaTemplate`, `@KafkaListener`, `@RabbitListener`** | High | **Gap, and a scope decision.** Zero occurrences across all 11 volumes. vol11 §6 builds its entire outbox argument on an unnamed "broker". Adding it properly means a new volume (`spring-12-messaging.html`), which is a file creation, not a targeted edit — outside "minimal, targeted edits". |
 | Virtual threads | High | Thin. Present in vol07/v09 but as prose, not mechanism. `spring.threads.virtual.enabled=true` + the pinning-to-carrier consequence is the senior answer. |

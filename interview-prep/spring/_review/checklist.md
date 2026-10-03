@@ -117,7 +117,7 @@ senior depth. A rating of High with `Partial` is a real gap and drives the work 
 | `ddl-auto` real default | High | Covered | v6 §7.1 |
 | Schema evolution, Flyway/Liquibase | High | Covered | v6 §7 |
 | Second-level cache | Medium | **Fixed 2026-10-03** — `javax.cache` → `jakarta.cache` | v6 |
-| **Spring Cache abstraction** | High | **MISSING** | `CacheManager` = 0 occurrences site-wide |
+| **Spring Cache abstraction** | High | **Added 2026-10-03** — `@EnableCaching` attributes, `@Cacheable`/`@CachePut`/`@CacheEvict`, key generation, the three-layer distinction, self-invocation, cache-vs-transaction ordering | v6 §4.6, cheat06 ch4 |
 | `@Version` optimistic locking | High | Covered | v6 |
 
 ## Security (Volume 8)

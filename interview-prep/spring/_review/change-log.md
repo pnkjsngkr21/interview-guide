@@ -16,17 +16,18 @@ or deleted in the content tree, no heading was renamed, no section was rewritten
 | `spring/spring-03-aop-proxying.html` | 3 | **Factual**, TOC leak |
 | `spring/spring-04-transaction-management.html` | 4 | **Factual**, TOC leak |
 | `spring/spring-05-spring-mvc-web-layer.html` | 2 | **Factual**, TOC leak |
-| `spring/spring-06-spring-data-jpa-persistence.html` | 3 | **Factual**, TOC leak, bold leak |
+| `spring/spring-06-spring-data-jpa-persistence.html` | 3 + **§4.6 added** | **Factual**, TOC leak, bold leak, **new section** |
 | `spring/spring-07-spring-boot-auto-configuration.html` | 2 | Heading level, TOC leak |
 | `spring/spring-08-spring-security.html` | 2 | Malformed QA block, TOC leak |
 | `spring/spring-09-testing-production-troubleshooting.html` | 2 | **Factual**, TOC leak |
 | `spring/spring-10-webflux-project-reactor.html` | 3 | **Factual**, consistency, TOC leak |
 | `spring/spring-11-spring-cloud-distributed-systems.html` | 7 | **Factual**, TOC leak, 2 malformed QA blocks, bold leak |
 | `cheatsheets/spring/02-bean-lifecycle-scopes-di.html` | 1 | **Factual** |
+| `cheatsheets/spring/06-spring-data-jpa-persistence.html` | **1 added** | **New section** |
 | `cheatsheets/spring/04-transaction-management.html` | 1 | Markdown leak |
 | `cheatsheets/spring/11-spring-cloud-distributed-systems.html` | 2 | **Factual** |
 
-**11 volumes + 3 cheatsheets = 14 files edited. 4 new files created, all under `_review/`.**
+**11 volumes + 4 cheatsheets = 15 files edited. 4 new files created, all under `_review/`.**
 
 ## Change-by-change
 
@@ -205,6 +206,83 @@ Its output was triaged claim-by-claim against the corpus rather than applied who
 — both verified, both High importance, both additions rather than corrections. Written into
 `checklist.md` as an addendum so they are not lost, rather than half-written into a volume.
 
+## Third pass — Spring Cache abstraction (added 2026-10-03, after user request)
+
+Closes item 2 of *Unverified / needs human check* below, which had flagged the Spring Cache
+abstraction as a genuine High-priority gap: `CacheManager` occurred **0 times site-wide** across
+all 22 Spring pages. Added as a new **§4.6** in vol06 plus a matching cheat06 block — an addition,
+not a rewrite, so no existing section was touched.
+
+32. **`spring-06` §4.6 "The Spring Cache Abstraction — the Layer Above"** — new `h3` section, inserted
+    between §4.5 and the chapter's `Common Mistakes` block so the volume keeps its
+    `section → Common Mistakes → Interview Questions → Further Reading` triple intact. Contains:
+    - **One-line framing** — the abstraction is not a cache; it is an AOP layer that decides
+      *whether to call your method*, plus a `CacheManager` that supplies the storage.
+    - **Annotation snippet** — `@Cacheable` / `@CachePut` / `@CacheEvict` with their distinguishing
+      one-liners (`@CachePut` always runs then stores; `@CacheEvict` removes).
+    - **A three-layer `pre.diagram`** — Spring Cache → persistence context (L1) → Hibernate L2 →
+      database, which is the actual interview question: *how do these interact?* The answer is that
+      they are three layers with three different invalidation models, and the diagram is what makes
+      that legible without prose.
+    - **Comparison table** (Layer / Scope / Invalidated by / Knows about JPA?) covering all three.
+    - **Four callouts**, each a real interview trap:
+      - `trap` — an unnamed `@Cacheable` throws `IllegalStateException`; a *misspelled* name throws
+        `IllegalArgumentException`. Two different exceptions, and candidates routinely describe them
+        as the same one.
+      - `must` — cache a DTO, never a detached entity. A cached entity leaves the persistence
+        context, so lazy associations throw `LazyInitializationException` on the next access.
+      - `scale` — `ConcurrentMapCache` (the default) has no TTL, no size bound and is process-local.
+      - `staff` — cache advice and transaction advice are **both** at `LOWEST_PRECEDENCE`, so their
+        relative order is undefined. An eviction can therefore run before the commit, and a rollback
+        leaves the cache holding an entry for a write that never landed. Fix:
+        `TransactionAwareCacheManagerProxy`, which defers `put` to the after-commit phase.
+33. **8 `Common Mistakes` bullets** appended to the chapter's existing list.
+34. **4 new Q&A articles** (`4-the-n1-problem-9` … `-12`) — missing cache name, caching entities
+    rather than DTOs, array arguments and key generation, and evict-vs-commit ordering.
+35. **3 `Further Reading` links** — Framework cache abstraction reference, Boot caching reference,
+    `@EnableCaching` javadoc.
+36. **Sidebar TOC + masthead** — `<summary>8 sections` → `9 sections`, the §4.6 `<li>` inserted, and
+    the masthead counters updated to `9 chapters | 126 questions | 20 diagrams`.
+37. **`cheatsheets/spring/06-*`** — one decision table (which layer a question means, captioned per the
+    `table--decision` contract), a `callout--trap` and a `callout--must`, added inside `ch4`. Both
+    callout labels use the conventional `Interview trap — ` / `Must remember — ` prefixes. The
+    cheatsheet TOC is chapter-level (8 anchors), so adding an `<h3>` inside `ch4` required no TOC
+    change. Per the deduplication rule the block **links** to vol06 §4.6 for the full treatment and
+    to Database Vol 9 for the stampede rather than restating either.
+
+### Source discipline for this pass
+
+Every claim was verified against **Framework 6.2.x source**, not the reference prose. This mattered:
+the docs' own `@EnableCaching` example shows `cacheManager = "cacheManager"`, an attribute that does
+not **exist** on `@EnableCaching` (`cacheManager` lives on `@CacheConfig` and on the operation
+annotations). Three claims in the rendered documentation were falsified by source and corrected
+rather than transcribed:
+
+| Documentation claim | Verified truth (source) |
+| --- | --- |
+| `@EnableCaching(cacheManager = …)` | No such attribute. Only `proxyTargetClass` (default `false`), `mode` (default `PROXY`) and `order` (default `LOWEST_PRECEDENCE`). |
+| `@Cacheable` attributes listed without `cacheManager` / `cacheResolver` | Both exist. Full set: `value`, `cacheNames`, `key`, `keyGenerator`, `cacheManager`, `cacheResolver`, `condition`, `unless`, `sync`. |
+| Spring generates a cache name from class + method when none is given | It **throws**. `CacheAspectSupport.getCaches` raises `IllegalStateException("No cache could be resolved for … At least one cache should be provided per cache operation.")`. `CacheOperation.Builder.cacheNames` defaults to `Collections.emptySet()` and `SpringCacheAnnotationParser` never derives one. |
+
+Also verified rather than assumed:
+
+- `SimpleKeyGenerator.generateKey` — 0 args → `SimpleKey.EMPTY`; exactly one non-array arg → the
+  argument itself; **anything else** (multiple args *or* a single array) → `new SimpleKey(params)`.
+  The array case is the one that surprises people, so it became its own Q&A.
+- `sync = true` restrictions, from the `Cacheable` javadoc: `unless` is unsupported, only one cache
+  may be named, and no other cache operation may be combined. It is also documented as
+  *"effectively a hint"* — provider-specific, so Redis and Caffeine behave differently.
+- `@CacheEvict` has `allEntries` and `beforeInvocation` but **no** `unless` and **no** `sync`;
+  `@CachePut` is `@Cacheable` minus `sync`.
+- The default `CacheManager` is `ConcurrentMapCacheManager` over a `ConcurrentHashMap`; Boot's
+  `CacheAutoConfiguration` → `SimpleCacheConfiguration` contributes exactly this when no provider
+  bean exists, and Boot's own reference calls it *"not really recommended for production usage."*
+- The advisor-ordering claim was traced end to end: `BeanFactoryCacheOperationSourceAdvisor` and
+  `BeanFactoryTransactionAttributeSourceAdvisor` both extend `AbstractBeanFactoryPointcutAdvisor`,
+  neither overrides `getOrder()`, and `AbstractPointcutAdvisor.getOrder()` returns
+  `Ordered.LOWEST_PRECEDENCE`. `@EnableTransactionManagement.order()` defaults to the same value.
+  Relative order is therefore genuinely undefined, which is what the `staff` callout says.
+
 ## Verification
 
 All 22 Spring pages re-checked after every edit batch, plus the site index:
@@ -230,6 +308,7 @@ backtick conversions were all in sidebar TOCs and prose, never inside a `<pre>`.
 | Volumes PASS `check.js --volume` | 11 | 11 |
 | Cheatsheets PASS `check.js --cheatsheet` | 11 | 11 |
 | Markdown leaks outside `<pre>` | 316 backticks + 2 bold, all 22 files | **0** |
+| High-priority topics closed | 1 (Spring Cache) | 2 |
 
 ### By version
 
@@ -242,6 +321,12 @@ backtick conversions were all in sidebar TOCs and prose, never inside a `<pre>`.
 | `nestedTransactionAllowed` default | `AbstractPlatformTransactionManager` / `JpaTransactionManager` javadoc, `DataSourceTransactionManager` source |
 | Resilience4j `waitDurationInOpenState` | Resilience4j CircuitBreaker docs |
 | `@MockBean` deprecation | Boot 3.4 release notes (carried over from the inventory pass) |
+| `@EnableCaching` attributes, `@Cacheable`/`@CachePut`/`@CacheEvict` attribute sets | Framework 6.2.x **source** — `EnableCaching.java`, `Cacheable.java`, `CachePut.java`, `CacheEvict.java` |
+| Unnamed-cache and misspelled-cache exceptions | `CacheAspectSupport.getCaches`, `AbstractCacheResolver.resolveCaches` source |
+| Key generation incl. the array case | `SimpleKeyGenerator.generateKey` source |
+| `sync = true` restrictions | `Cacheable` javadoc source |
+| Default `CacheManager`; Boot's SIMPLE provider | `ConcurrentMapCacheManager`, `SimpleCacheConfiguration` (Boot 3.5.x), Boot caching reference |
+| Cache-advice vs transaction-advice ordering | `BeanFactoryCacheOperationSourceAdvisor`, `BeanFactoryTransactionAttributeSourceAdvisor`, `AbstractBeanFactoryPointcutAdvisor`, `AbstractPointcutAdvisor`, `ProxyCachingConfiguration` source |
 
 ## Unverified / needs human check
 
@@ -250,11 +335,8 @@ backtick conversions were all in sidebar TOCs and prose, never inside a `<pre>`.
    block or a JDBC call inside it defeats the whole thing, and why the connection pool rather than
    the thread count becomes the limit. That is an addition, not a correction, so it was left out
    rather than half-written. **Recommend a dedicated section in vol07 or vol09.**
-2. **Spring Cache abstraction is absent** (`CacheManager`, `@Cacheable`, `@EnableCaching` — zero
-   occurrences site-wide). This is a genuine High-priority gap against the brief's own topic list.
-   Belongs in vol06 next to the second-level cache material, because the interview question is
-   almost always "how do these two interact?" — and the answer is that they are different layers
-   with different invalidation models. **Not added; recommend it be the next piece of work.**
+2. ~~**Spring Cache abstraction is absent**~~ — **CLOSED 2026-10-03.** Added as vol06 §4.6 with a
+   matching cheat06 block; see the third pass above. `CacheManager` now appears throughout §4.6.
 3. **`RestClient` is absent from vol05 §7.5**, which owns outbound HTTP, and from `cheat05`
    entirely. `RestTemplate` entered maintenance mode in Framework 6.1 and `RestClient` is its
    designated successor. The one place `RestClient` appears in the corpus is a Further Reading
