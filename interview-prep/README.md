@@ -1,6 +1,6 @@
 # Interview Prep
 
-The authoring contract for everything in this directory: the 34 study volumes, the 34 condensed
+The authoring contract for everything in this directory: the 35 study volumes, the 34 condensed
 cheatsheets, and the shell they share.
 
 **These pages are hand-authored and are the source of truth.** There is no build step, no
@@ -16,7 +16,7 @@ interview-prep/
   search.js       filtering (reads the data-* filter markup)
   highlight.js    code block labelling + syntax highlighting
   check.js        contract checker for all three page shapes
-  java/           9 volumes
+  java/           10 volumes
   spring/        11 volumes
   database/      11 volumes
   microservices/  3 volumes
@@ -56,7 +56,7 @@ Four things follow from sharing them:
   *add* selectors and custom properties — they never edit an existing rule. Reversing the order
   would let the additions stop winning.
 - **`search.js` and `highlight.js` are used unmodified by both content types.**
-- **`highlight.js` selects `pre.snippet` and nothing else.** That is what keeps the 711 ASCII
+- **`highlight.js` selects `pre.snippet` and nothing else.** That is what keeps the 715 ASCII
   diagrams from being tokenised — a volume diagram is emitted as `pre.diagram` with no `data-lang`,
   so the highlighter structurally cannot reach it. `check.js --volume` asserts this rather than
   relying on anyone re-reading `highlight.js`.
@@ -86,12 +86,12 @@ contract, filter-markup exactness, TOC↔section bidirectional match, table stru
 colspan/rowspan resolution, the callout prefix taxonomy, keyfacts-exactly-5, snippet attributes,
 SVG marker ordering and `aria-label` presence, and a literal-hue rejection.
 
-**`--index` adds:** exactly 34 volumes and 34 cheatsheets with the right path prefixes, four
+**`--index` adds:** exactly 35 volumes and 34 cheatsheets with the right path prefixes, four
 track groups, and every track id reachable from the sidebar.
 
 The disk-resolution check is the one that matters most now. The pages are edited by hand, so
 nothing else catches a link left pointing at a file that no longer exists. `--index` matters
-especially: it is the only page linking all 68 content pages, so it is the check that would catch a
+especially: it is the only page linking all 69 content pages, so it is the check that would catch a
 rename anywhere in the tree.
 
 This checker deliberately verifies only what is checkable from a page alone. It has no source to
@@ -172,7 +172,7 @@ avoids print-hostile constructs in the first place.
 
 # Volume page contract
 
-Applies to `interview-prep/<track>/*.html` — 34 pages.
+Applies to `interview-prep/<track>/*.html` — 35 pages.
 
 Every chapter, question, answer and diagram, in a browser-readable form. The volumes are written to
 be *read*; the cheatsheets below are written to be *reached into*.
@@ -194,7 +194,9 @@ A volume page loads `site.css`, then `search.js`, `highlight.js` and `toc.js` at
 
 # Cheatsheet page contract
 
-Applies to `interview-prep/cheatsheets/<track>/*.html` — 34 pages, one per volume.
+Applies to `interview-prep/cheatsheets/<track>/*.html` — 34 pages. There is one per volume
+except Java Volume 10 (Testing & Build Tooling), which has a volume page and no cheatsheet,
+so its wall row carries no cheatsheet link.
 
 Each page is derived from the corresponding volume. The volumes are written to be *read*; these are
 written to be *reached into* when someone asks you a question and you have about ninety seconds.
@@ -365,7 +367,7 @@ nothing but diagrams has not been condensed, only redrawn.
 
 ## The catalogue wall
 
-`../index.html` is the site's only index: all 34 volumes and all 34 cheatsheets in one wall,
+`../index.html` is the site's only index: all 35 volumes and all 34 cheatsheets in one wall,
 grouped by track, each volume row linking both its volume and its cheatsheet. It is filterable via
 the same `search.js` the content pages use — `data-filter-target` on each row, `data-filter-group`
 on each track section.

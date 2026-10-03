@@ -471,10 +471,13 @@ if (MODE === "--index") {
   // track being renamed out from under the links.
   const volLinks = s.match(/class="wall__title" href="interview-prep\/(java|spring|database|microservices)\//g) || [];
   const cheatLinks = s.match(/class="wall__cheat" href="interview-prep\/cheatsheets\/(java|spring|database|microservices)\//g) || [];
-  if (volLinks.length !== 34) fail("expected 34 volume links in the wall, found " + volLinks.length);
+  // Volumes and cheatsheets are counted separately and are NOT equal: Java Volume 10
+  // (Testing & Build Tooling) has a volume page and no cheatsheet, so its wall row
+  // carries no wall__cheat anchor. Adding a cheatsheet for it makes both 35.
+  if (volLinks.length !== 35) fail("expected 35 volume links in the wall, found " + volLinks.length);
   if (cheatLinks.length !== 34) fail("expected 34 cheatsheet links in the wall, found " + cheatLinks.length);
   if (count(/data-filter-group/g) !== 4) fail("expected 4 data-filter-group tracks");
-  if (count(/data-filter-target/g) !== 34) fail("expected 34 data-filter-target rows");
+  if (count(/data-filter-target/g) !== 35) fail("expected 35 data-filter-target rows");
   for (const track of ["java", "spring", "database", "microservices"]) {
     if (!new RegExp('<section class="wall__track" id="' + track + '"').test(s)) {
       fail("wall has no track section for " + track);

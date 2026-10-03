@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-A curated interview-prep study collection: 34 "deep-dive volumes" (Java, Spring, Database,
+A curated interview-prep study collection: 35 "deep-dive volumes" (Java, Spring, Database,
 Microservices) and one condensed hand-authored cheatsheet per volume, served as a **plain static
 site**. There is **no `package.json`, no `node_modules`, no build step, and no toolchain.** The HTML
 is hand-authored and committed; it is edited directly, like any other document.
@@ -38,7 +38,7 @@ The site is servable with no tooling: open `index.html` from `file://`.
 There is no pipeline. One tree, hand-authored, with one shared asset layer and one validator.
 
 ```
-index.html          the only index: a filterable catalogue wall linking all 68 content pages
+index.html          the only index: a filterable catalogue wall linking all 69 content pages
 java/pdfs/          printable PDF editions
 fonts/              self-hosted webfonts, loaded by site.css via url("../fonts/…")
 interview-prep/
@@ -49,7 +49,7 @@ interview-prep/
   highlight.js      code block labelling + syntax highlighting
   check.js          contract checker for all three page shapes
   README.md         the authoring contract for both content types
-  <track>/*.html        the 34 volume pages
+  <track>/*.html        the 35 volume pages
   cheatsheets/<track>/*.html    the 34 cheatsheets
 ```
 
@@ -67,7 +67,7 @@ long-form volume styles are appended after it, because the second half only *add
 custom properties; reversing the order would let the additions stop winning.
 
 **Corollary you must preserve:** `highlight.js` selects `pre.snippet` only. ASCII diagrams are
-`pre.diagram` with **no** `data-lang`, so the highlighter structurally cannot tokenise the 711
+`pre.diagram` with **no** `data-lang`, so the highlighter structurally cannot tokenise the 715
 diagrams. `check.js --volume` asserts this rather than trusting that someone re-reads `highlight.js`.
 When adding a code-block case, keep that guarantee.
 
