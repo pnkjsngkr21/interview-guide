@@ -1,0 +1,18 @@
+# The generated guide pages are byte-compared against a fresh build by
+# `node guides/build.js --check`. That comparison is exact, so line endings
+# are load-bearing: a CRLF working tree fails it on every file.
+#
+# With `core.autocrlf=true` (git's default on Windows) git rewrites LF to CRLF
+# on checkout, which made `--check` report 35 stale pages on a clean clone.
+# Declaring the generated output as `-text` pins it to LF in the working tree
+# on every platform, and keeps the committed blob identical to the build.
+guides/**/*.html    -text
+
+# The build writes and compares these too. The .md volumes are read-only
+# source of truth; LF keeps diffs honest on Windows.
+guides/**/*.js      -text
+guides/**/*.css     -text
+
+# The markdown volumes are checked for CR by the build's hygiene assertions,
+# so they must not be rewritten on checkout either.
+*.md                -text
