@@ -564,6 +564,56 @@ public class AcmeVendorAutoConfiguration {
         tell that it matters most is the service that autoscales from zero — then every new replica
         is paying that registry transfer at the exact moment the system is under stress.</p>
       </div>
+
+      <h3>The two-module layout</h3>
+      <p>The rules above are the <em>contract</em>; this is the <em>shape</em>. A starter is always
+      two Maven modules, and the split is an architectural rule rather than ceremony — see
+      <a href="../../spring/spring-07-spring-boot-auto-configuration.html#35-building-your-own-starter">vol07
+      §3.5</a> for the worked tree and the full POM.</p>
+      <table>
+        <caption>What lives in which module</caption>
+        <thead>
+          <tr><th>Module</th><th>Contains</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>-spring-boot-autoconfigure</code></td>
+            <td><strong>All the code.</strong> The
+            <code>@AutoConfiguration</code> class, the
+            <code>@ConfigurationProperties</code> class, any SPI factory. Depends on
+            <code>spring-boot-autoconfigure</code> + your core library, and on
+            <strong>no other starter</strong>. Holds the registration file.</td>
+          </tr>
+          <tr>
+            <td><code>-spring-boot-starter</code></td>
+            <td><strong>A POM and nothing else.</strong> One dependency, on the autoconfigure
+            module. No code, so there is no second copy of anything and no second set of conditions
+            to reason about.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>Two placement facts that are easy to get wrong:</p>
+      <ul>
+        <li>The registration file lives in the <strong>autoconfigure</strong> module, at
+        <code>META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports</code>
+        — one fully-qualified class name per line. It is <em>not</em> the old
+        <code>spring.factories</code> key, and since Boot 3 it is the <em>only</em> supported
+        mechanism.</li>
+        <li>Add <code>spring-boot-configuration-processor</code> as <strong>optional</strong>. It
+        generates the IDE metadata that turns your properties into autocomplete with descriptions;
+        being optional keeps it out of your consumers&rsquo; runtime classpath.</li>
+      </ul>
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — one module &ldquo;for speed&rdquo; breaks
+        consumers, not you</span>
+        <p>A single-module starter is a real anti-pattern, and it fails asymmetrically: it works in
+        your demo, and breaks in someone else&rsquo;s application. Collapsing the two means the
+        dependency on <code>spring-boot-autoconfigure</code> becomes a
+        <em>compile-scope</em> dependency of every consumer, so they inherit your conditions and
+        your classes whether they use your feature or not. Worse, it makes it <em>possible</em> for
+        your starter to depend on another starter, which is the mistake in the trap above — and the
+        two-module split exists precisely to make that mistake hard to commit.</p>
+      </div>
     </section>
 
     <!-- ============ 4 ============ -->

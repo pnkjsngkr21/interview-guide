@@ -616,6 +616,61 @@ public List&lt;Order&gt; findVisible(List&lt;Order&gt; orders) { ... }</code></p
       structural one. The scalable version of that is an ArchUnit rule failing the build when a
       public method on a <code>@RestController</code> or <code>@Service</code> in a protected
       package is unannotated.</p>
+
+      <h3><code>AuthorizationManager</code> — what replaced the decision point</h3>
+      <p>Since Spring Security 6, the authorization decision is made by an
+      <code>AuthorizationManager</code>, which generalised away the old
+      <code>AccessDecisionManager</code>. <code>hasRole</code>, <code>hasAuthority</code> and the
+      rest <em>are</em> <code>AuthorizationManager</code>s, composed into a
+      <code>RequestMatcherDelegatingAuthorizationManager</code> — so &ldquo;which class decides?&rdquo;
+      and &ldquo;which annotation expresses it?&rdquo; are the same question at two levels. Signature,
+      both extension points, and the reactive variant are in
+      <a href="../../spring/spring-08-spring-security.html#36-authorizationmanager-and-custom-permission-evaluation">vol08
+      §3.6</a>.</p>
+      <table>
+        <caption>The decision surface in 6.x</caption>
+        <thead>
+          <tr><th>Question</th><th>Answer</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>What is the decision type?</td>
+            <td><code>AuthorizationManager&lt;T&gt;</code>, with
+            <code>check(Supplier&lt;T&gt; authentication, T object)</code></td>
+          </tr>
+          <tr>
+            <td>Why a <code>Supplier</code>?</td>
+            <td>So the decision can be <strong>deferred</strong> — a JWT validated
+            asynchronously must be able to resolve before authorization checks it</td>
+          </tr>
+          <tr>
+            <td>Is <code>AccessDecisionManager</code> still around?</td>
+            <td>No. Replaced. Anything you remember about <code>AbstractAccessDecisionManager</code>
+            and <code>RoleVoter</code> is 5.x-era</td>
+          </tr>
+          <tr>
+            <td>Custom domain permission?</td>
+            <td>Two hooks: a <strong>SpEL bean method</strong>
+            (<code>@accountPermission.canEdit(...)</code>) or a <code>PermissionEvaluator</code> for
+            <code>hasPermission(...)</code></td>
+          </tr>
+          <tr>
+            <td>Reactive?</td>
+            <td>The reactive variant returns <code>Mono&lt;AuthorizationDecision&gt;</code> — the two
+            variants are <strong>not</strong> interchangeable</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — authorization annotations are enforced by a
+        proxy, so the method must be reachable through it</span>
+        <p>The same self-invocation trap that breaks <code>@Transactional</code> breaks
+        <code>@PreAuthorize</code>, for the same reason: both are applied by a proxy around the
+        bean. An internal call never passes through it, so the check silently does not run. This is
+        why the fix is to protect <strong>public entry points</strong> rather than the method you
+        happen to be worried about — and it is why an ArchUnit rule that fails the build on an
+        unannotated public method in a protected package scales better than review.</p>
+      </div>
     </section>
 
     <!-- ============ 4 ============ -->
@@ -860,6 +915,46 @@ JwtDecoder jwtDecoder(String issuer, String audience) {
         scopes. Either way the whole model rests on section 4's check: a downstream that cannot
         tell a token meant for it from a token meant for someone else has no model at all.</p>
       </div>
+
+      <h3>Spring Security does not contain an authorization server</h3>
+      <p>The single most-repeated mistake in OAuth2 interview answers is treating Spring Security
+      as though it can be an issuer. <strong>It cannot.</strong> The authorization-server and
+      OIDC-provider functionality moved out to a separate project,
+      <code>spring-authorization-server</code>. What Spring Security 6.x gives you is the
+      <strong>consumer</strong> side — <code>oauth2Login()</code>, <code>oauth2Client()</code>,
+      <code>oauth2ResourceServer().jwt()</code> and client credentials.</p>
+      <table>
+        <caption>Consumer versus issuer — different projects, different blast radius</caption>
+        <thead>
+          <tr><th>Side</th><th>What it is</th><th>Owns</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Consumer</strong><br>(Spring Security 6.x)</td>
+            <td><code>oauth2Login()</code>, <code>oauth2Client()</code>,
+            <code>oauth2ResourceServer().jwt()</code></td>
+            <td>Verifying a token, mapping claims to authorities, your own session after
+            login</td>
+          </tr>
+          <tr>
+            <td><strong>Issuer</strong><br>(separate project)</td>
+            <td><code>spring-authorization-server</code> — <code>/authorize</code>,
+            <code>/token</code>, <code>/userinfo</code>, <code>/jwks</code></td>
+            <td>Client secrets, refresh tokens, signing-key rotation, consent, token storage</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — the two sides have opposite security
+        postures</span>
+        <p>A resource server <em>verifies</em>; an authorization server <em>stores secrets and signs
+        tokens</em>. That makes the issuer a high-value target whose compromise affects every client
+        at once, and it is why operating one correctly is a specialty rather than a Spring feature.
+        The defensible default for most teams is a hosted provider (Auth0, Okta, Cognito, Keycloak)
+        for the issuer and being a resource server in Spring. The full argument is in
+        <a href="../../spring/spring-08-spring-security.html#54-the-authorization-server-split">vol08
+        §5.4</a>.</p>
+      </div>
     </section>
 
     <!-- ============ 6 ============ -->
@@ -1103,6 +1198,88 @@ void post_without_csrf_token_is_rejected() throws Exception {
       time in ways testing does not show. Send
       <code>Content-Security-Policy-Report-Only</code> first, collect violations, then enforce
       directive by directive.</p>
+
+      <h3>The attack surface outside the filter chain</h3>
+      <p>Almost every Spring security question is about the filter chain, and almost every
+      <em>real</em> vulnerability is not. The chain decides who you are; it does not stop a
+      <code>@ModelAttribute</code> from binding <code>role</code>, a <code>Resource</code> from
+      serving <code>../../etc/passwd</code>, or a <code>redirect:</code> URL from sending a user
+      off-site. Volume 8 keeps the full table at
+      <a href="../../spring/spring-08-spring-security.html#67-the-wider-attack-surface">§6.7</a>;
+      these are the ones that recur in review.</p>
+      <table class="table--decision">
+        <caption>Attack surface the filter chain does not cover</caption>
+        <thead>
+          <tr><th>Attack</th><th>Where it lands</th><th>The control</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Mass assignment</strong></td>
+            <td>Binding a client-supplied object onto a persistence entity</td>
+            <td>Bind to a DTO and map explicitly. Never an <code>@Entity</code> as a
+            <code>@RequestBody</code> type</td>
+          </tr>
+          <tr>
+            <td><strong>Path traversal</strong></td>
+            <td><code>Resource</code> or <code>File</code> resolved from user input</td>
+            <td>Resolve, then <strong>assert the result is under the base directory</strong>. The
+            <code>Resource</code> abstraction does not stop <code>../</code></td>
+          </tr>
+          <tr>
+            <td><strong>Unsafe deserialization</strong></td>
+            <td><code>ObjectInputStream</code> from the wire; Jackson default typing</td>
+            <td>Never <code>enableDefaultTyping</code> on untrusted input — it is a gadget chain
+            waiting for a classpath</td>
+          </tr>
+          <tr>
+            <td><strong>Open redirect</strong></td>
+            <td><code>redirect:</code> URLs, a <code>returnUrl</code> read by a success handler</td>
+            <td>Only ever redirect to a path on your own host, or validate against an allowlist</td>
+          </tr>
+          <tr>
+            <td><strong>XXE</strong></td>
+            <td>Any parser that resolves external entities</td>
+            <td>Disable DTDs and external entities on every parser you create — Spring's own
+            configuration does not cover the ones you instantiate</td>
+          </tr>
+          <tr>
+            <td><strong>Expression injection</strong></td>
+            <td>SpEL evaluated against user input</td>
+            <td>SpEL is a full language. Never evaluate a user-supplied string as SpEL</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Sessions: fixation, concurrency, timeout</h3>
+      <p>Stateless JWT APIs removed most of this from the critical path, but any
+      browser-held session brings it back. The three properties, and what each defends:</p>
+      <ul>
+        <li><strong>Fixation defence.</strong> Spring Security changes the session ID on
+        authentication by default (<code>sessionFixation().changeSessionId()</code>). An attacker who
+        planted a known ID pre-login must not still hold a valid session afterwards. This is why
+        &ldquo;regenerate the session on privilege change&rdquo; is the rule to remember — login is
+        a privilege change.</li>
+        <li><strong>Concurrency control.</strong> <code>maximumSessions</code> bounds how many
+        sessions one principal may hold; the second login can be told to expire the first. It is a
+        <em>policy</em> decision, not a security control, and it is enforced by
+        <code>SessionManagementFilter</code> — which is also why it disappears entirely in a
+        stateless setup.</li>
+        <li><strong>Timeout.</strong> Inactivity timeout bounds an abandoned session; absolute
+        timeout bounds its total lifetime. Both are attributes on the servlet
+        <code>HttpSession</code>, configured through Boot's
+        <code>server.servlet.session.*</code>.</li>
+      </ul>
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — &ldquo;we&rsquo;re stateless, so CSRF and
+        sessions don&rsquo;t apply&rdquo;</span>
+        <p>Half right, and the half that is wrong causes real incidents. Dropping the session
+        removes <em>fixation, concurrency and timeout</em> — but a cookie still authenticates you if
+        one is present, and that is precisely the CSRF condition. Statelessness is what makes
+        <code>SameSite</code> and CSRF-tolerance decisions possible; it does not make them
+        automatic. See
+        <a href="../../spring/spring-08-spring-security.html#66-sessions-fixation-concurrency-timeout-cookies">vol08
+        §6.6</a> and §4 of this sheet for the token-side equivalent.</p>
+      </div>
     </section>
 
     <!-- ============ 8 ============ -->
