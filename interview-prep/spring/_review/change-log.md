@@ -181,6 +181,30 @@ or deleted in the content tree, no heading was renamed, no section was rewritten
     `ConfigurationClassBeanDefinition` with a `factoryMethodName`; it does **not** register a
     `FactoryBean`. The observable difference: only the `@Bean` case also exposes `&sqlClient`.
 
+## Second pass — mined from the completed `deep-research` workflow
+
+The background workflow (`wf_d560f97d-ec3`, 107 agents, ~58 min) finished after the first commit.
+Its output was triaged claim-by-claim against the corpus rather than applied wholesale.
+
+**Two claims the workflow marked "refuted" were both non-issues:**
+
+1. *"`@Transactional.proxyTargetClass` defaults to `false`, so 'transactions always use CGLIB' is wrong."* — `@Transactional` has **no** `proxyTargetClass` attribute at all. The attribute list is `value`, `transactionManager`, `label`, `propagation`, `isolation`, `timeout`, `timeoutString`, `readOnly`, `rollbackFor`, `rollbackForClassName`, `noRollbackFor`, `noRollbackForClassName`. The corpus's §2.2 table lists these correctly and never makes the claim. Separately, the *container-level* `spring.aop.proxy-target-class` default (Boot 2.0+, `true`) is correct in vol03 §2.5.
+2. *"`@MockitoBean` is Framework 6.2, not a Boot 3.2 feature."* — vol09 already says "Framework 6.2 / Boot 3.4". Correct as written.
+
+**One real gap found and fixed:**
+
+31. `spring-04` §2.4 "The Proxy Requirement, Enumerated" enumerated the visibility rules without
+    stating the **Spring Framework 6.0 relaxation**: since 6.0, `protected` and package-private
+    methods are advised by default on CGLIB class-based proxies, so "transactions only work on
+    public methods" — the standard interview answer — is out of date. Added, with the two
+    constraints that keep it from being a free pass (JDK proxies still require `public` +
+    interface-declared; package-private must be visible to the generated proxy) and a note that
+    self-invocation bypasses all of it because the rule is about proxy reachability, not modifiers.
+
+**Recorded but not added** (Boot 4 baseline and the `@MockitoBean` `enforceOverride=false` trap)
+— both verified, both High importance, both additions rather than corrections. Written into
+`checklist.md` as an addendum so they are not lost, rather than half-written into a volume.
+
 ## Verification
 
 All 22 Spring pages re-checked after every edit batch, plus the site index:
@@ -247,7 +271,16 @@ backtick conversions were all in sidebar TOCs and prose, never inside a `<pre>`.
    not corrections.
 6. **Boot 4 / Framework 7 absent.** Justified rather than overlooked — the corpus tags its claims
    to Boot 3.x throughout, and adding Boot 4 responsibly would mean re-verifying every version tag
-   in the set. Flagged because the corpus will need it eventually.
+   in the set. **The verified Boot 4 baseline is now written up in `checklist.md`**, so the next
+   pass can add it without re-researching. The highest-value single fact: `@MockBean`/`@SpyBean`
+   are *removed* in Boot 4 (not merely deprecated), and `@SpringBootTest` no longer supplies
+   `MockMvc`/`WebClient`/`TestRestTemplate` — which breaks every Boot 4 test relying on the old
+   default.
 7. **`spring-01`'s `@MockBean` reference left in place.** Used as a contrast in a
    constructor-injection argument, not as a recommendation. A defensible reading either way; worth
    a human decision if you want the set to be uniformly 3.4-clean.
+8. **`@MockitoBean`'s `enforceOverride` default is absent from vol09 §2.5**, which covers the
+   deprecation and the `@Configuration`-class restriction thoroughly but not this. `enforceOverride`
+   defaults to `false` (`REPLACE_OR_CREATE`), so a typo'd field silently auto-creates a mock instead
+   of failing the test — the opposite of `@MockBean`'s behaviour, and a good senior question. Written
+   into `checklist.md`; recommend adding to vol09 alongside the existing material.

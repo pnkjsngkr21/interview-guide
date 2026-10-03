@@ -182,6 +182,30 @@ senior depth. A rating of High with `Partial` is a real gap and drives the work 
 | Topic | Rating | Status | Where |
 | --- | --- | --- | --- |
 | Boot 2 → 3 migration, Jakarta rename | High | Partial | scattered; no dedicated treatment |
-| Boot 4 / Framework 7 | Medium | Not covered | — |
+| Boot 4 / Framework 7 | Medium | Not covered — see below for verified content | — |
 | Structured logging | Medium | Not covered | — |
 | `@Scheduled` | Medium | Not covered | — |
+
+### Addendum: Spring Boot 4 baseline (verified 2026-10-03, not yet in the corpus)
+
+Sourced from the Spring Boot 4.0 migration guide, the 4.0 system-requirements page, and the
+release notes. Recorded here so a future pass can write it without re-researching it.
+
+| Fact | Note |
+| --- | --- |
+| Boot 4 requires **Java 17+**, not 21 | The "Boot 4 needs Java 21+" claim is wrong. Boot 3.x was also 17+, so Java 21 was never the differentiator. |
+| Requires **Spring Framework 7.x** | |
+| Based on **Jakarta EE 11**, **Servlet 6.1** baseline | Boot 3 was Jakarta EE 10 / Servlet 6.0 |
+| Everything deprecated in Boot 3.x is **removed** in 4.0 | The arc is 3.4-deprecate → 4.0-remove |
+| Spring's guidance: upgrade to **3.5 first**, then 4.0 | |
+| `@MockBean` / `@SpyBean` support **removed** (not merely deprecated) | `@MockitoBean` / `@MockitoSpyBean` are Spring **Framework** annotations, and cannot be used on `@Configuration` classes |
+| `@SpringBootTest` no longer supplies `MockMvc`, `WebClient` or `TestRestTemplate` | `@AutoConfigureMockMvc` required. This breaks every Boot 4 test that relied on the old default. |
+| Jackson 3 is now the preferred JSON library | `com.fasterxml.jackson` → `tools.jackson`; `jackson-annotations` keeps the old package. `Jackson2ObjectMapperBuilderCustomizer` → `JsonMapperBuilderCustomizer`. Properties move to `spring.jackson.json.read`/`write`, with `spring.jackson2.*` as a migration namespace. |
+
+### Addendum: `@MockitoBean`'s `enforceOverride` default (verified, absent from the corpus)
+
+`enforceOverride` defaults to **`false`**, mapping to `BeanOverrideStrategy.REPLACE_OR_CREATE`. A
+`@MockitoBean` field therefore **creates** a mock when no matching bean exists, rather than failing
+the test. A typo'd field name or a missing bean definition is masked by a silently auto-created
+mock instead of surfacing a wiring error — a genuinely good senior-interview question, and the
+opposite of what `@MockBean` did. Set `enforceOverride = true` to get the old fail-fast behaviour.
