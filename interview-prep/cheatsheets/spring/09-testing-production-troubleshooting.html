@@ -454,6 +454,51 @@ class OrderRepositoryTest {
       you need to test — and a test profile is the one place someone gets to make the
       application easier to work with, so every such relaxation is invisible unless somebody
       deliberately goes looking.</p>
+
+      <h3>Boot 4: the testing surface moves first</h3>
+      <p>Boot 4 changes tests more than it changes runtime behaviour, which is why a green build
+      is <em>not</em> evidence that the suite still tests what it tested. Full table in
+      <a href="../../spring/spring-09-testing-production-troubleshooting.html#28-boot-4-what-breaks-first">vol09
+      §2.8</a>; the migration guide is the source.</p>
+      <table class="table--decision">
+        <caption>Boot 4 changes that break a test suite — loud versus silent</caption>
+        <thead>
+          <tr><th>Change</th><th>Fails</th><th>What you do</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>@MockBean</code> / <code>@SpyBean</code></td>
+            <td><strong>Loudly</strong> — will not compile</td>
+            <td><code>@MockitoBean</code> / <code>@MockitoSpyBean</code>. Framework annotations, so
+            <strong>not usable on <code>@Configuration</code> classes</strong></td>
+          </tr>
+          <tr>
+            <td><code>@SpringBootTest</code> no longer supplies <code>MockMvc</code>,
+            <code>WebClient</code>, <code>TestRestTemplate</code></td>
+            <td><strong>Silently</strong> — fields arrive <code>null</code></td>
+            <td>Add <code>@AutoConfigureMockMvc</code> explicitly. Breaks every test that relied on
+            the old default, at the assertion rather than at startup</td>
+          </tr>
+          <tr>
+            <td>Jackson 3 preferred</td>
+            <td>Loudly</td>
+            <td><code>com.fasterxml.jackson</code> → <code>tools.jackson</code>;
+            <code>Jackson2ObjectMapperBuilderCustomizer</code> → <code>JsonMapperBuilderCustomizer</code>;
+            properties move under <code>spring.jackson.json.*</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — Boot 4 does <em>not</em> require Java
+        21</span>
+        <p>It requires <strong>Java 17+</strong>, the same as Boot 3.x — Java 21 was never the
+        differentiator, and the &ldquo;Boot 4 needs 21+&rdquo; claim is simply wrong. The real
+        baseline jump is <strong>Spring Framework 7.x on Jakarta EE 11 / Servlet 6.1</strong>, from
+        Framework 6 on Jakarta EE 10. And upgrade <strong>3.5 first, then 4.0</strong>: everything
+        deprecated in Boot 3.x is <em>removed</em> in 4.0, so the 3.5 warnings are the migration
+        checklist. A 3.4 → 4.0 jump skips exactly the deprecation notices that would have told you
+        what you own.</p>
+      </div>
     </section>
 
     <!-- ============ 3 ============ -->
