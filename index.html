@@ -13,15 +13,21 @@
 <div class="page">
 
   <nav class="sidebar" aria-label="Contents">
-    <h2>Read</h2>
+    <h2>Catalogue</h2>
     <ul>
-      <li><a href="#guides">Deep-Dive Guides</a></li>
-      <li><a href="#cheatsheets">Cheatsheets</a></li>
+      <li><a href="#java">Java</a></li>
+      <li><a href="#spring">Spring</a></li>
+      <li><a href="#database">Database</a></li>
+      <li><a href="#microservices">Microservices</a></li>
+    </ul>
+    <h2>By form</h2>
+    <ul>
+      <li><a href="guides/index.html">Deep-dive volumes</a></li>
+      <li><a href="cheatsheets/index.html">Cheatsheets</a></li>
     </ul>
     <h2>Repository</h2>
     <ul>
       <li><a href="README.md">README</a></li>
-      <li><a href="guides/index.html">Deep-dive guides</a></li>
     </ul>
   </nav>
 
@@ -29,104 +35,282 @@
 
     <header class="masthead">
       <p class="masthead__eyebrow">Interview Prep Guide</p>
-      <h1>Deep-Dive Guides &amp; Cheatsheets</h1>
+      <h1>Deep-Dive Guides <span class="nowrap">&amp; Cheatsheets</span></h1>
       <p class="masthead__sub">
-        34 study volumes across Java, Spring, Database and Microservices, each with an
-        interview scenario bank. Read in whichever form suits the moment — the full volume
-        when you are learning a topic, the one-page cheatsheet when you are revising one or
-        trying to recall something mid-interview.
+        34 study volumes across Java, Spring, Database and Microservices. Read the full volume
+        when you are learning a topic; keep the cheatsheet open when you are revising one or trying
+        to recall something mid-interview.
       </p>
       <ul class="masthead__meta">
         <li>4 tracks</li>
-        <li>349 chapters</li>
+        <li>341 chapters</li>
         <li>6,158 interview questions</li>
-        <li>PDF editions included</li>
+        <li>711 diagrams</li>
       </ul>
     </header>
 
-    <section class="track" id="guides">
-      <div class="track__head">
-        <h2>Deep-Dive Guides</h2>
-        <span class="track__count">34 volumes</span>
-      </div>
-      <p class="track__hook">
-        Every chapter, question, answer and diagram from all 34 volumes, served as a static
-        site. Filterable by chapter, searchable in the browser, and servable straight from a
-        clone — no build step needed to read it.
-      </p>
-      <div class="vol">
-        <span class="vol__num">→</span>
-        <span>
-          <a class="vol__title" href="guides/index.html">Browse all 34 volumes</a>
-          <span class="vol__hook">Java, Spring, Database and Microservices — filterable index.</span>
-        </span>
-      </div>
-      <div class="vol">
-        <span class="vol__num">01</span>
-        <span>
-          <a class="vol__title" href="guides/java/java-01-java-basics.html">Java Basics</a>
-          <span class="vol__hook">Primitives vs wrappers, integer overflow, string immutability, pass-by-value.</span>
-        </span>
-      </div>
-      <div class="vol">
-        <span class="vol__num">04</span>
-        <span>
-          <a class="vol__title" href="guides/database/database-04-indexes-query-planning-execution.html">Indexes, Query Planning &amp; Execution</a>
-          <span class="vol__hook">B+ trees, page splits, composite index order, reading EXPLAIN.</span>
-        </span>
-      </div>
-      <div class="vol">
-        <span class="vol__num">11</span>
-        <span>
-          <a class="vol__title" href="guides/spring/spring-11-spring-cloud-distributed-systems.html">Spring Cloud &amp; Distributed Systems</a>
-          <span class="vol__hook">Circuit breakers, retries, config, discovery, gateways, idempotency.</span>
-        </span>
-      </div>
-    </section>
+    <div class="wall">
 
-    <section class="track" id="cheatsheets">
-      <div class="track__head">
-        <h2>Cheatsheets</h2>
-        <span class="track__count">34 pages</span>
-      </div>
-      <p class="track__hook">
-        One page per volume, condensed to the decisions, traps and numbers you need to say
-        when the question gets asked. Built to be scanned fast and read under pressure.
-      </p>
-      <div class="vol">
-        <span class="vol__num">→</span>
-        <span>
-          <a class="vol__title" href="cheatsheets/index.html">Browse all 34 cheatsheets</a>
-          <span class="vol__hook">One page per volume, filterable by topic or tool.</span>
-        </span>
-      </div>
-      <div class="vol">
-        <span class="vol__num">06</span>
-        <span>
-          <a class="vol__title" href="cheatsheets/java/06-multithreading-concurrency.html">Multithreading &amp; Concurrency</a>
-          <span class="vol__hook">Executors and bounded queues, volatile vs synchronized, deadlocks.</span>
-        </span>
-      </div>
-      <div class="vol">
-        <span class="vol__num">05</span>
-        <span>
-          <a class="vol__title" href="cheatsheets/database/05-transactions-isolation-concurrency.html">Transactions, Isolation &amp; Concurrency</a>
-          <span class="vol__hook">Isolation anomalies by name, lost updates, write skew.</span>
-        </span>
-      </div>
-      <div class="vol">
-        <span class="vol__num">03</span>
-        <span>
-          <a class="vol__title" href="cheatsheets/microservices/03-operations-platforms-evolution.html">Operations, Platforms &amp; Evolution</a>
-          <span class="vol__hook">Observability and SLIs, resilience budgets, service mesh.</span>
-        </span>
-      </div>
-    </section>
+      <section class="wall__track" id="java">
+        <h2 class="wall__label">Java</h2>
+        <div class="wall__row">
+          <span class="wall__num">01</span>
+          <a class="wall__title" href="guides/java/java-01-java-basics.html">Java Basics</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">15 ch · 439 q</span>
+          <a class="wall__cheat" href="cheatsheets/java/01-java-basics.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">02</span>
+          <a class="wall__title" href="guides/java/java-02-object-oriented-programming.html">Object-Oriented Programming</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">12 ch · 429 q</span>
+          <a class="wall__cheat" href="cheatsheets/java/02-object-oriented-programming.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">03</span>
+          <a class="wall__title" href="guides/java/java-03-core-java.html">Core Java</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">11 ch · 412 q</span>
+          <a class="wall__cheat" href="cheatsheets/java/03-core-java.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">04</span>
+          <a class="wall__title" href="guides/java/java-04-collections-framework.html">The Collections Framework</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 431 q</span>
+          <a class="wall__cheat" href="cheatsheets/java/04-collections-framework.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">05</span>
+          <a class="wall__title" href="guides/java/java-05-java-8.html">Java 8+</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">11 ch · 426 q</span>
+          <a class="wall__cheat" href="cheatsheets/java/05-java-8-plus.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">06</span>
+          <a class="wall__title" href="guides/java/java-06-multithreading-concurrency.html">Multithreading &amp; Concurrency</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 401 q</span>
+          <a class="wall__cheat" href="cheatsheets/java/06-multithreading-concurrency.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">07</span>
+          <a class="wall__title" href="guides/java/java-07-jvm-internals-memory.html">JVM Internals &amp; Memory Management</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 401 q</span>
+          <a class="wall__cheat" href="cheatsheets/java/07-jvm-internals-memory.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">08</span>
+          <a class="wall__title" href="guides/java/java-08-advanced-java.html">Advanced Java</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 391 q</span>
+          <a class="wall__cheat" href="cheatsheets/java/08-advanced-java.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">09</span>
+          <a class="wall__title" href="guides/java/java-09-final-volume.html">Modern Java &amp; Production Mastery</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 400 q</span>
+          <a class="wall__cheat" href="cheatsheets/java/09-modern-java-production.html">cheatsheet</a>
+        </div>
+      </section>
+
+      <section class="wall__track" id="spring">
+        <h2 class="wall__label">Spring</h2>
+        <div class="wall__row">
+          <span class="wall__num">01</span>
+          <a class="wall__title" href="guides/spring/spring-01-spring-core-ioc.html">Spring Core &amp; the IoC Container</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 78 q</span>
+          <a class="wall__cheat" href="cheatsheets/spring/01-spring-core-ioc.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">02</span>
+          <a class="wall__title" href="guides/spring/spring-02-bean-lifecycle-scopes-di.html">Bean Lifecycle, Scopes &amp; Advanced DI</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 105 q</span>
+          <a class="wall__cheat" href="cheatsheets/spring/02-bean-lifecycle-scopes-di.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">03</span>
+          <a class="wall__title" href="guides/spring/spring-03-aop-proxying.html">AOP &amp; Proxying</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 89 q</span>
+          <a class="wall__cheat" href="cheatsheets/spring/03-aop-proxying.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">04</span>
+          <a class="wall__title" href="guides/spring/spring-04-transaction-management.html">Transaction Management</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 113 q</span>
+          <a class="wall__cheat" href="cheatsheets/spring/04-transaction-management.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">05</span>
+          <a class="wall__title" href="guides/spring/spring-05-spring-mvc-web-layer.html">Spring MVC &amp; the Web Layer</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 91 q</span>
+          <a class="wall__cheat" href="cheatsheets/spring/05-spring-mvc-web-layer.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">06</span>
+          <a class="wall__title" href="guides/spring/spring-06-spring-data-jpa-persistence.html">Spring Data JPA &amp; Persistence</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 122 q</span>
+          <a class="wall__cheat" href="cheatsheets/spring/06-spring-data-jpa-persistence.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">07</span>
+          <a class="wall__title" href="guides/spring/spring-07-spring-boot-auto-configuration.html">Spring Boot &amp; Auto-Configuration</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 108 q</span>
+          <a class="wall__cheat" href="cheatsheets/spring/07-spring-boot-auto-configuration.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">08</span>
+          <a class="wall__title" href="guides/spring/spring-08-spring-security.html">Spring Security</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 97 q</span>
+          <a class="wall__cheat" href="cheatsheets/spring/08-spring-security.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">09</span>
+          <a class="wall__title" href="guides/spring/spring-09-testing-production-troubleshooting.html">Testing &amp; Production Troubleshooting</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 102 q</span>
+          <a class="wall__cheat" href="cheatsheets/spring/09-testing-production-troubleshooting.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">10</span>
+          <a class="wall__title" href="guides/spring/spring-10-webflux-project-reactor.html">WebFlux &amp; Project Reactor</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 65 q</span>
+          <a class="wall__cheat" href="cheatsheets/spring/10-webflux-project-reactor.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">11</span>
+          <a class="wall__title" href="guides/spring/spring-11-spring-cloud-distributed-systems.html">Spring Cloud &amp; Distributed Systems</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 114 q</span>
+          <a class="wall__cheat" href="cheatsheets/spring/11-spring-cloud-distributed-systems.html">cheatsheet</a>
+        </div>
+      </section>
+
+      <section class="wall__track" id="database">
+        <h2 class="wall__label">Database</h2>
+        <div class="wall__row">
+          <span class="wall__num">01</span>
+          <a class="wall__title" href="guides/database/database-01-fundamentals-relational-model.html">Database Fundamentals &amp; the Relational Model</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 45 q</span>
+          <a class="wall__cheat" href="cheatsheets/database/01-fundamentals-relational-model.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">02</span>
+          <a class="wall__title" href="guides/database/database-02-sql-ddl-dml-constraints.html">SQL — DDL, DML &amp; Constraints</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 92 q</span>
+          <a class="wall__cheat" href="cheatsheets/database/02-sql-ddl-dml-constraints.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">03</span>
+          <a class="wall__title" href="guides/database/database-03-sql-queries-joins-window-functions.html">SQL — Queries, Joins, CTEs &amp; Window Functions</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 32 q</span>
+          <a class="wall__cheat" href="cheatsheets/database/03-sql-queries-joins-window-functions.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">04</span>
+          <a class="wall__title" href="guides/database/database-04-indexes-query-planning-execution.html">Indexes, Query Planning &amp; Execution</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 84 q</span>
+          <a class="wall__cheat" href="cheatsheets/database/04-indexes-query-planning-execution.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">05</span>
+          <a class="wall__title" href="guides/database/database-05-transactions-isolation-concurrency.html">Transactions, Isolation Levels &amp; Concurrency</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 88 q</span>
+          <a class="wall__cheat" href="cheatsheets/database/05-transactions-isolation-concurrency.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">06</span>
+          <a class="wall__title" href="guides/database/database-06-schema-design-partitioning-scaling.html">Schema Design, Partitioning &amp; Scaling</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 86 q</span>
+          <a class="wall__cheat" href="cheatsheets/database/06-schema-design-partitioning-scaling.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">07</span>
+          <a class="wall__title" href="guides/database/database-07-postgresql.html">PostgreSQL</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">11 ch · 99 q</span>
+          <a class="wall__cheat" href="cheatsheets/database/07-postgresql.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">08</span>
+          <a class="wall__title" href="guides/database/database-08-mysql.html">MySQL</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 82 q</span>
+          <a class="wall__cheat" href="cheatsheets/database/08-mysql.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">09</span>
+          <a class="wall__title" href="guides/database/database-09-redis-caching.html">Redis &amp; Caching Strategies</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 95 q</span>
+          <a class="wall__cheat" href="cheatsheets/database/09-redis-caching.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">10</span>
+          <a class="wall__title" href="guides/database/database-10-nosql-cassandra-dynamodb-mongodb.html">NoSQL &amp; Distributed Stores</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">12 ch · 89 q</span>
+          <a class="wall__cheat" href="cheatsheets/database/10-nosql-distributed-stores.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">11</span>
+          <a class="wall__title" href="guides/database/database-11-s3-elasticsearch-interview-bank.html">S3, Elasticsearch &amp; the Interview Bank</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">12 ch · 207 q</span>
+          <a class="wall__cheat" href="cheatsheets/database/11-s3-elasticsearch-interview-bank.html">cheatsheet</a>
+        </div>
+      </section>
+
+      <section class="wall__track" id="microservices">
+        <h2 class="wall__label">Microservices</h2>
+        <div class="wall__row">
+          <span class="wall__num">01</span>
+          <a class="wall__title" href="guides/microservices/microservices-01-boundaries-decomposition.html">Boundaries, Decomposition &amp; Team Topology</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 118 q</span>
+          <a class="wall__cheat" href="cheatsheets/microservices/01-boundaries-decomposition.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">02</span>
+          <a class="wall__title" href="guides/microservices/microservices-02-communication-data-consistency.html">Communication, Data &amp; Consistency</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">10 ch · 117 q</span>
+          <a class="wall__cheat" href="cheatsheets/microservices/02-communication-data-consistency.html">cheatsheet</a>
+        </div>
+        <div class="wall__row">
+          <span class="wall__num">03</span>
+          <a class="wall__title" href="guides/microservices/microservices-03-operations-platforms-evolution.html">Operations, Platforms &amp; Evolution</a>
+          <span class="wall__leader" aria-hidden="true"></span>
+          <span class="wall__stats">9 ch · 110 q</span>
+          <a class="wall__cheat" href="cheatsheets/microservices/03-operations-platforms-evolution.html">cheatsheet</a>
+        </div>
+      </section>
+
+    </div>
 
     <footer class="pagefoot">
       <span>
-        The markdown volumes remain the source of truth; the HTML is generated from them by a
-        zero-dependency Node script.
+        Every cheatsheet links back to the volume it was condensed from, so any claim on it is
+        traceable to the full chapter it came from.
       </span>
     </footer>
 

@@ -8,3 +8,11 @@
 # working tree on every platform.
 guides/**/*.html    -text
 guides/**/*.css     -text
+cheatsheets/**/*.css  -text
+# Same reason, and `check.js` enforces it just as strictly — it fails the page
+# with "CRLF found" / "stray CR" on a Windows checkout without this.
+cheatsheets/**/*.html  -text
+
+# The self-hosted webfonts are binary. Without this, git's text detection would
+# be free to rewrite them and quietly corrupt every face on the site.
+fonts/*.woff2       -text binary

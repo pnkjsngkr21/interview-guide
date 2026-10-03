@@ -4,7 +4,7 @@
    inherited wholesale from it — the `.page` grid, `.sidebar`, `.masthead`,
    `.callout`, `.table-wrap`, `pre.snippet` and `.pager` all already work. This
    file only adds what a 300-page volume needs that a one-page cheatsheet does
-   not: a narrower prose measure, part dividers, the Q&A items, and the three
+   not: a narrower prose measure, part dividers, the Q&A items, and the two
    callout families that have no cheatsheet counterpart.
 
    The new colour tokens are declared twice, in `:root` and in the dark block,
@@ -12,40 +12,42 @@
    idiom `cheatsheet.css` already uses, so one toggle drives both files. */
 
 :root {
-  /* Prose is narrower than the cheatsheet measure. `--measure` (78ch) is sized
-     for two-column summary content; a volume is unbroken sustained reading, and
-     tables, code and diagrams are allowed to break out of the column rather
-     than the text being widened to accommodate them. */
-  --measure-prose: 68ch;
+  /* Prose is narrower than the cheatsheet measure. `--measure` (66ch) is sized
+     for summary content; a volume is unbroken sustained reading, and tables,
+     code and diagrams break out of the column rather than the text being
+     widened to accommodate them. */
+  --measure-prose: 64ch;
 
-  --prod: #0f6f8f;
-  --prod-soft: #e8f5fa;
+  /* Production concern and staffing. Both are real, recurring claims in a
+     volume, so they hold a hue. `--summary` deliberately does not: chapter
+     summaries are structure, not emphasis — there are 253 of them, roughly one
+     per chapter — so it takes the page's own neutral and costs no hue. */
+  --prod: #106a80;
+  --prod-soft: #e4f0f2;
   --staff: #8a2f5f;
-  --staff-soft: #fbeaf2;
-  --summary: #4a5464;
-  --summary-soft: #eef0f4;
+  --staff-soft: #f8e9f0;
+  --summary: var(--fg-muted);
+  --summary-soft: var(--bg-sunken);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --prod: #6fc3de;
-    --prod-soft: #10262f;
+    --prod-soft: #14262c;
     --staff: #e08ab5;
-    --staff-soft: #2e1524;
-    --summary: #9aa3b4;
-    --summary-soft: #1c1f26;
+    --staff-soft: #2b1622;
   }
 }
 
 /* ---------- The reading column ---------- */
 
 .main--guide {
-  padding-right: 3rem;
+  padding-right: var(--s7);
 }
 
 /* The narrow measure applies to prose only. Everything structural — lists,
    tables, code, callouts — runs the full column, because a Q&A answer that is
-   itself a list reads badly when the list is held to 68ch. */
+   itself a list reads badly when the list is held to the prose measure. */
 .main--guide p {
   max-width: var(--measure-prose);
 }
@@ -67,42 +69,43 @@
 /* ---------- Headings ---------- */
 
 .main--guide section {
-  margin-bottom: 3.5rem;
+  margin-bottom: var(--s7);
 }
 
+/* Part dividers. A volume has up to nine and they carry no content of their
+   own, so they stay compact and let the rule do the separating. Mono and
+   sentence case, like every other structural label in the system. */
 .vol__h1 {
-  /* Part dividers. A volume has up to nine and they carry no content of their
-     own, so they stay compact and let the rule do the separating. */
-  font-size: 1.05rem;
+  font-family: var(--font-mono);
+  font-size: var(--t-meta);
+  font-weight: 500;
   color: var(--fg-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin: 3rem 0 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--line);
+  margin: var(--s7) 0 var(--s5);
+  padding-top: var(--s5);
+  border-top: 1px solid var(--line-strong);
   max-width: none;
 }
 
 .vol__h2 {
-  font-size: 1.35rem;
-  margin: 0 0 1.25rem;
-  padding-bottom: 0.5rem;
+  font-size: 1.5rem;
+  margin: 0 0 var(--s4);
+  padding-bottom: var(--s2);
   border-bottom: 1px solid var(--line);
-  scroll-margin-top: 1.5rem;
+  scroll-margin-top: var(--s5);
 }
 
 .vol__h3 {
-  font-size: 1.05rem;
-  margin: 2.25rem 0 0.75rem;
+  font-size: 1.25rem;
+  margin: var(--s6) 0 var(--s2);
   color: var(--fg);
-  scroll-margin-top: 1.5rem;
+  scroll-margin-top: var(--s5);
 }
 
 .vol__h4 {
-  font-size: 0.95rem;
-  margin: 1.75rem 0 0.6rem;
+  font-size: 1.125rem;
+  margin: var(--s5) 0 var(--s2);
   color: var(--fg-muted);
-  scroll-margin-top: 1.5rem;
+  scroll-margin-top: var(--s5);
 }
 
 /* A heading joined from a wrapped line, or one the parser found was a sentence
@@ -110,24 +113,24 @@
 .bridge {
   max-width: var(--measure-prose);
   color: var(--fg-muted);
-  font-size: 0.92rem;
+  font-size: var(--t-dense);
   font-style: italic;
-  margin: 0 0 1.5rem;
+  margin: 0 0 var(--s5);
 }
 
 /* The repository's all-caps tic, which appears as a bare paragraph in every
-   volume. Set as a centred rule rather than as a shouted paragraph, because a
-   78-character all-caps line at body size is the loudest thing on the page. */
+   volume. Set as a quiet rule rather than as a shouted paragraph, because an
+   all-caps line at body size is the loudest thing on the page. */
 .banner {
   max-width: none;
-  margin: 2.25rem 0;
-  padding: 0.9rem 1.1rem;
-  border-left: 3px solid var(--accent);
-  background: var(--accent-soft);
-  color: var(--fg);
-  font-size: 0.8rem;
-  font-weight: 650;
-  letter-spacing: 0.07em;
+  margin: var(--s6) 0;
+  padding: var(--s3) var(--s4);
+  border-left: 3px solid var(--line-strong);
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  font-weight: 500;
   line-height: 1.5;
   border-radius: 0 var(--radius) var(--radius) 0;
 }
@@ -137,8 +140,8 @@
 /* Only used outside a Q&A answer. Inside `.qa__a` the wrapper supplies the rule
    already, so a quote there renders its blocks bare. */
 .note {
-  margin: 1.25rem 0;
-  padding: 0.1rem 0 0.1rem 1.1rem;
+  margin: var(--s4) 0;
+  padding: 0.1rem 0 0.1rem var(--s4);
   border-left: 3px solid var(--line-strong);
   color: var(--fg-muted);
 }
@@ -146,7 +149,7 @@
 .note--nested {
   border-left-style: dashed;
   border-left-color: var(--line);
-  margin: 1rem 0;
+  margin: var(--s3) 0;
 }
 
 .note > :first-child {
@@ -161,18 +164,18 @@
 
 /* A `text` fence carries no `data-lang`, so `highlight.js` never selects it —
  * that is the structural guarantee the box-drawing characters survive, and
- * `lib/check.js` fails the build if it is ever broken. All this rule has to do
+ * `check-guide.js` fails the page if it is ever broken. All this rule has to do
  * is supply the box and let the glyphs align. */
 pre.diagram {
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: var(--t-meta);
   line-height: 1.45;
   background: var(--code-bg);
   color: var(--code-fg);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  margin: 0 0 1.25rem;
-  padding: 0.9rem 1.1rem;
+  margin: 0 0 var(--s4);
+  padding: var(--s3) var(--s4);
   overflow-x: auto;
   tab-size: 2;
 }
@@ -189,10 +192,10 @@ pre.diagram code {
 /* ---------- The Q&A items ---------- */
 
 .qa {
-  margin: 0 0 1.75rem;
-  padding-bottom: 1.75rem;
+  margin: 0 0 var(--s5);
+  padding-bottom: var(--s5);
   border-bottom: 1px solid var(--line);
-  scroll-margin-top: 1.5rem;
+  scroll-margin-top: var(--s5);
 }
 
 .qa:last-child {
@@ -202,8 +205,8 @@ pre.diagram code {
 
 .qa__q {
   max-width: none;
-  margin: 0 0 0.85rem;
-  font-weight: 620;
+  margin: 0 0 var(--s3);
+  font-weight: 600;
   line-height: 1.45;
 }
 
@@ -216,14 +219,14 @@ pre.diagram code {
   margin-right: 0.35em;
   font-family: var(--font-mono);
   font-size: 0.82em;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--accent);
+  font-weight: 500;
+  color: var(--fg-muted);
   text-decoration: none;
 }
 
 .qa__num:hover {
   text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 
 .qa__badge {
@@ -236,18 +239,16 @@ pre.diagram code {
   color: var(--fg-muted);
   font-family: var(--font-mono);
   font-size: 0.66em;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  vertical-align: 0.1em;
+  font-weight: 500;
   white-space: nowrap;
+  vertical-align: 0.1em;
 }
 
 /* The answer wrapper. It exists so the two measured answer shapes — 3,387 in a
    blockquote, 2,759 as plain paragraphs — are visually identical; the left rule
    is what the `>` form used to supply and what the paragraph form lacked. */
 .qa__a {
-  padding-left: 1.1rem;
+  padding-left: var(--s4);
   border-left: 2px solid var(--line);
 }
 
@@ -269,7 +270,7 @@ pre.diagram code {
   margin: 0;
   color: var(--fg-muted);
   font-style: italic;
-  font-size: 0.88rem;
+  font-size: var(--t-dense);
 }
 
 /* ---------- Callouts without a cheatsheet counterpart ---------- */
@@ -290,21 +291,17 @@ pre.diagram code {
   color: var(--staff);
 }
 
-/* Chapter summaries are structure, not emphasis — 253 of them, roughly one per
-   chapter — so they take the neutral slate family rather than a fifth hue.
-   A volume that gave each summary its own colour would be unreadable. */
+/* A summary is long-form — it restates the chapter — so it runs at body size
+   rather than the smaller type the short callouts use. It takes the neutral
+   family: 253 of them, one per chapter, and a hue each would be unreadable. */
 .callout--summary {
-  border-left-color: var(--summary);
+  border-left-color: var(--line-strong);
   background: var(--summary-soft);
-}
-.callout--summary .callout__label {
-  color: var(--summary);
+  font-size: var(--t-dense);
 }
 
-/* A summary is long-form — it restates the chapter — so it runs at body size
-   rather than the smaller type the short callouts use. */
-.callout--summary {
-  font-size: 0.94rem;
+.callout--summary .callout__label {
+  color: var(--fg-muted);
 }
 
 /* ---------- Sidebar: the collapsed subsection list ---------- */
@@ -315,9 +312,9 @@ pre.diagram code {
 
 .toc__more > summary {
   display: block;
-  padding: 0.25rem 0.5rem;
+  padding: var(--s1) var(--s2);
   color: var(--fg-muted);
-  font-size: 0.78rem;
+  font-size: var(--t-meta);
   cursor: pointer;
   list-style: none;
   border-radius: var(--radius);
@@ -328,12 +325,12 @@ pre.diagram code {
 }
 
 .toc__more > summary::before {
-  content: "▸ ";
+  content: "\25B8\00a0";
   color: var(--line-strong);
 }
 
 .toc__more[open] > summary::before {
-  content: "▾ ";
+  content: "\25BE\00a0";
 }
 
 .toc__more > summary:hover {
@@ -347,29 +344,29 @@ pre.diagram code {
 }
 
 .toc__more > ul a {
-  padding: 0.22rem 0.5rem 0.22rem 1.1rem;
-  font-size: 0.8rem;
+  padding: 0.22rem var(--s2) 0.22rem var(--s4);
+  font-size: var(--t-meta);
 }
 
 /* The scroll-spy's target state. `toc.js` sets `aria-current="true"` on the
    chapter link whose section is nearest the top of the viewport; styling it
- * here keeps the JS free of any presentational decision. */
+   here keeps the JS free of any presentational decision. */
 .sidebar a[aria-current="true"] {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font-weight: 500;
 }
 
 /* ---------- Responsive ---------- */
 
 @media (max-width: 900px) {
   .main--guide {
-    padding-right: 2.5rem;
+    padding-right: var(--s5);
   }
 
-  /* The left rule costs 1.1rem of an already narrow column once the sidebar
+  /* The left rule costs a chunk of an already narrow column once the sidebar
      has stacked above the content. */
   .qa__a {
-    padding-left: 0.8rem;
+    padding-left: var(--s3);
   }
 }
