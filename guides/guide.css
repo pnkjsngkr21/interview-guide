@@ -12,11 +12,14 @@
    idiom `cheatsheet.css` already uses, so one toggle drives both files. */
 
 :root {
-  /* Prose is narrower than the cheatsheet measure. `--measure` (66ch) is sized
-     for summary content; a volume is unbroken sustained reading, and tables,
-     code and diagrams break out of the column rather than the text being
-     widened to accommodate them. */
-  --measure-prose: 64ch;
+  /* Prose is narrower than the cheatsheet measure. `--measure-prose` (74ch) is
+     sized for a narrative cheatsheet; a volume is unbroken sustained reading
+     against a rail and 34 chapters of Q&A, and it wants a shorter line than
+     that. This is deliberately its own token rather than a second
+     `--measure-prose` declaration — this file loads second, so redeclaring the
+     shared name would silently re-point every cheatsheet rule on the 34 guide
+     pages that load both files. */
+  --measure-guide: 64ch;
 
   /* Production concern and staffing. Both are real, recurring claims in a
      volume, so they hold a hue. `--summary` deliberately does not: chapter
@@ -49,7 +52,7 @@
    tables, code, callouts — runs the full column, because a Q&A answer that is
    itself a list reads badly when the list is held to the prose measure. */
 .main--guide p {
-  max-width: var(--measure-prose);
+  max-width: var(--measure-guide);
 }
 
 /* `cheatsheet.css` sets `white-space: nowrap` on inline `code`, which is right
@@ -111,7 +114,7 @@
 /* A heading joined from a wrapped line, or one the parser found was a sentence
    wearing heading marks. It reads as prose, so it is set as prose. */
 .bridge {
-  max-width: var(--measure-prose);
+  max-width: var(--measure-guide);
   color: var(--fg-muted);
   font-size: var(--t-dense);
   font-style: italic;
@@ -261,7 +264,7 @@ pre.diagram code {
 }
 
 .qa__a p {
-  max-width: var(--measure-prose);
+  max-width: var(--measure-guide);
 }
 
 /* An opener with nothing between it and the next one. Rare, but the wrapper has

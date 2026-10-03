@@ -108,7 +108,17 @@
   --diagram-bad: #b02a20;
 
   --radius: 4px;
-  --sidebar-w: 200px;
+
+  /* The rail is sized to its longest real content, not to taste — and the
+     measurement went the other way from the redesign's assumption. The plan
+     narrowed it 268px -> 200px on the judgement that it was "wider than its
+     content warrants". It isn't: chapter labels like "Deployment & progressive
+     delivery" and "Observability: the three signals" are the binding
+     constraint. Across a ten-page sample, 200px wrapped 11 labels onto a second
+     line, 240px still wrapped 11, 268px wrapped 2, and 280px wraps none.
+     Twelve pixels of rail is worth zero broken labels, so the narrowing is
+     reverted. Re-measure before narrowing this again. */
+  --sidebar-w: 280px;
 
   /* Spacing: 8 steps on a 4px base. */
   --s1: 0.25rem;
@@ -124,7 +134,15 @@
   --t-micro: 0.75rem;
   --t-meta: 0.8125rem;
   --t-dense: 0.9rem;
+
+  /* Two measures, because the two page shapes want different ones. The
+     reference shape is tables, callouts and numbers — short entries that want a
+     tight column. The narrative shape (the three microservices volumes, and the
+     longer spring ones) is unbroken prose, and at 66ch it sat hard against the
+     left edge with tables running far wider beside it: a visibly lopsided page.
+     Prose gets the longer measure; everything structural stays tight. */
   --measure: 66ch;
+  --measure-prose: 74ch;
 
   --font-sans: "Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
@@ -230,9 +248,13 @@ h4 {
   font-size: 1.125rem;
 }
 
+/* Prose takes the longer measure; structural blocks (tables, callouts, code,
+   `.plain` lists) keep `--measure`. The reference shape is mostly the former
+   running full-width and the latter being short entries, so it is barely
+   affected; the narrative shape gains back the line length it needs. */
 p {
   margin: 0 0 var(--s3);
-  max-width: var(--measure);
+  max-width: var(--measure-prose);
 }
 
 /* Links are ink, so the underline is what distinguishes them. */
