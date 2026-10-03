@@ -49,7 +49,7 @@ senior depth. A rating of High with `Partial` is a real gap and drives the work 
 | Executable JAR, layered jars, `jarmode` | Medium | Covered | v7 §5 |
 | AOT and native image | Medium | Covered | v7 §6 |
 | Graceful shutdown | High | Covered | v7 §7.6 |
-| Virtual threads | High | **Thin — one table row only** | v7, v9 |
+| **Virtual threads** | High | **Added 2026-10-04** — vol09 §5.8: mount/unmount lifecycle, carrier pool, **version-conditional pinning** (`synchronized` pins on JDK 21–23, not on 24+ per JEP 491; `jdk.tracePinnedThreads` removed), `spring.threads.virtual.enabled` (Boot 3.2+, also needs Java 21+; `@Async` follows automatically; `Executor`-bean back-off; no Undertow path), `Thread.dump_to_file`, and why the connection pool becomes the limit | v9 §5.8, v7 §2.3, cheat09 §5, cheat07 |
 
 ## AOP (Volume 3)
 

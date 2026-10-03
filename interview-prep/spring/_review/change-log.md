@@ -17,19 +17,20 @@ or deleted in the content tree, no heading was renamed, no section was rewritten
 | `spring/spring-04-transaction-management.html` | 4 | **Factual**, TOC leak |
 | `spring/spring-05-spring-mvc-web-layer.html` | 2 + **§7.5 rebuilt** | **Factual**, TOC leak, **new content** |
 | `spring/spring-06-spring-data-jpa-persistence.html` | 3 + **§4.6 added** | **Factual**, TOC leak, bold leak, **new section** |
-| `spring/spring-07-spring-boot-auto-configuration.html` | 2 | Heading level, TOC leak |
+| `spring/spring-07-spring-boot-auto-configuration.html` | 2 + **1 cell extended** | Heading level, TOC leak, **new content** |
 | `spring/spring-08-spring-security.html` | 2 | Malformed QA block, TOC leak |
-| `spring/spring-09-testing-production-troubleshooting.html` | 2 + **§2.5 extended** | **Factual**, TOC leak, **new content** |
+| `spring/spring-09-testing-production-troubleshooting.html` | 2 + **§2.5 extended + §5.8 added** | **Factual**, TOC leak, **new content**, **new section** |
 | `spring/spring-10-webflux-project-reactor.html` | 3 | **Factual**, consistency, TOC leak |
 | `spring/spring-11-spring-cloud-distributed-systems.html` | 7 | **Factual**, TOC leak, 2 malformed QA blocks, bold leak |
 | `cheatsheets/spring/02-bean-lifecycle-scopes-di.html` | 1 | **Factual** |
 | `cheatsheets/spring/05-spring-mvc-web-layer.html` | **1 added** | **New callout** |
 | `cheatsheets/spring/06-spring-data-jpa-persistence.html` | **1 added** | **New section** |
-| `cheatsheets/spring/09-testing-production-troubleshooting.html` | **1 added** | **New callout** |
+| `cheatsheets/spring/09-testing-production-troubleshooting.html` | **1 added** + **§5 extended** | **New callout**, **new section** |
+| `cheatsheets/spring/07-spring-boot-auto-configuration.html` | **1 cell extended** | **New content** |
 | `cheatsheets/spring/04-transaction-management.html` | 1 | Markdown leak |
 | `cheatsheets/spring/11-spring-cloud-distributed-systems.html` | 2 + **3 added** | **Factual**, **new sections** |
 
-**11 volumes + 6 cheatsheets = 17 files edited. 4 new files created, all under `_review/`.**
+**11 volumes + 7 cheatsheets = 18 files edited. 4 new files created, all under `_review/`.**
 
 ## Change-by-change
 
@@ -332,6 +333,46 @@ Verified and used:
 - Infrastructure is **shared** with `RestTemplate` — same request factories, interceptors,
   initializers and message converters, so an interceptor written for one works on the other.
 
+## Fifth pass — virtual threads (2026-10-04)
+
+### What was added
+
+| File | Change |
+| --- | --- |
+| `spring/spring-09` §5.8 | **New section**, "Virtual Threads — What Changes, and What Does Not": the mount/unmount lifecycle as an ASCII diagram, the JDK 21-vs-24 pinning table, what `spring.threads.virtual.enabled` does and does not switch on, the connection-pool argument, and the observability change. Plus 6 Common Mistakes bullets, Q&A `5-performance-and-memory-9` … `-12`, 3 Further Reading links, and the sidebar TOC (`10 sections` → `11 sections`). |
+| `spring/spring-09` §5.4 | One clause added to the existing `scale` callout so the forward-reference resolves to §5.8 instead of leaving the topic dangling. |
+| `cheatsheets/spring/09` §5 | **New "Virtual threads" block**: a `table--decision` of what the flag switches on, a version-conditional pinning table, the scheduler properties, and three trap callouts. Links to vol09 §5.8 rather than restating the mechanism. |
+| `spring/spring-07` §2.3 + `cheatsheets/spring/07` | The `@ConditionalOnThreading(VIRTUAL)` row gained the fact that the condition matches only when the property **and** Java 21+ are both true. |
+
+### Why vol09, not vol07
+
+The topic was thin in both, but §5.4's Tomcat arithmetic and §5.5's HikariCP arithmetic are
+exactly the argument virtual threads qualify, and the existing scale callout already forward-referenced
+the topic. Placing it there completes a running argument rather than opening a new one.
+
+### Claims the research falsified before they were written
+
+This is the third pass in a row where source verification overturned the folklore. The claims below
+are the ones a candidate is most likely to have memorised from blog posts, and **none** of them were
+written into the corpus:
+
+| Folklore claim | Verified truth | Source |
+| --- | --- | --- |
+| "`synchronized` pins a virtual thread" | **Version-conditional.** True on JDK 21–23; **false from JDK 24**, where JEP 491 made monitors independent of the carrier. | JEP 444; JEP 491 (Release 24) |
+| "Use `ReentrantLock` instead of `synchronized` under virtual threads" | JEP 491 **explicitly retracts** this: *"such migration will no longer be necessary. You need not revert code."* Correct advice on 21–23, unnecessary on 24+. | JEP 491, Description |
+| "Set `-Djdk.tracePinnedThreads=full` to find pinning" | **Removed** in JDK 24, not deprecated — *"setting it on the command line will have no effect."* Use the `jdk.VirtualThreadPinned` JFR event (retained, on by default, 20 ms threshold). | JEP 491 |
+| "`@Async` needs a second property to use virtual threads" | **False.** With the flag set, `applicationTaskExecutor` is already a virtual-thread `SimpleAsyncTaskExecutor`. `OnExecutorCondition` has two triggers and `spring.task.execution.thread-name-prefix` is in neither. | `TaskExecutorConfigurations.java` (3.5.x) |
+| "`jcmd Thread.dump` shows virtual threads" | Wrong command. It is `jcmd <pid> Thread.dump_to_file -format=json <file>`. `jstack` and `Thread.print` show **no** virtual threads at all. | JEP 444 |
+| Virtual threads work on any embedded server | **Tomcat and Jetty only.** No `UndertowVirtualThreadsWebServerFactoryCustomizer` exists in any Boot version, including 3.2.x where the feature was introduced. | `TomcatVirtualThreadsWebServerFactoryCustomizer`, `JettyVirtualThreadsWebServerFactoryCustomizer` (3.5.x) |
+| Pinning causes reentrancy failure | The failure mode is **starvation**: *"The scheduler does not compensate for pinning by expanding its parallelism."* `maxPoolSize` (default 256) can rescue non-pinning blocking, never pinning. | JEP 444, Motivation |
+| Virtual threads make requests faster | *"They exist to provide scale (higher throughput), not speed (lower latency)."* | JEP 444 |
+
+The last one shaped the section's central claim. §5.4 previously said virtual threads *"change
+this arithmetic entirely"*, which is the tidier and less accurate version. The section now argues
+what the JEPs support: virtual threads **relocate** the bottleneck from the request queue to the
+connection pool, which is why §5.5's arithmetic still governs. JEP 444's own warning against
+pooling virtual threads to limit concurrency is quoted for the same reason.
+
 ## Verification
 
 All 22 Spring pages re-checked after every edit batch, plus the site index:
@@ -342,22 +383,38 @@ All 22 Spring pages re-checked after every edit batch, plus the site index:
  index.html     → PASS - no errors, exit 0
 ```
 
-No file was deleted. No heading was renamed, so no anchor moved. The `pre.snippet` /
-`pre.diagram` invariant asserted by `check.js --volume` holds across all 11 volumes — the 310
-backtick conversions were all in sidebar TOCs and prose, never inside a `<pre>`.
+No file was deleted. No heading was renamed, so no anchor moved — §5.8 is a new `h3` with a new id
+and no existing section was touched by the renumbering. The `pre.snippet` / `pre.diagram` invariant
+asserted by `check.js --volume` holds across all 11 volumes — the 310 backtick conversions were all
+in sidebar TOCs and prose, never inside a `<pre>`.
+
+After the virtual-threads pass, additionally verified by direct scan across all 22 Spring pages:
+
+```
+diagTagged (pre.diagram carrying data-lang)   0
+CR characters                                0
+tab characters                               0
+emoji outside <pre>                          0 files
+```
+
+Cheatsheet warnings were diffed against the pre-edit baseline (`git stash` → capture → restore):
+the **only** delta is `cheat09`'s callout count moving 20 → 23, which trips the advisory
+`callout count 23 is above the 12-20 composition guide`. No new warning class was introduced. Two
+warnings that *were* mine on first write — an uncaptioned table and a trap callout missing the
+`Interview trap` prefix — were fixed rather than accepted.
 
 ## Coverage summary
 
 | Checklist area | Before | After |
 | --- | --- | --- |
-| Verified-correct technical claims | 9 spot-checks | 12 |
+| Verified-correct technical claims | 9 spot-checks | 20 |
 | Factual errors found and fixed | — | 12 |
 | Rendered-broken markdown defects fixed | — | 10 (310 backticks, 3 malformed QA blocks, 2 bold leaks, 1 prose leak) |
 | Heading/structural inconsistencies fixed | — | 3 |
 | Volumes PASS `check.js --volume` | 11 | 11 |
 | Cheatsheets PASS `check.js --cheatsheet` | 11 | 11 |
 | Markdown leaks outside `<pre>` | 316 backticks + 2 bold, all 22 files | **0** |
-| High-priority topics closed | 1 (Spring Cache) | 4 (Spring Cache, RestClient, `enforceOverride`, cheat11 ch.1/7/8) |
+| High-priority topics closed | 1 (Spring Cache) | 5 (Spring Cache, RestClient, `enforceOverride`, cheat11 ch.1/7/8, virtual threads) |
 
 ### By version
 
@@ -379,14 +436,25 @@ backtick conversions were all in sidebar TOCs and prose, never inside a `<pre>`.
 | `enforceOverride` default + singleton-only + `@ContextHierarchy` warning | `MockitoBean.java` (6.2.x) source; `BeanOverrideStrategy` enum |
 | `RestClient` `@since`, sync-only, default-throws, `onStatus` ordering, lazy `retrieve()`, `exchange()` bypass | `RestClient.java`, `DefaultRestClient.java`, `StatusHandler.java`, `RestTemplate.java` (6.2.x) source; `rest-clients.adoc` |
 | Boot prototype-scoped `RestClient.Builder`, stateful builder | `RestClientAutoConfiguration` (3.5.x), Boot `io/rest-client.adoc` |
+| Virtual-thread pinning in JDK 21–23 vs 24+; `jdk.tracePinnedThreads` removal; lock-migration retraction | [JEP 444](https://openjdk.org/jeps/444) (Release 21), [JEP 491](https://openjdk.org/jeps/491) (Release 24) |
+| Carrier-pool parallelism = core count; no compensation for pinning; `maxPoolSize` default 256; "scale not speed" | JEP 444 |
+| `Thread.dump_to_file -format=json`; `jstack`/`Thread.print` omit virtual threads; disjoint carrier stacks; `jdk.VirtualThreadPinned` 20 ms | JEP 444 |
+| `spring.threads.virtual.enabled` requires Java 21+; `@Async` follows by default; `Executor`-bean back-off | `Threading.java`, `TaskExecutorConfigurations.java` (Boot 3.5.x); Boot `task-execution-and-scheduling.adoc` |
+| Tomcat/Jetty virtual-thread support; no Undertow path | `TomcatVirtualThreadsWebServerFactoryCustomizer`, `JettyVirtualThreadsWebServerFactoryCustomizer` (Boot 3.5.x); full-tree file listing |
+| Do not pool virtual threads to limit concurrency — use semaphores | JEP 444 |
 
 ## Unverified / needs human check
 
-1. **Virtual threads are thin.** `spring.threads.virtual.enabled=true` appears as prose and a
-   table row, but the senior answer is the mechanism — carrier-thread pinning, why a `synchronized`
-   block or a JDBC call inside it defeats the whole thing, and why the connection pool rather than
-   the thread count becomes the limit. That is an addition, not a correction, so it was left out
-   rather than half-written. **Recommend a dedicated section in vol07 or vol09.**
+1. ~~**Virtual threads are thin**~~ — **CLOSED 2026-10-04.** Added as vol09 §5.8 with a matching
+   cheat09 block, covering the mechanism, version-conditional pinning, what Boot switches on, and
+   why the connection pool becomes the limit. See the fifth pass above.
+
+   **One adjacent claim the research did not verify, deliberately not written:** whether
+   `SecurityContextHolder`'s `ThreadLocal` strategy needs changing under virtual threads, and
+   whether `InheritableThreadLocal` / `RequestContextHolder` behave differently. This is a real
+   senior-level question and it is **not** in the corpus. Left out rather than filled from memory.
+   **Recommend a human check of Spring Security's `VirtualThreadSecurityContextHolderStrategy`
+   before writing it.**
 2. ~~**Spring Cache abstraction is absent**~~ — **CLOSED 2026-10-03.** Added as vol06 §4.6 with a
    matching cheat06 block; see the third pass above. `CacheManager` now appears throughout §4.6.
 3. **`RestClient` was absent from vol05 §7.5**, which owns outbound HTTP, and from `cheat05`

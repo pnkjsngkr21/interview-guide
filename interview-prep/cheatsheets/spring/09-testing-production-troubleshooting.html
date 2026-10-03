@@ -882,6 +882,114 @@ cfg.setLeakDetectionThreshold(0);  // DEFAULT off — set 5000 while debugging, 
         logging, which costs well under 1% of throughput — and which must be
         <em>rotated</em> (<code>filecount=5,filesize=50M</code>), because an unrotated GC log
         fills the disk and takes the pod down.</p>
+
+        <h3>Virtual threads</h3>
+        <p><strong><code>spring.threads.virtual.enabled=true</code>, Boot 3.2+, and it also needs
+        Java 21+.</strong> <strong>Scale, not speed.</strong> A virtual thread's stack lives in the
+        heap, so
+        creating one is cheap — but it runs code no faster than a platform thread. A CPU-bound
+        workload gains nothing. Full treatment in
+        <a href="../../spring/spring-09-testing-production-troubleshooting.html#58-virtual-threads-what-changes-and-what-does-not">vol09
+        §5.8</a>.</p>
+        <table class="table--decision">
+          <caption>What <code>spring.threads.virtual.enabled=true</code> switches on — and what it
+          does not</caption>
+          <thead>
+            <tr><th>Area</th><th>Effect</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Gate</strong></td>
+              <td>Needs the property <strong>and</strong> Java 21+. On JDK 17 it is a silent
+              no-op — no warning, no failure.</td>
+            </tr>
+            <tr>
+              <td>Servlet container</td>
+              <td>Tomcat and Jetty get a <code>VirtualThreadExecutor</code>.
+              <strong>Undertow has no virtual-thread path in any Boot version.</strong></td>
+            </tr>
+            <tr>
+              <td><code>@Async</code></td>
+              <td><strong>Follows automatically — no second property.</strong>
+              <code>applicationTaskExecutor</code> becomes a virtual-thread
+              <code>SimpleAsyncTaskExecutor</code>.</td>
+            </tr>
+            <tr>
+              <td>Scheduling</td>
+              <td>Moves to <code>SimpleAsyncTaskScheduler</code>, which ignores all pooling
+              properties.</td>
+            </tr>
+            <tr>
+              <td>Connection pool</td>
+              <td><strong>Unchanged, and now the binding constraint.</strong> Every parked
+              continuation still wants a connection.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p><strong>Pinning, by JDK version</strong> — the single most-repeated virtual-thread
+        claim, and it is version-conditional:</p>
+        <table>
+          <caption>Pinning claims, by JDK version — the most-repeated virtual-thread advice is
+          version-conditional</caption>
+          <thead>
+            <tr><th>Claim</th><th>JDK 21–23</th><th>JDK 24+</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>synchronized</code> pins a virtual thread</td>
+              <td>True</td>
+              <td><strong>False</strong> — JEP 491</td>
+            </tr>
+            <tr>
+              <td>Rewrite <code>synchronized</code> → <code>ReentrantLock</code></td>
+              <td>Correct advice</td>
+              <td><strong>Unnecessary</strong> — JEP 491 retracts it</td>
+            </tr>
+            <tr>
+              <td><code>-Djdk.tracePinnedThreads=full</code></td>
+              <td>Supported</td>
+              <td><strong>Removed — silently does nothing</strong></td>
+            </tr>
+            <tr>
+              <td>Native callback / class initialisation</td>
+              <td>Pins</td>
+              <td>Still pins</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>Scheduling knobs: <code>jdk.virtualThreadScheduler.parallelism</code> (default: core
+        count, a small work-stealing <code>ForkJoinPool</code> in FIFO — <em>not</em> the LIFO
+        common pool) and <code>jdk.virtualThreadScheduler.maxPoolSize</code> (default 256). Blocking
+        that is <em>not</em> pinning may temporarily expand the pool; pinning does <strong>not</strong>
+        — that asymmetry is what makes pinning starve the scheduler. Use the
+        <code>jdk.VirtualThreadPinned</code> JFR event (on by default, 20&nbsp;ms threshold) rather
+        than the removed system property.</p>
+        <div class="callout callout--trap">
+          <span class="callout__label">Interview trap — <code>jstack</code> cannot see virtual
+          threads</span>
+          <p><code>jstack</code> and <code>jcmd Thread.print</code> show <strong>none</strong> of
+          them, so a virtual-thread service looks deceptively quiet. The command is
+          <code>jcmd &lt;pid&gt; Thread.dump_to_file -format=json vt.json</code>. It carries no
+          object addresses, locks or heap statistics, it does <em>not</em> pause the application,
+          and carrier frames do not appear in the virtual thread's stack.</p>
+        </div>
+        <div class="callout callout--trap">
+          <span class="callout__label">Interview trap — declaring any <code>Executor</code> bean
+          silently disables the whole thing</span>
+          <p>The auto-configured executor is <code>@ConditionalOnMissingBean(Executor.class)</code>.
+          Declare <em>any</em> <code>java.util.concurrent.Executor</code> — a scheduling pool, a
+          one-component executor, a test double — and it stands down, so <code>@Async</code> runs on
+          yours. The flag is not broken; nothing tells you it stopped applying.</p>
+        </div>
+        <div class="callout callout--trap">
+          <span class="callout__label">Interview trap — do not pool virtual threads to limit
+          concurrency</span>
+          <p>JEP 444 is explicit: <em>"do not be tempted to pool virtual threads in order to limit
+          concurrency. Instead use constructs specifically designed for that purpose, such as
+          semaphores."</em> Pooling was idiomatic only because platform threads were expensive. The
+          sizing discipline survives the migration — it just moves from a thread pool to a
+          semaphore.</p>
+        </div>
       </div>
     </section>
 

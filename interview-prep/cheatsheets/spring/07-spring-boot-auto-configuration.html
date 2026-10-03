@@ -380,7 +380,8 @@ public class AcmeReportingAutoConfiguration {
             <tr><td><code>@ConditionalOnResource</code>, <code>@ConditionalOnWarDeployment</code></td><td>A resource exists / deployed as a war</td>
               <td>The war-deployment one is the escape hatch for the &ldquo;works in a container, breaks as a war&rdquo; class of bug</td></tr>
             <tr><td><code>@ConditionalOnThreading(VIRTUAL)</code></td><td>The app is running on virtual threads</td>
-              <td>Boot 3.2+; lets a starter behave differently under <code>spring.threads.virtual.enabled</code></td></tr>
+              <td>Boot 3.2+; lets a starter behave differently under <code>spring.threads.virtual.enabled</code>.
+              Matches only if the property <em>and</em> Java 21+ are both true</td></tr>
           </tbody>
         </table>
       </div>
