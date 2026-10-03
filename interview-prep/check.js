@@ -16,7 +16,7 @@
 
      - The encoding, link, id and encoding-hygiene core runs on every mode.
      - The volume contract adds the diagram guarantee, which is what keeps
-       `highlight.js` out of 711 ASCII diagrams.
+       `highlight.js` out of 725 ASCII diagrams.
      - The cheatsheet contract adds the density, table, callout, snippet and
        figure checks that the one-page shape is held to.
      - The index contract adds the catalogue counts. It is the only page that
@@ -247,7 +247,7 @@ if (isVolume) {
   // `highlight.js` selects `pre.snippet` only. An ASCII diagram is therefore
   // `pre.diagram` with NO `data-lang`; if one ever carries one, the highlighter
   // reaches into the box-drawing characters and mangles them. This is the one
-  // structural guarantee protecting all 711 diagrams, so it is asserted here
+  // structural guarantee protecting all 725 diagrams, so it is asserted here
   // rather than left to a re-read of highlight.js.
   const diagRe = /<pre class="diagram"([^>]*)>/g;
   while ((m = diagRe.exec(s))) {
@@ -473,11 +473,11 @@ if (MODE === "--index") {
   const cheatLinks = s.match(/class="wall__cheat" href="interview-prep\/cheatsheets\/(java|spring|database|microservices)\//g) || [];
   // Volumes and cheatsheets are counted separately and are NOT equal: Java Volume 10
   // (Testing & Build Tooling) has a volume page and no cheatsheet, so its wall row
-  // carries no wall__cheat anchor. Adding a cheatsheet for it makes both 35.
-  if (volLinks.length !== 35) fail("expected 35 volume links in the wall, found " + volLinks.length);
-  if (cheatLinks.length !== 34) fail("expected 34 cheatsheet links in the wall, found " + cheatLinks.length);
+  // carries no wall__cheat anchor. Adding a cheatsheet for it makes both 36.
+  if (volLinks.length !== 36) fail("expected 36 volume links in the wall, found " + volLinks.length);
+  if (cheatLinks.length !== 35) fail("expected 35 cheatsheet links in the wall, found " + cheatLinks.length);
   if (count(/data-filter-group/g) !== 4) fail("expected 4 data-filter-group tracks");
-  if (count(/data-filter-target/g) !== 35) fail("expected 35 data-filter-target rows");
+  if (count(/data-filter-target/g) !== 36) fail("expected 36 data-filter-target rows");
   for (const track of ["java", "spring", "database", "microservices"]) {
     if (!new RegExp('<section class="wall__track" id="' + track + '"').test(s)) {
       fail("wall has no track section for " + track);

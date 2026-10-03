@@ -148,7 +148,7 @@ senior depth. A rating of High with `Partial` is a real gap and drives the work 
 | Saga patterns | High | Covered | v11 |
 | Outbox pattern | High | Covered (unnamed broker) | v11 |
 | OpenTelemetry | Medium | Thin — one diagram, one paragraph | v11 §5.4 |
-| **Messaging (Kafka / RabbitMQ)** | High | **MISSING** — `KafkaTemplate`, `@KafkaListener`, `@RabbitListener` = 0 occurrences | — |
+| **Messaging (Kafka / RabbitMQ)** | High | **Added 2026-10-04** — new volume 12 + cheatsheet. Log-vs-queue, consumer groups and ordering, `@KafkaListener` (`id`/`idIsGroup`), the 7 `AckMode` values and their `BATCH` default, error handling and the 9-retry default, EOS and its sequence-only qualifier, `KafkaTemplate` send failure, RabbitMQ's 3 `AcknowledgeMode` values, `defaultRequeueRejected=true`, prefetch 250, the two dead-letter paths, `SimpleMessageConverter`'s `Serializable` case, simple/direct namespaces. 23 questions. Version-tagged **4.1.1** | v12, cheat12 |
 | Cheatsheet coverage of ch. 1, 7, 8 | Medium | **Added 2026-10-04** — three sections: should you split at all, service-to-service security, antipatterns and their causes | cheat11 §9–11 |
 
 ## Testing / Production (Volume 9)

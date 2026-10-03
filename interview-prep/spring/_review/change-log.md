@@ -21,16 +21,28 @@ or deleted in the content tree, no heading was renamed, no section was rewritten
 | `spring/spring-08-spring-security.html` | 2 | Malformed QA block, TOC leak |
 | `spring/spring-09-testing-production-troubleshooting.html` | 2 + **§2.5 extended + §5.8 added** | **Factual**, TOC leak, **new content**, **new section** |
 | `spring/spring-10-webflux-project-reactor.html` | 3 | **Factual**, consistency, TOC leak |
-| `spring/spring-11-spring-cloud-distributed-systems.html` | 7 | **Factual**, TOC leak, 2 malformed QA blocks, bold leak |
+| `spring/spring-11-spring-cloud-distributed-systems.html` | 7 + **1 pager added** | **Factual**, TOC leak, 2 malformed QA blocks, bold leak, **navigation** |
+| `spring/spring-12-messaging-kafka-rabbitmq.html` | **NEW** | **New volume** — 4 chapters + scenario bank |
 | `cheatsheets/spring/02-bean-lifecycle-scopes-di.html` | 1 | **Factual** |
 | `cheatsheets/spring/05-spring-mvc-web-layer.html` | **1 added** | **New callout** |
 | `cheatsheets/spring/06-spring-data-jpa-persistence.html` | **1 added** | **New section** |
 | `cheatsheets/spring/09-testing-production-troubleshooting.html` | **1 added** + **§5 extended** | **New callout**, **new section** |
 | `cheatsheets/spring/07-spring-boot-auto-configuration.html` | **1 cell extended** | **New content** |
 | `cheatsheets/spring/04-transaction-management.html` | 1 | Markdown leak |
-| `cheatsheets/spring/11-spring-cloud-distributed-systems.html` | 2 + **3 added** | **Factual**, **new sections** |
+| `cheatsheets/spring/11-spring-cloud-distributed-systems.html` | 2 + **3 added** + **footer corrected** + **11 files whitespace-normalised** | **Factual**, **new sections**, **navigation**, encoding hygiene |
+| `cheatsheets/spring/12-spring-messaging-kafka-rabbitmq.html` | **NEW** | **New cheatsheet** |
+| `index.html` | **1 row added** | **Registration** |
+| `interview-prep/check.js` | 3 counts + 1 comment | **Required** — the `--index` contract hardcodes the wall totals |
 
-**11 volumes + 7 cheatsheets = 18 files edited. 4 new files created, all under `_review/`.**
+**12 volumes + 12 cheatsheets + index.html + check.js = 26 files edited across six passes.
+8 new files created: 4 under `_review/`, plus the volume 12 / cheatsheet 12 pair.**
+
+### New files created
+
+| File | Shape |
+| --- | --- |
+| `spring/spring-12-messaging-kafka-rabbitmq.html` | Volume — 6 `data-filter-target` sections, 23 Q&A, 5 ASCII diagrams, 6 snippets, 5 tables, 13 callouts. Version-tagged spring-kafka / spring-amqp 4.1.1. |
+| `cheatsheets/spring/12-spring-messaging-kafka-rabbitmq.html` | Cheatsheet — 6 sections + numbers, 9 captioned `table--decision`, 2 SVG figures, 3 snippets, 8 callouts, 8 number cards. Zero warnings. |
 
 ## Change-by-change
 
@@ -288,7 +300,7 @@ Also verified rather than assumed:
 
 ## Fourth pass — `RestClient`, `@MockitoBean.enforceOverride`, cheat11 sync (2026-10-04)
 
-38. **`@MockitoBean`'s `enforceOverride` default** — vol09 §2.5 gained a paragraph, a 4-line
+39. **`@MockitoBean`'s `enforceOverride` default** — vol09 §2.5 gained a paragraph, a 4-line
     snippet, a trap callout and Q&A `2-spring-boot-test-annotations-8`; cheat09 gained a matching
     trap callout. Closes item 8 of *Unverified*. Verified at source:
     `boolean enforceOverride() default false;`, mapping to `BeanOverrideStrategy.REPLACE_OR_CREATE`.
@@ -373,32 +385,136 @@ what the JEPs support: virtual threads **relocate** the bottleneck from the requ
 connection pool, which is why §5.5's arithmetic still governs. JEP 444's own warning against
 pooling virtual threads to limit concurrency is quoted for the same reason.
 
+## Sixth pass — messaging, Kafka & RabbitMQ (2026-10-04)
+
+This pass is **file creation rather than targeted edit**, and that was the one decision I escalated
+rather than took. Messaging was flagged as unowned across all 11 volumes; the user's *"complete the
+open items"* was the decision I was waiting on, so the volume was created.
+
+### What was added
+
+| File | Change |
+| --- | --- |
+| `spring/spring-12-messaging-kafka-rabbitmq.html` | **New volume**, 4 chapters + scenario bank, 23 questions, 5 ASCII diagrams, 6 snippets, 5 tables, 13 callouts. Ch.1 the two models; Ch.2 spring-kafka; Ch.3 spring-amqp; Ch.4 choosing and operating; then 3 production narratives. |
+| `cheatsheets/spring/12-spring-messaging-kafka-rabbitmq.html` | **New cheatsheet**, 6 sections + numbers, 9 `table--decision`, 2 SVG figures, 8 callouts, 8 number cards. |
+| `index.html` | Volume 12 registered in the Spring wall. |
+| `spring/spring-11` | Forward `pager__next` added to both pagers, so the chain is walkable from 11 to 12. |
+| `cheatsheets/spring/11` | Footer pager gained the volume-12 link; `Volume 11 of 11` corrected to `of 12`. |
+| `check.js` | Index counts 35/34/35 → **36/35/36** (the only shared-asset change, and unavoidable: the index contract hardcodes them). |
+
+### Deduplication, deliberately
+
+Volume 11 owns the outbox (§7), saga compensation (§6) and consumer idempotency (§7). This volume
+**links** to those rather than restating them — §2.5 and §4.4 cover the transactional gap from the
+broker-API side and then point at vol11. Per the authoring contract, that is the rule, and the
+cheatsheet's keyfacts entry 5 does the same.
+
+### The research falsified my own premise
+
+I asked the research agent to verify messaging "on spring-kafka / spring-amqp 3.3.x / 3.4.x". The
+agent's opening line was that the premise was wrong:
+
+> *"Your premise 'current is 3.3.x/3.4.x' is WRONG. The current GA for both projects is 4.1.1…
+> This matters: major API changes landed in 4.0 that invalidate several commonly-repeated interview
+> answers."*
+
+That is the fourth consecutive pass where verification overturned what I would otherwise have
+written uncritically (RestClient 4, virtual threads 7, messaging 18). Both new files are tagged
+**4.1.1 / Boot 4.1.1** and §2 opens by saying so, because the version is load-bearing here in a way
+it is not in most volumes.
+
+### Claims the research falsified before they were written
+
+| Folklore claim | Verified truth | Source |
+| --- | --- | --- |
+| `@KafkaListener.idIsGroup` defaults to `false` | **Defaults to `true`.** The source is `boolean idIsGroup() default true;`. Its javadoc ends *"@return false to disable"*, which reads as the opposite — and is where the folk answer comes from. | `KafkaListener.java` |
+| Kafka's default ack mode is `RECORD` | **`BATCH`** — `private AckMode ackMode = AckMode.BATCH;`. Spring Boot does not change it: `spring.kafka.listener.ack-mode` has no default in its metadata. | `ContainerProperties.java`; Boot config metadata |
+| There are four `AckMode` values | **Seven**: RECORD, BATCH, TIME, COUNT, COUNT_TIME, MANUAL, MANUAL_IMMEDIATE. | `ContainerProperties.AckMode` |
+| Default backoff is a sensible exponential | **9 retries, no delay.** Not a policy anyone wrote. | `DefaultErrorHandler` |
+| Unmatched exception types are fatal | Classified **retryable** — the classifier defaults to `true`, so an unexpected NPE gets nine attempts. | `ExceptionClassifier` |
+| The fatal list contains Kafka's `SerializationException` | It contains **Spring's** `DeserializationException`, in `org.springframework.kafka.support.serializer` — a different class in a different package. | `DefaultErrorHandler` |
+| You configure a producer-side error handler | **No such API.** Verified absent from `DefaultKafkaProducerFactory`, `ProducerFactory` and `KafkaTemplate` in 4.1.1. Failure arrives on the `CompletableFuture`, or via a `ProducerListener`. | `DefaultKafkaProducerFactory.java`; `KafkaTemplate.java` |
+| `KafkaTemplate.send()` returns `ListenableFuture` | Returns **`CompletableFuture` since 3.0**; `ListenableFuture` through 2.9.x. | spring-kafka 3.0 release notes |
+| Keys/values are `StringSerializer` by default | A **Boot** convention, not a spring-kafka one — `DefaultKafkaProducerFactory` has nullable serializers. That attribution matters: it explains why a Boot POJO send fails with a class-name error. | `DefaultKafkaProducerFactory.java` |
+| Mark exceptions with a `RetriableException` interface | **Does not exist.** Replaced by `ExceptionMatcher`; the vocabulary inverted — you configure what is *not* retryable. | spring-kafka error handling docs |
+| `SeekToCurrentErrorHandler` is current | **Removed in 3.0**, replaced by `DefaultErrorHandler`. | 3.0 migration notes |
+| A transaction manager and an error handler coexist | **No error handler is installed at all** when a `transactionManager` is present — so retry and DLT policy silently stops applying. | spring-kafka docs |
+| RabbitMQ has `MANUAL_IMMEDIATE` | It has **exactly three** values — NONE, MANUAL, AUTO — unchanged since 2.3.0. `MANUAL_IMMEDIATE` is a spring-kafka concept, and carrying it across is the most common cross-contamination between the two APIs. | `SimpleMessageListenerContainer.AcknowledgeMode` |
+| `defaultRequeueRejected` default is `false` | **`true`** — so a listener that throws causes an immediate, unbounded redelivery loop with no delay and no attempt limit. | Boot metadata; `SimpleMessageListenerContainer` |
+| `SimpleMessageConverter` is JSON-ish | It handles String, byte[] **and `Serializable`** — so most DTOs get **Java serialization silently**, at both ends. | `SimpleMessageConverter.java` |
+| A queue DLX and `RepublishMessageRecoverer` are two layers | They are **one path, chosen by the recoverer.** With the republish recoverer, *"the message is ack'd and is not sent to the dead letter exchange by the broker"* — the broker DLX is silently inert. | spring-amqp container docs |
+
+### One premise the research itself corrected mid-report
+
+The agent also corrected a figure I had assumed for the exactly-once caveat, and the correction is
+what made the section worth writing. The official qualifier is that EOS guarantees *the sequence*
+completes exactly once — **"the read and process have at least once semantics."** That parenthetical
+is now the quoted centrepiece of §2.5, because it is precisely the thing a candidate who has only
+read the marketing gets wrong. Related: the docs state that when the second commit fails after the
+primary has committed, the application *"should take remedial action, if necessary, to compensate
+for the committed primary transaction"* — which is the documented admission that the cross-system
+atomicity nobody claims actually exists.
+
+### What I deliberately did not write
+
+The research marked exactly one item **UNVERIFIED** and safety rule 5 applies: whether
+`isolation.level=read_committed` is a Spring-managed setting. It is **not** in the corpus. That
+setting is a Kafka consumer config property, and describing it as Spring-managed would be an
+unverifiable claim — it is listed below instead.
+
 ## Verification
 
-All 22 Spring pages re-checked after every edit batch, plus the site index:
+All Spring pages re-checked after every edit batch, plus the site index. Current state:
 
 ```
-11 volumes      → PASS - no errors, exit 0
-11 cheatsheets  → PASS - no errors, exit 0
+12 volumes      → PASS - no errors, exit 0
+12 cheatsheets  → PASS - no errors, exit 0
  index.html     → PASS - no errors, exit 0
 ```
 
-No file was deleted. No heading was renamed, so no anchor moved — §5.8 is a new `h3` with a new id
-and no existing section was touched by the renumbering. The `pre.snippet` / `pre.diagram` invariant
-asserted by `check.js --volume` holds across all 11 volumes — the 310 backtick conversions were all
-in sidebar TOCs and prose, never inside a `<pre>`.
+**New files, fully clean.** `spring-12` passes `--volume` with no warnings at all. `cheat12` passes
+`--cheatsheet` with no warnings at all — unusual, since the 11 siblings run ~559 advisory warnings
+between them. Six defects were found and fixed during authoring rather than accepted:
 
-After the virtual-threads pass, additionally verified by direct scan across all 22 Spring pages:
+- three wrong `Series` sidebar links (I had guessed `02-bean-lifecycle-context`,
+  `03-transaction-management`, `04-spring-aop`; the real filenames are
+  `02-bean-lifecycle-scopes-di`, `04-transaction-management`, `03-aop-proxying`);
+- three snippets missing `data-title`, which is a hard error not a warning;
+- a `callout--scale` label not following the house `Scaling reality check — <claim>` form;
+- a 5-word `data-title` where the checker wants 3–4;
+- a snippet line at 89 columns (the count included the `&lt;&gt;` escapes; wrapped anyway);
+- the two `callout--tradeoff` / `callout--scale` mix warnings, resolved by writing callouts the
+  content actually warranted rather than by adding filler.
+
+`figure count 0 outside 2-4` was also fixed on merit: all 11 siblings carry 2–4 SVG figures and
+mine had none. The two added are the consumer-group/partition assignment picture and the
+Kafka-vs-RabbitMQ failure-path contrast — the two things a candidate most often draws wrong.
+
+**Whitespace normalisation, all 11 existing cheatsheets.** A direct scan found exactly 2
+trailing-whitespace lines in each of the 11 pre-existing cheatsheets (22 total) — the blank line
+inside the sidebar `Series` list. Confirmed pre-existing by `git stash` diff against HEAD, not a
+regression from this pass, but it violates the stated no-trailing-whitespace rule and was fixed in
+a whitespace-only edit that touches no other byte. The new `cheat12` has none.
+
+Encoding invariants re-verified by direct scan across all **24** Spring pages:
 
 ```
 diagTagged (pre.diagram carrying data-lang)   0
 CR characters                                0
 tab characters                               0
+trailing-whitespace lines                    0
 emoji outside <pre>                          0 files
 ```
 
+**One shared asset was modified**, which needs stating plainly: `check.js`. The `--index` contract
+hardcodes `35` volume links, `34` cheatsheet links and `35` `data-filter-target` rows, so adding a
+volume fails the index check until they become `36` / `35` / `36`. This was unavoidable, and the
+alternative — leaving `check.js --index` failing — would have been worse. The stale explanatory
+comment above those lines ("Adding a cheatsheet for it makes both 35") was updated in the same edit.
+`site.css`, `search.js`, `highlight.js` and `toc.js` are untouched.
+
 Cheatsheet warnings were diffed against the pre-edit baseline (`git stash` → capture → restore):
-the **only** delta is `cheat09`'s callout count moving 20 → 23, which trips the advisory
+the only delta is `cheat09`'s callout count moving 20 → 23, which trips the advisory
 `callout count 23 is above the 12-20 composition guide`. No new warning class was introduced. Two
 warnings that *were* mine on first write — an uncaptioned table and a trap callout missing the
 `Interview trap` prefix — were fixed rather than accepted.
@@ -475,27 +591,34 @@ warnings that *were* mine on first write — an uncaptioned table and a trap cal
    features, without the `@Deprecated` annotation. The distinction matters for an interview answer,
    because "maintenance mode" and "deprecated" are different statements and only the second one
    would be checkable.
-4. **Messaging has no home.** `KafkaTemplate`, `@KafkaListener`, `@RabbitListener` are absent from
-   all 11 volumes, and vol11 §6 builds its outbox argument on an unnamed "broker". The brief lists
-   messaging as in-scope, but no existing volume owns it — a proper treatment is a new
-   `spring-12-*.html`, which is a file creation rather than the minimal targeted edit the brief
-   also requires. **Flagged for a decision rather than taken unilaterally.**
-5. **Cheatsheet sync gaps remain**: cheat07 is missing §1.5 (scan-root trap), §2.5 (condition
-   report) and §3.5 (building your own starter); cheat08 is missing the attack-surface table,
-   `AuthorizationManager`, the authorization-server split and session fixation; cheat11 has no
-   section at all for volume chapters 1, 7 or 8. Per the authoring contract these are additions,
-   not corrections.
-6. **Boot 4 / Framework 7 absent.** Justified rather than overlooked — the corpus tags its claims
-   to Boot 3.x throughout, and adding Boot 4 responsibly would mean re-verifying every version tag
-   in the set. **The verified Boot 4 baseline is now written up in `checklist.md`**, so the next
-   pass can add it without re-researching. The highest-value single fact: `@MockBean`/`@SpyBean`
-   are *removed* in Boot 4 (not merely deprecated), and `@SpringBootTest` no longer supplies
+4. ~~**Messaging has no home.**~~ — **CLOSED 2026-10-04.** Created `spring/spring-12` and
+   `cheatsheets/spring/12`, registered both in `index.html`. `KafkaTemplate`, `@KafkaListener` and
+   `@RabbitListener` now have a home. See the sixth pass above.
+5. **Cheatsheet sync gaps** — **CLOSED 2026-10-03/04.** All of the reported gaps were closed:
+   cheat07 gained §1.5 (scan-root trap), §2.5 (condition report) and §3.5 (building your own
+   starter); cheat08 gained the attack-surface table, `AuthorizationManager`, the
+   authorization-server split and session fixation; cheat11 gained chapters 1, 7 and 8.
+
+   **Correction to this entry's own earlier claim.** It previously said these topics were "missing"
+   from the cheatsheets, inferred from a keyword scan. Reading the actual files showed cheat07
+   already carried the scan-root trap, §2.5 the condition report, and cheat08 mass assignment —
+   all present under different wording. The keyword scan produced **false positives**, and I
+   recorded the correction rather than quietly "fixing" gaps that did not exist.
+6. **Boot 4 / Framework 7 absent.** **CLOSED 2026-10-04** — added as vol09 §2.8 with a matching
+   cheat09 block. Framework 7 requires **Java 17+**, not 21+. `@MockBean`/`@SpyBean` are *removed*
+   in Boot 4 (not merely deprecated), and `@SpringBootTest` no longer supplies
    `MockMvc`/`WebClient`/`TestRestTemplate` — which breaks every Boot 4 test relying on the old
    default.
-7. **`spring-01`'s `@MockBean` reference left in place.** Used as a contrast in a
+7. **Messaging: `isolation.level=read_committed` as a Spring-managed setting — UNVERIFIED, not
+   written.** The research flagged exactly one item it could not confirm, and safety rule 5 applies.
+   `isolation.level` is a Kafka consumer config property; describing it as *Spring*-managed is a
+   claim I could not verify against source, so it is **not** in vol12. A human check against
+   `ConsumerFactory` / `ContainerProperties` would close it. Note this is the one thing that would
+   sharpen the §2.5 answer, since it is how a candidate would normally talk about `read_committed`.
+8. **`spring-01`'s `@MockBean` reference left in place.** Used as a contrast in a
    constructor-injection argument, not as a recommendation. A defensible reading either way; worth
    a human decision if you want the set to be uniformly 3.4-clean.
-8. **`@MockitoBean`'s `enforceOverride` default is absent from vol09 §2.5**, which covers the
+9. **`@MockitoBean`'s `enforceOverride` default is absent from vol09 §2.5**, which covers the
    deprecation and the `@Configuration`-class restriction thoroughly but not this. `enforceOverride`
    defaults to `false` (`REPLACE_OR_CREATE`), so a typo'd field silently auto-creates a mock instead
    of failing the test — the opposite of `@MockBean`'s behaviour, and a good senior question. Written
