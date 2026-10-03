@@ -4,121 +4,106 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-A curated interview-prep study collection: 34 markdown "deep-dive volumes" (Java, Spring, Database,
-Microservices), one condensed hand-authored cheatsheet per volume, and a zero-dependency Node build
-that renders the volumes as a static site. There is **no `package.json`, no `node_modules`, and no
-toolchain** — only `fs` and `path`, matching the philosophy of `cheatsheets/check.js`. Everything
-runs with plain `node <script>`.
+A curated interview-prep study collection: 34 "deep-dive volumes" (Java, Spring, Database,
+Microservices) and one condensed hand-authored cheatsheet per volume, served as a **plain static
+site**. There is **no `package.json`, no `node_modules`, no build step, and no toolchain.** The HTML
+is hand-authored and committed; it is edited directly, like any other document.
+
+The volumes were originally markdown, rendered into `guides/` by a zero-dependency Node build. That
+conversion was a one-time task and has been retired, along with the converter (`build.js`, `census.js`,
+`lib/`) and the markdown sources. The markdown remains in git history at commit `fcec505`.
 
 ## Commands
 
-Run from the repo root:
+Run from the repo root. These verify a page; none of them generate anything.
 
 ```
-node guides/build.js                      # write all 34 pages + guides/index.html, and assert
-node guides/build.js --check              # assert only; also fails if committed HTML is stale
-node guides/census.js                     # block-count parity against the corpus census
-node guides/check-guide.js <page.html>    # per-page contract check for a generated volume page
-node guides/check-guide.js --index guides/index.html   # same, for the guides index (different contract)
+node guides/check-guide.js --index guides/index.html            # the guides index
+node guides/check-guide.js guides/java/java-01-java-basics.html # a volume page
+node cheatsheets/check.js cheatsheets/java/01-java-basics.html  # a cheatsheet
 ```
 
-`--check` is the one to run before committing any `.md` edit. It compares committed bytes against a
-fresh build, so a stale page fails. A full build + check takes ~1.3s.
+Both checkers resolve every relative link against the filesystem, so a page still pointing at a
+deleted file fails rather than shipping a dead link. Run the relevant one after editing a page.
 
 The site is servable with no tooling: open `index.html` from `file://`.
 
 ## Architecture
 
-The 34 `.md` volumes are the **source of truth**. Everything under `guides/` except `guide.css`,
-`toc.js`, and `lib/` is generated and committed, so the site is readable straight from a clone.
-
-### Generated site (`guides/`)
+There is no pipeline. Two deliverables, both hand-authored, sharing three assets.
 
 ```
-build.js          entry: walk 4 tracks → parse → render → write → assert
-census.js         parse-only parity check against measured corpus figures
-check-guide.js    per-page contract checker for a *committed* page (no source in hand)
-guide.css         additive long-form styles (strictly adds selectors; never edits cheatsheet.css)
-toc.js            chapter scroll-spy (IntersectionObserver, sets aria-current)
-lib/markdown.js   fence-aware, quote-aware block parser → block tree
-lib/inline.js     inline span parser (code spans → escape → links → bold → italic)
-lib/render.js     block renderers, callout map, Q&A item renderer
-lib/page.js       page assembly: chapters, TOC, title consumption
-lib/shell.js      document shell, masthead, toolbar, pager, footer
-lib/index.js      guides/index.html generation
-lib/check.js      build-time assertions (parity + word/code conservation)
-java|spring|database|microservices/   generated pages, one per volume
+index.html          landing page
+java/pdfs/          printable PDF editions
+guides/
+  index.html        track and volume index, filterable
+  guide.css         additive long-form styles (strictly adds selectors; never edits cheatsheet.css)
+  toc.js            chapter scroll-spy (IntersectionObserver, sets aria-current)
+  check-guide.js    per-page contract checker
+  <track>/*.html    the 34 volume pages
+cheatsheets/
+  index.html        all 34 cheatsheets, grouped by track
+  cheatsheet.css    shared tokens, light/dark gate, .page grid
+  search.js         filtering (reads the data-* filter markup)
+  highlight.js      code block labelling + syntax highlighting
+  check.js          cheatsheet contract checker
+  <track>/*.html    the 34 cheatsheets
 ```
 
-Pipeline: `markdown.js` produces a block tree → `page.js` splits it into chapters and assigns
-document-order slug ids (so sidebar and body always agree) → `render.js`/`inline.js` emit HTML →
-`shell.js` wraps it → `check.js` asserts. `lib/` modules are required relatively; Node resolves that
-without a `package.json`.
+Five JavaScript files remain. Three run in the browser (`search.js`, `highlight.js`, `toc.js`); two
+are validators (`check-guide.js`, `check.js`). Nothing converts and nothing overwrites.
 
-### The two designs that matter most
+### The design that matters most
 
-**1. Reuse, don't fork.** Volume pages load `cheatsheets/cheatsheet.css` first (it owns every colour
-token, the light/dark gate, and the `.page` grid) then `guide.css`, which only adds selectors.
-`search.js` and `highlight.js` are used unmodified. `guide.css` is strictly additive and never edits
-an existing `cheatsheet.css` rule.
+**Reuse, don't fork.** Both deliverables load `cheatsheets/cheatsheet.css` first — it owns every
+colour token, the light/dark gate, and the `.page` grid — then `guide.css`, which only adds
+selectors. `search.js` and `highlight.js` are used unmodified by both.
 
-**2. Conservation, not parity, catches corruption.** `lib/check.js` runs on every build. Parity
-compares two *counts* and would pass a renderer that dropped a chapter. The load-bearing assertions
-compare *text*:
-- **Word conservation** — the source volume's word stream must equal the page's text content, exactly.
-- **Code conservation** — every `<pre><code>` must equal its source fence character-for-character
-  after entity decoding (this is also the ASCII-diagram guard).
-- Plus: relative links resolve on disk (depth derived from the page's own path), balanced tags,
-  unique ids, `href="#…"` resolves, no BOM/CRLF/tabs/trailing whitespace, no literal `[text](url)`.
-
-Corollary you must preserve: `highlight.js` selects `pre.snippet` only. A `text` fence must be
-emitted as `pre.diagram` with **no** `data-lang`, so the highlighter structurally cannot tokenise
-the 711 ASCII diagrams. `check.js` asserts this rather than trusting that someone re-reads
-`highlight.js`. When adding a code-block case, keep that guarantee.
-
-When you add an assertion, negative-test it — confirm it actually fails on a deliberately broken
-input. An assertion that cannot fail is decoration. Two were written only after the first build
-passed everything else.
+**Corollary you must preserve:** `highlight.js` selects `pre.snippet` only. ASCII diagrams are
+`pre.diagram` with **no** `data-lang`, so the highlighter structurally cannot tokenise the 711
+diagrams. `check-guide.js` asserts this rather than trusting that someone re-reads `highlight.js`.
+When adding a code-block case, keep that guarantee.
 
 ## Contracts for contributors
 
-Three authoring contracts govern content. Read the relevant one before editing prose:
+Two authoring contracts govern content. Read the relevant one before editing prose:
 
-- **`database/README.md`** — the canonical format contract for the markdown volumes: front matter,
-  section order, heading hierarchy, callout labels, question prefixes, style rules (no emoji, LF,
-  `- ` lists, `| --- |` tables, hard-wrap ~95 cols). The Spring/Microservices/Java sets inherit it.
-- **`cheatsheets/README.md`** — the cheatsheet contract: hand-authored (never generated), one per
-  volume, the two page shapes (narrative vs reference) and their very different measures, the
-  five-things box, the callout component vocabulary, the `data-*` filter markup `search.js` reads.
-- **`guides/README.md`** — the generated site's build contract, what the build asserts, and the
-  measured corpus facts the parser is built against.
+- **`guides/README.md`** — the volume-page contract: the shared page shell, what `check-guide.js`
+  asserts, the editing rules (LF, no tabs, no trailing whitespace, no emoji) that used to be
+  enforced by the build, and the anchors you must not break.
+- **`cheatsheets/README.md`** — the cheatsheet contract: hand-authored, one per volume, the two page
+  shapes (narrative vs reference) and their very different measures, the five-things box, the
+  callout component vocabulary, the `data-*` filter markup `search.js` reads.
 
-Key invariants across all three:
-- **The `.md` volumes, `cheatsheets/cheatsheet.css`, `search.js`, `highlight.js`, and
-  `cheatsheets/check.js` are read-only.** The build reads them and writes only under `guides/`.
-  To change a volume, edit the markdown and rebuild — never the generated HTML.
-- Cheatsheets are hand-authored from their source volume and must **link, not restate**, any concept
+Key invariants across both:
+- **`cheatsheets/cheatsheet.css`, `cheatsheets/search.js`, `cheatsheets/highlight.js`, and
+  `cheatsheets/check.js` are shared and read-only.** Both deliverables depend on them. Change a
+  token or a filter behaviour there, and expect every page to move.
+- Cheatsheets are hand-authored from their volume and must **link, not restate**, any concept
   another volume owns.
-- `_italic_` is disabled in the rendered volumes on purpose (`snake_case` is everywhere); a heading
-  wrapped across two same-level lines with only blanks between is joined; `Continued in Chapter N…`
-  renders as a `.bridge` paragraph; a `text` fence is a diagram.
+- A `pre.diagram` block is an ASCII diagram, not code. Leave it untagged.
+- `.bridge` marks a chapter continuing in the next volume — a plain paragraph, deliberately not a
+  heading, so it has no id and no sidebar entry.
 
 ## Conventions
 
-- UTF-8, **LF line endings** (enforced by `.gitattributes` with `-text`, and by the build's hygiene
-  assertions). A CRLF working tree makes `--check` report every page stale.
-- No emoji anywhere in generated markup or authored content.
+- UTF-8, **LF line endings**. `.gitattributes` pins `guides/**/*.html` to `-text` so a Windows
+  checkout cannot rewrite them to CRLF and churn every diff.
+- No emoji anywhere.
 - Zero dependencies in any script; `fs` and `path` only.
-- Generated HTML is committed. If you edit a `.md`, rebuild and commit the regenerated pages with it.
+- HTML is committed as-is. Edit the file; there is nothing to rebuild.
 
 ## Things that will mislead you
 
-- **There is no test suite.** The assertions in `lib/check.js` (run by `build.js`) and
-  `check-guide.js` are the tests. `census.js` is a separate parse-only parity check.
-- **`--check` compares committed bytes**, so it fails both on a genuinely stale page *and* on a
-  working tree whose line endings were rewritten (the `.gitattributes` `-text` rules exist to
-  prevent the latter). If `--check` fails on all 35 pages at once, suspect line endings before
-  suspecting the parser.
-- The generated site and the cheatsheets are **two separate deliverables** with different
-  contracts and different checkers (`check-guide.js` vs `cheatsheets/check.js`). Do not run one
-  against the other.
+- **There is no build.** If you are looking for a generator, a task runner, or a way to
+  "regenerate" the volumes, there isn't one — `guides/*.html` is the source. Editing it directly is
+  correct, not a shortcut.
+- **The checkers verify structure, not content.** `check-guide.js` has no source to compare a page
+  against, so it catches broken links, duplicate ids, missing assets and encoding damage — but it
+  cannot tell you that a chapter was dropped or a paragraph mangled. Read the diff.
+- **Nothing checks the root `index.html` or `README.md`.** `check-guide.js` assumes the
+  `guides/` shell and will false-fail on it. Links in those two files are unverified.
+- The guides site and the cheatsheets are **two separate deliverables** with different contracts and
+  different checkers. Do not run one against the other. `cheatsheets/check.js` has no `--index`
+  mode, so it reports false failures on `cheatsheets/index.html`; that is known, not something you
+  broke.

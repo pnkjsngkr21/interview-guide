@@ -1,45 +1,42 @@
 # Deep-Dive Guides
 
-The 34 study volumes rendered as a static site. Every chapter, question, answer and diagram
-from the markdown sources, in a browser-readable form.
+The 34 study volumes as a static site. Every chapter, question, answer and diagram, in a
+browser-readable form.
 
-**The markdown volumes remain the source of truth.** Everything in this directory except
-`guide.css`, `toc.js` and `lib/` is generated from them, and no build step is needed to read
-the result — open `index.html` from disk and it works.
+**These pages are hand-authored and are the source of truth.** There is no build step, no
+converter, and nothing to regenerate — open `index.html` from disk and it works.
 
 ## Layout
 
 ```
 guides/
-  index.html       generated — track and volume index, filterable
+  index.html       the track and volume index, filterable
   guide.css        additive long-form styles (cheatsheet.css is the token source)
   toc.js           chapter scroll-spy
-  build.js         the converter
-  lib/             markdown parser, inline parser, renderers, assertions
-  java/            9 generated pages
-  spring/          11 generated pages
-  database/        11 generated pages
-  microservices/   3 generated pages
+  check-guide.js   per-page contract checker
+  java/            9 pages
+  spring/          11 pages
+  database/        11 pages
+  microservices/   3 pages
 ```
 
-## Rebuilding
+Every page shares one shell: `cheatsheet.css` first, then `guide.css`, then a sidebar, a
+masthead, a filter toolbar, the body, and a pager. Editing one page means editing that
+structure directly; there is no template to change it in.
 
-```
-node guides/build.js          write all 34 pages and the index
-node guides/build.js --check  assert against the committed HTML without writing
-```
+## Provenance
 
-Requires Node and nothing else. There is no `package.json`, no `node_modules` and no
-toolchain — the build uses only `fs` and `path`, matching `cheatsheets/check.js`.
-
-`--check` also fails if `index.html` on disk differs from what the current sources would
-generate, so it doubles as a staleness check in CI.
+The volumes were originally authored as markdown and rendered into this directory by a
+zero-dependency Node build (`build.js` plus a `lib/` of parser and renderer modules). The
+conversion was a one-time task. The converter and the markdown sources have both been
+retired; the markdown remains in git history at commit `fcec505` if you need to consult what
+a page was rendered from.
 
 ## The contract
 
-The `.md` volumes, `cheatsheets/cheatsheet.css`, `cheatsheets/search.js` and
-`cheatsheets/highlight.js` are **read-only**. The build reads them and writes only under
-`guides/`. If you need to change a volume, edit the markdown and rebuild — never the HTML.
+`cheatsheets/cheatsheet.css`, `cheatsheets/search.js` and `cheatsheets/highlight.js` are
+**shared and read-only** — the same files serve both deliverables, and `cheatsheets/check.js`
+depends on their behaviour. Change a token or a filter behaviour there, not here.
 
 Three things follow from reusing the cheatsheet assets unchanged:
 
@@ -47,54 +44,46 @@ Three things follow from reusing the cheatsheet assets unchanged:
   the `.page` grid. `guide.css` only adds selectors; it never edits an existing rule.
 - `search.js` and `highlight.js` are used unmodified.
 - `highlight.js` selects `pre.snippet` and nothing else. That is what keeps the 711 ASCII
-  diagrams from being tokenised — a `text` fence is emitted as `pre.diagram` with no
-  `data-lang`, so the highlighter structurally cannot reach it. `lib/check.js` asserts this
-  rather than relying on anyone re-reading `highlight.js`.
+  diagrams from being tokenised — a diagram is emitted as `pre.diagram` with no `data-lang`,
+  so the highlighter structurally cannot reach it. `check-guide.js` asserts this rather than
+  relying on anyone re-reading `highlight.js`.
 
-## What the build asserts
+## What `check-guide.js` asserts
 
-Every build, and every `--check`, runs these against each page. They exist to catch silent
-corruption rather than visible miscounting:
+```
+node guides/check-guide.js guides/index.html --index        # the index
+node guides/check-guide.js guides/java/java-01-java-basics.html   # a volume page
+```
 
-- **Word conservation** — the source volume's word stream must equal the page's text
-  content, exactly. Parity compares two counts and would happily pass a renderer that
-  dropped a chapter; comparing the text cannot be satisfied by losing material.
-- **Code conservation** — every `<pre><code>` must equal its source fence body
-  character-for-character after entity decoding.
-- **Relative links resolve on disk** — depth is derived from the page's own path, since the
-  index sits one directory down and the volumes sit two.
-- Balanced tags, unique ids, every `href="#…"` resolving to an emitted id, no BOM, no CRLF,
-  no tabs or trailing whitespace in generated markup, and no literal `[text](url)` surviving.
+Per page: the required assets load, the `<h1>` is not repeated in the body, ids are unique,
+every `href="#…"` resolves to an emitted id, **every relative link resolves to a real file on
+disk**, `pre.diagram` carries no `data-lang`, and the encoding is clean — no BOM, no CRLF, no
+tabs, and no unparsed `[text](url)` left in the markup.
 
-Two of these were written after the first build passed everything else, because passing is
-only meaningful if failing is possible. Both were negative-tested: deleting a chapter, and
-perturbing one code block, each fail loudly.
+The disk-resolution check is the one that matters most now. The pages are edited by hand, so
+nothing else catches a link left pointing at a file that no longer exists.
 
-## Corpus facts the parser is built against
+This checker deliberately verifies only what is checkable from a page alone. It has no source
+to compare against, so it cannot catch content that was silently dropped — only structural
+breakage. Read the page yourself for that.
 
-Measured across all 34 volumes. They are acceptance criteria, not estimates:
+## Editing rules
 
-| | |
-|---|---|
-| Chapters / `N.M` subsections | 349 / 1,287 (up to 57 in one volume) |
-| Bold-led Q&A items | 6,158, of which 1,549 (25%) hard-wrap past line 1 |
-| Code fences | 1,887, of which 711 are `text` diagrams |
-| Blockquote regions | 4,633 — 988 labelled, 3,645 plain |
-| Inline links | 853, all inside list items |
-| Heading slug collisions | present in all 34 files — dedup is mandatory |
-| Same-level heading joins | 31 → 23 headings + 8 bridge notes |
-| `snake_case` in prose | 4,131 lines — `_`-emphasis is disabled because of it |
+These were previously enforced by the build and are now on you:
 
-The three corrections to the original plan's figures were all in the same direction: the
-plan's scanner counted masked *lines* with a broken separator test and reported 452 tables,
-1,878 fences and 707 diagrams against measured truth of 454, 1,887 and 711.
+- **LF line endings.** `.gitattributes` pins `guides/**/*.html` to `-text` to stop a Windows
+  checkout rewriting them to CRLF, which would churn every diff.
+- **No tabs, no trailing whitespace, no emoji.** The checker enforces the first two; the third
+  is a convention across the repo.
+- **Keep the shell intact.** The filter box needs `data-filter-input`, `data-filter-empty` and
+  at least one `data-filter-target`; the skip link needs `<main id="main">`; the scroll-spy
+  needs the sidebar `.toc` anchors. `check-guide.js` checks all of these.
 
-## Notes for contributors
+## Notes
 
-- A heading that wraps across two `##` lines with only a blank between them is joined.
-  `Continued in Chapter N…` is rendered as a `.bridge` paragraph rather than a heading.
-- `_italic_` does not work, by design — `snake_case` identifiers are everywhere and there is
-  no `_emphasis_` usage in the corpus.
-- A `text` fence is a diagram. Do not tag one with a language; it would be highlighted.
-- Q&A openers render in place, interleaved with the prose that sets them up, rather than
-  being hoisted into a bank at the end of the chapter.
+- A `pre.diagram` block is an ASCII diagram, not code. Leave it untagged so the highlighter
+  skips it.
+- The `.bridge` paragraph marks a chapter that continues in the next volume — a plain
+  paragraph, deliberately not a heading, so it gets no id and no sidebar entry.
+- Slugs are deduplicated per page, so a repeated heading becomes `topic-2`, `topic-3` and so
+  on. Renaming a heading changes its anchor, so check for inbound `#` links first.

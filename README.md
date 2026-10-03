@@ -4,16 +4,15 @@ A curated study collection for technical interview preparation — concept notes
 volumes, and printable PDF editions.
 
 > **Start here:** [Interview Prep Guide](index.html) → browse all 34 volumes as a site, or jump
-> straight to a track. Everything below is also listed per volume, and each links to both the
-> rendered page and its markdown source.
+> straight to a track. Everything below is also listed per volume.
 
 > **Looking to revise rather than learn?** [Cheatsheets](cheatsheets/index.html) condense all 34
 > volumes to one scannable page each — the decisions, the traps, and the numbers, for use
 > under interview pressure. Read a volume properly first; use these to revise.
 
-The volume links below point at the rendered HTML, with the markdown source beside each one.
-The `.md` files remain the source of truth; the HTML is generated from them by
-`guides/build.js`, a zero-dependency Node script. See [guides/README.md](guides/README.md).
+The volume links below point at the HTML pages in [`guides/`](guides/index.html), which are the
+deliverable and are edited directly. There is no build step — the site is plain static HTML and
+opens straight from a clone. See [guides/README.md](guides/README.md).
 
 ## Available Topics
 
@@ -26,15 +25,15 @@ questions for interview practice.
 
 | # | Volume | Format |
 |---|--------|--------|
-| 1 | [Java Basics](guides/java/java-01-java-basics.html) &middot; [source](java/java-deep-dive-volume-01-java-basics.md) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%201%20(Java%20Basics).pdf) |
-| 2 | [Object-Oriented Programming](guides/java/java-02-object-oriented-programming.html) &middot; [source](java/java-deep-dive-volume-02-object-oriented-programming.md) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%202%20(Object-Oriented%20Programming).pdf) |
-| 3 | [Core Java](guides/java/java-03-core-java.html) &middot; [source](java/java-deep-dive-volume-03-core-java.md) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%203%20(Core%20Java).pdf) |
-| 4 | [Collections Framework](guides/java/java-04-collections-framework.html) &middot; [source](java/java-deep-dive-volume-04-collections-framework.md) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%204%20(Collections%20Framework).pdf) |
-| 5 | [Java 8+](guides/java/java-05-java-8.html) &middot; [source](java/java-deep-dive-volume-05-java-8.md) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%205%20(Java%208%2B).pdf) |
-| 6 | [Multithreading & Concurrency](guides/java/java-06-multithreading-concurrency.html) &middot; [source](java/java-deep-dive-volume-06-multithreading-concurrency.md) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%206%20(Multithreading%20%26%20Concurrency).pdf) |
-| 7 | [JVM Internals & Memory](guides/java/java-07-jvm-internals-memory.html) &middot; [source](java/java-deep-dive-volume-07-jvm-internals-memory.md) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%207%20(JVM%20Internals%20%26%20Memory).pdf) |
-| 8 | [Advanced Java](guides/java/java-08-advanced-java.html) &middot; [source](java/java-deep-dive-volume-08-advanced-java.md) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%208%20(Advanced%20Java).pdf) |
-| 9 | [Final Volume — Modern Java & Production Troubleshooting](guides/java/java-09-final-volume.html) &middot; [source](java/java-deep-dive-volume-09-final-volume.md) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%209%20(Modern%20Java%20%26%20Production%20Troubleshooting).pdf) |
+| 1 | [Java Basics](guides/java/java-01-java-basics.html) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%201%20(Java%20Basics).pdf) |
+| 2 | [Object-Oriented Programming](guides/java/java-02-object-oriented-programming.html) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%202%20(Object-Oriented%20Programming).pdf) |
+| 3 | [Core Java](guides/java/java-03-core-java.html) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%203%20(Core%20Java).pdf) |
+| 4 | [Collections Framework](guides/java/java-04-collections-framework.html) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%204%20(Collections%20Framework).pdf) |
+| 5 | [Java 8+](guides/java/java-05-java-8.html) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%205%20(Java%208%2B).pdf) |
+| 6 | [Multithreading & Concurrency](guides/java/java-06-multithreading-concurrency.html) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%206%20(Multithreading%20%26%20Concurrency).pdf) |
+| 7 | [JVM Internals & Memory](guides/java/java-07-jvm-internals-memory.html) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%207%20(JVM%20Internals%20%26%20Memory).pdf) |
+| 8 | [Advanced Java](guides/java/java-08-advanced-java.html) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%208%20(Advanced%20Java).pdf) |
+| 9 | [Final Volume — Modern Java & Production Troubleshooting](guides/java/java-09-final-volume.html) | [PDF](java/pdfs/Java%20Deep-Dive%20Study%20Guide%20-%20Volume%209%20(Modern%20Java%20%26%20Production%20Troubleshooting).pdf) |
 
 ### Spring — "The Spring Complete Deep-Dive"
 
@@ -46,17 +45,17 @@ ends with a large interview scenario bank weighted toward design trade-offs.
 
 | # | Volume |
 |---|--------|
-| 1 | [Spring Core & the IoC Container](guides/spring/spring-01-spring-core-ioc.html) &middot; [source](spring/spring-deep-dive-volume-01-spring-core-ioc.md) |
-| 2 | [Bean Lifecycle, Scopes & Advanced DI](guides/spring/spring-02-bean-lifecycle-scopes-di.html) &middot; [source](spring/spring-deep-dive-volume-02-bean-lifecycle-scopes-di.md) |
-| 3 | [AOP & Proxying](guides/spring/spring-03-aop-proxying.html) &middot; [source](spring/spring-deep-dive-volume-03-aop-proxying.md) |
-| 4 | [Transaction Management](guides/spring/spring-04-transaction-management.html) &middot; [source](spring/spring-deep-dive-volume-04-transaction-management.md) |
-| 5 | [Spring MVC & the Web Layer](guides/spring/spring-05-spring-mvc-web-layer.html) &middot; [source](spring/spring-deep-dive-volume-05-spring-mvc-web-layer.md) |
-| 6 | [Spring Data JPA & Persistence](guides/spring/spring-06-spring-data-jpa-persistence.html) &middot; [source](spring/spring-deep-dive-volume-06-spring-data-jpa-persistence.md) |
-| 7 | [Spring Boot & Auto-Configuration](guides/spring/spring-07-spring-boot-auto-configuration.html) &middot; [source](spring/spring-deep-dive-volume-07-spring-boot-auto-configuration.md) |
-| 8 | [Spring Security](guides/spring/spring-08-spring-security.html) &middot; [source](spring/spring-deep-dive-volume-08-spring-security.md) |
-| 9 | [Testing & Production Troubleshooting](guides/spring/spring-09-testing-production-troubleshooting.html) &middot; [source](spring/spring-deep-dive-volume-09-testing-production-troubleshooting.md) |
-| 10 | [WebFlux & Project Reactor](guides/spring/spring-10-webflux-project-reactor.html) &middot; [source](spring/spring-deep-dive-volume-10-webflux-project-reactor.md) |
-| 11 | [Spring Cloud & Distributed Systems](guides/spring/spring-11-spring-cloud-distributed-systems.html) &middot; [source](spring/spring-deep-dive-volume-11-spring-cloud-distributed-systems.md) |
+| 1 | [Spring Core & the IoC Container](guides/spring/spring-01-spring-core-ioc.html) |
+| 2 | [Bean Lifecycle, Scopes & Advanced DI](guides/spring/spring-02-bean-lifecycle-scopes-di.html) |
+| 3 | [AOP & Proxying](guides/spring/spring-03-aop-proxying.html) |
+| 4 | [Transaction Management](guides/spring/spring-04-transaction-management.html) |
+| 5 | [Spring MVC & the Web Layer](guides/spring/spring-05-spring-mvc-web-layer.html) |
+| 6 | [Spring Data JPA & Persistence](guides/spring/spring-06-spring-data-jpa-persistence.html) |
+| 7 | [Spring Boot & Auto-Configuration](guides/spring/spring-07-spring-boot-auto-configuration.html) |
+| 8 | [Spring Security](guides/spring/spring-08-spring-security.html) |
+| 9 | [Testing & Production Troubleshooting](guides/spring/spring-09-testing-production-troubleshooting.html) |
+| 10 | [WebFlux & Project Reactor](guides/spring/spring-10-webflux-project-reactor.html) |
+| 11 | [Spring Cloud & Distributed Systems](guides/spring/spring-11-spring-cloud-distributed-systems.html) |
 
 ### Microservices — "The Microservices Complete Deep-Dive"
 
@@ -70,9 +69,9 @@ trade-offs.
 
 | # | Volume |
 |---|--------|
-| 1 | [Foundations — Boundaries & Decomposition](guides/microservices/microservices-01-boundaries-decomposition.html) &middot; [source](microservices/microservices-deep-dive-volume-01-boundaries-decomposition.md) |
-| 2 | [Communication, Data & Consistency](guides/microservices/microservices-02-communication-data-consistency.html) &middot; [source](microservices/microservices-deep-dive-volume-02-communication-data-consistency.md) |
-| 3 | [Operations, Platforms & Evolution](guides/microservices/microservices-03-operations-platforms-evolution.html) &middot; [source](microservices/microservices-deep-dive-volume-03-operations-platforms-evolution.md) |
+| 1 | [Foundations — Boundaries & Decomposition](guides/microservices/microservices-01-boundaries-decomposition.html) |
+| 2 | [Communication, Data & Consistency](guides/microservices/microservices-02-communication-data-consistency.html) |
+| 3 | [Operations, Platforms & Evolution](guides/microservices/microservices-03-operations-platforms-evolution.html) |
 
 ### Database — "The Database Complete Deep-Dive"
 
@@ -88,17 +87,17 @@ organised by category rather than by volume.
 
 | # | Volume |
 |---|--------|
-| 1 | [Database Fundamentals & the Relational Model](guides/database/database-01-fundamentals-relational-model.html) &middot; [source](database/database-deep-dive-volume-01-fundamentals-relational-model.md) |
-| 2 | [SQL — DDL, DML & Constraints](guides/database/database-02-sql-ddl-dml-constraints.html) &middot; [source](database/database-deep-dive-volume-02-sql-ddl-dml-constraints.md) |
-| 3 | [SQL — Queries, Joins, CTEs & Window Functions](guides/database/database-03-sql-queries-joins-window-functions.html) &middot; [source](database/database-deep-dive-volume-03-sql-queries-joins-window-functions.md) |
-| 4 | [Indexes, Query Planning & Execution](guides/database/database-04-indexes-query-planning-execution.html) &middot; [source](database/database-deep-dive-volume-04-indexes-query-planning-execution.md) |
-| 5 | [Transactions, Isolation Levels & Concurrency](guides/database/database-05-transactions-isolation-concurrency.html) &middot; [source](database/database-deep-dive-volume-05-transactions-isolation-concurrency.md) |
-| 6 | [Schema Design, Partitioning & Scaling](guides/database/database-06-schema-design-partitioning-scaling.html) &middot; [source](database/database-deep-dive-volume-06-schema-design-partitioning-scaling.md) |
-| 7 | [PostgreSQL](guides/database/database-07-postgresql.html) &middot; [source](database/database-deep-dive-volume-07-postgresql.md) |
-| 8 | [MySQL](guides/database/database-08-mysql.html) &middot; [source](database/database-deep-dive-volume-08-mysql.md) |
-| 9 | [Redis & Caching Strategies](guides/database/database-09-redis-caching.html) &middot; [source](database/database-deep-dive-volume-09-redis-caching.md) |
-| 10 | [NoSQL & Distributed Stores — Cassandra, DynamoDB, MongoDB](guides/database/database-10-nosql-cassandra-dynamodb-mongodb.html) &middot; [source](database/database-deep-dive-volume-10-nosql-cassandra-dynamodb-mongodb.md) |
-| 11 | [S3, Elasticsearch & the Database Interview Bank](guides/database/database-11-s3-elasticsearch-interview-bank.html) &middot; [source](database/database-deep-dive-volume-11-s3-elasticsearch-interview-bank.md) |
+| 1 | [Database Fundamentals & the Relational Model](guides/database/database-01-fundamentals-relational-model.html) |
+| 2 | [SQL — DDL, DML & Constraints](guides/database/database-02-sql-ddl-dml-constraints.html) |
+| 3 | [SQL — Queries, Joins, CTEs & Window Functions](guides/database/database-03-sql-queries-joins-window-functions.html) |
+| 4 | [Indexes, Query Planning & Execution](guides/database/database-04-indexes-query-planning-execution.html) |
+| 5 | [Transactions, Isolation Levels & Concurrency](guides/database/database-05-transactions-isolation-concurrency.html) |
+| 6 | [Schema Design, Partitioning & Scaling](guides/database/database-06-schema-design-partitioning-scaling.html) |
+| 7 | [PostgreSQL](guides/database/database-07-postgresql.html) |
+| 8 | [MySQL](guides/database/database-08-mysql.html) |
+| 9 | [Redis & Caching Strategies](guides/database/database-09-redis-caching.html) |
+| 10 | [NoSQL & Distributed Stores — Cassandra, DynamoDB, MongoDB](guides/database/database-10-nosql-cassandra-dynamodb-mongodb.html) |
+| 11 | [S3, Elasticsearch & the Database Interview Bank](guides/database/database-11-s3-elasticsearch-interview-bank.html) |
 
 ## Suggested Study Path
 
@@ -136,20 +135,23 @@ Volume 5's isolation material underpins the Microservices set's Volume 2.
 ```
 .
 ├── README.md
+├── index.html                           # Landing page
 ├── java/
-│   ├── java-deep-dive-volume-01..09-*.md   # Markdown source for each volume
-│   └── pdfs/                                # Printable PDF editions
-├── spring/
-│   └── spring-deep-dive-volume-01..11-*.md  # Markdown source for each volume
-├── microservices/
-│   └── microservices-deep-dive-volume-01..03-*.md  # Markdown source for each volume
-├── database/
-│   ├── README.md                                     # Authoring format contract
-│   └── database-deep-dive-volume-01..11-*.md        # Markdown source for each volume
+│   └── pdfs/                            # Printable PDF editions
+├── guides/
+│   ├── index.html                       # All 34 volumes, grouped by track
+│   ├── guide.css                        # Long-form styles (additive to cheatsheet.css)
+│   ├── toc.js                           # Chapter scroll-spy
+│   ├── check-guide.js                   # Per-page contract checker
+│   ├── java/          01..09-*.html      # The deep-dive volumes
+│   ├── spring/        01..11-*.html
+│   ├── microservices/ 01..03-*.html
+│   └── database/      01..11-*.html
 └── cheatsheets/
     ├── index.html                            # All 34 cheatsheets, grouped by track
     ├── README.md                             # Cheatsheet authoring contract
     ├── cheatsheet.css                        # Shared stylesheet
+    ├── check.js                              # Cheatsheet contract checker
     ├── search.js                             # Shared filtering
     ├── highlight.js                          # Code block labelling + highlighting
     ├── java/          01..09-*.html           # One condensed page per volume
@@ -158,17 +160,26 @@ Volume 5's isolation material underpins the Microservices set's Volume 2.
     └── database/      01..11-*.html
 ```
 
+The volumes were originally authored as markdown and rendered into `guides/` by a
+zero-dependency Node build. That conversion was a one-time task and has been retired, along
+with the markdown sources; they remain in git history at commit `fcec505`. The HTML is now
+the source of truth and is edited directly.
+
 ## Contributing
 
-Add new material as Markdown under a topic folder, and link it from this README so it
-stays discoverable.
+Edit the HTML. Both the volumes in [`guides/`](guides/README.md) and the cheatsheets in
+[`cheatsheets/`](cheatsheets/README.md) are hand-authored now, and neither is generated — there
+is no build step to run and nothing to rebuild. Each follows its own authoring contract; the
+cheatsheets in particular are deliberately hand-condensed from the corresponding volume rather
+than derived mechanically.
 
-Cheatsheets live in [`cheatsheets/`](cheatsheets/README.md) and follow their own authoring
-contract. Each one is hand-authored from its source volume rather than generated, and
-carries a link back to that volume so any claim on the page is traceable.
+Before committing a page edit, run its checker:
 
-The rendered volumes in [`guides/`](guides/README.md) are generated, so **edit the markdown,
-not the HTML**. Rebuild with `node guides/build.js`; `node guides/build.js --check` asserts
-without writing and also fails if the committed HTML is stale. The build checks word and code
-conservation per file, so a renderer that dropped a chapter or mangled a diagram fails
-rather than shipping.
+```
+node guides/check-guide.js guides/index.html --index      # the guides index
+node guides/check-guide.js guides/java/java-01-java-basics.html   # a volume page
+node cheatsheets/check.js cheatsheets/index.html         # a cheatsheet
+```
+
+Both resolve every relative link on disk, so a page that still points at an archived file fails
+rather than shipping a dead link.

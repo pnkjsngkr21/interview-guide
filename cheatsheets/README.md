@@ -7,8 +7,8 @@ written to be *read*; these are written to be *reached into* when someone asks y
 and you have about ninety seconds.
 
 This is the authoring contract for that material. It follows the same spirit as
-[`database/README.md`](../database/README.md), which is the contract for the markdown volumes
-themselves — the style rules here are inherited from it rather than restated as new ones.
+[`guides/README.md`](../guides/README.md), the contract for the volume pages themselves — the
+style rules here are inherited from it rather than restated as new ones.
 
 ---
 
@@ -37,13 +37,16 @@ Everything else is a link back to the volume.
 
 `{NN}-{kebab-case-slug}.html`, two-digit zero-padded, inside a folder named for the track.
 
-| Source | Cheatsheet |
+| Volume | Cheatsheet |
 | --- | --- |
-| `java/java-deep-dive-volume-06-multithreading-concurrency.md` | `java/06-multithreading-concurrency.html` |
-| `spring/spring-deep-dive-volume-04-transaction-management.md` | `spring/04-transaction-management.html` |
+| `guides/java/java-06-multithreading-concurrency.html` | `java/06-multithreading-concurrency.html` |
+| `guides/spring/spring-04-transaction-management.html` | `spring/04-transaction-management.html` |
 
-The `deep-dive-volume-` infix is dropped; everything else is preserved so the mapping stays
-one-to-one and obvious. Volume numbers are fixed at authoring time and never renumbered.
+The `guides/` prefix is dropped and the volume number is kept. The mapping is one-to-one and
+obvious, though note that three cheatsheets carry a slug of their own rather than the volume's:
+`java/05-java-8-plus.html`, `java/09-modern-java-production.html` and
+`database/10-nosql-distributed-stores.html`. Volume numbers are fixed at authoring time and
+never renumbered.
 
 ---
 
@@ -146,8 +149,8 @@ Wrap long lines — the volume's own snippets run past 95 columns and read badly
 - `data-hl-line` is a comma-separated 1-based list of lines to emphasise — normally the one
   line the paragraph beneath is actually talking about. Never more than two.
 
-**Write the code HTML-escaped inside `<code>`** exactly as you would in the markdown volumes —
-`&lt;` for `<`, `&amp;` for `&`. `highlight.js` reads `textContent`, tokenises, and writes back
+**Write the code HTML-escaped inside `<code>`** — `&lt;` for `<`, `&amp;` for `&`.
+`highlight.js` reads `textContent`, tokenises, and writes back
 escaped HTML, so the round-trip is lossless and `Ctrl+F` still matches the real characters.
 Never put markup inside a `<pre>`: the highlighter replaces the contents wholesale and any tags
 you wrote there will be escaped into visible text.
@@ -218,7 +221,7 @@ A volume page loads both scripts at the end of `<body>`, in that order. `index.h
 
 ## Style Rules
 
-Inherited from `database/README.md` and binding here:
+Inherited from `guides/README.md` and binding here:
 
 - **No emoji anywhere.**
 - Em-dashes for asides; `*italics*` for the concept being defined; `**bold**` for the
