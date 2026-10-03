@@ -101,7 +101,7 @@ senior depth. A rating of High with `Partial` is a real gap and drives the work 
 | `ProblemDetail`, `@ControllerAdvice` | High | Covered | v5 |
 | Filters vs interceptors | High | Covered | v5 |
 | `RestTemplate` | High | Covered | v5 §7.5 |
-| **`RestClient`** | High | **MISSING** | — |
+| **`RestClient`** | High | **Added 2026-10-04** — three-client comparison; `@since 6.1`, synchronous (not reactive), throws by default like `RestTemplate`, per-request `onStatus` vs global `ResponseErrorHandler`, Boot 3.2 prototype builder | v5 §7.5, cheat05 |
 | `WebClient` | High | Covered | v5 §7.5, v10 |
 | Content negotiation | Medium | Covered | v5 §3 |
 
@@ -149,7 +149,7 @@ senior depth. A rating of High with `Partial` is a real gap and drives the work 
 | Outbox pattern | High | Covered (unnamed broker) | v11 |
 | OpenTelemetry | Medium | Thin — one diagram, one paragraph | v11 §5.4 |
 | **Messaging (Kafka / RabbitMQ)** | High | **MISSING** — `KafkaTemplate`, `@KafkaListener`, `@RabbitListener` = 0 occurrences | — |
-| Cheatsheet coverage of ch. 1, 7, 8 | Medium | **MISSING** | cheat11 |
+| Cheatsheet coverage of ch. 1, 7, 8 | Medium | **Added 2026-10-04** — three sections: should you split at all, service-to-service security, antipatterns and their causes | cheat11 §9–11 |
 
 ## Testing / Production (Volume 9)
 
@@ -158,6 +158,7 @@ senior depth. A rating of High with `Partial` is a real gap and drives the work 
 | Test pyramid | High | Covered | v9 |
 | Slice tests | High | Covered | v9 |
 | `@MockBean` deprecation → `@MockitoBean` | High | Covered | v9 §2.5 |
+| `@MockitoBean`'s `enforceOverride` default | High | **Added 2026-10-04** — defaults to `false` / `REPLACE_OR_CREATE`, so a missing bean yields a silently created mock | v9 §2.5, cheat09 |
 | Testcontainers | High | Covered | v9 |
 | JVM tuning, GC logging | High | Covered | v9 §5.3 |
 | Tomcat thread arithmetic | High | Covered | v9 §5.4 |

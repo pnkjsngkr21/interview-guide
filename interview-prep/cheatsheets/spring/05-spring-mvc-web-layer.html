@@ -1231,7 +1231,7 @@ public UploadResult upload(@RequestPart("file") MultipartFile file,
             <tr><td>Body size enforcement</td><td><strong>Connector first</strong>, filter for per-route policy, controller for the business rule</td><td>Only the connector can act before the bytes arrive; a filter is right for streaming and per-route policy; the controller is right only for &ldquo;this plan allows 50MB&rdquo; because only it knows the plan</td></tr>
             <tr><td>Coarse per-IP rate limit</td><td><strong>Gateway</strong></td><td>It can reject without consuming a request thread, and it protects the service from traffic the service never sees. A per-IP limit in the application duplicates the gateway and spends a thread to do it</td></tr>
             <tr><td>Business-state limit (per-tenant quota, per-plan, concurrent jobs)</td><td><strong>Application</strong></td><td>Only the application knows the plan. If you run limits in both places, agree the ordering or the same request gets two different limit errors</td></tr>
-            <tr><td>HTTP client choice</td><td>See below</td><td>Mixing <code>RestTemplate</code> and <code>WebClient</code> in one codebase gives you two error conventions and no clear default</td></tr>
+            <tr><td>HTTP client choice</td><td>See below</td><td>Mixing synchronous and reactive clients in one codebase gives you two error conventions and no clear default. <code>RestTemplate</code> vs <code>RestClient</code> is a smaller decision than it looks &mdash; same blocking model, same infrastructure</td></tr>
           </tbody>
         </table>
       </div>
@@ -1249,6 +1249,31 @@ public UploadResult upload(@RequestPart("file") MultipartFile file,
         that a mixed codebase ends up with two error-handling conventions. Note the paired
         difference: <code>RestTemplate</code> <em>throws</em> on 4xx and 5xx, while
         <code>WebClient</code> <em>signals</em> an error as a value on the stream.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — <code>RestClient</code> is not reactive, and
+        not "non-throwing"</span>
+        <p>Three clients, not two. <code>RestClient</code> is <code>@since 6.1</code> and is the
+        modern <strong>synchronous</strong> API &mdash; its own javadoc says <em>"a fluent,
+        synchronous API"</em>, and it has no <code>Mono</code> or <code>CompletableFuture</code>
+        surface at all in 6.2.x. <code>RestTemplate</code>'s javadoc points async callers at
+        <code>WebClient</code>, not at <code>RestClient</code>.</p>
+        <p>It also <strong>throws on 4xx/5xx by default</strong>, exactly like
+        <code>RestTemplate</code>. What differs is granularity: <code>RestTemplate</code> has one
+        global <code>ResponseErrorHandler</code> on the instance, <code>RestClient</code> has a
+        <em>per-request</em> <code>retrieve().onStatus(...)</code> chain, user handlers inserted
+        before the defaults, first match wins. The one place it genuinely does not throw is
+        <code>exchange()</code>, which bypasses status handling by design because your lambda gets
+        the raw response.</p>
+        <p>And <code>RestTemplate</code> is <strong>not</strong> <code>&#64;Deprecated</code> in 6.2
+        &mdash; "maintenance mode" is not in the source. It says only that
+        <code>RestClient</code> "is the focus for new higher-level features". Supersession, not
+        deprecation. <code>RestClientAdapter</code> is also not a <code>RestTemplate</code> bridge
+        (<code>RestClient</code> does not implement <code>RestOperations</code>); use
+        <code>RestClient.create(RestTemplate)</code> to carry config across. Boot 3.2+
+        auto-configures a <em>prototype-scoped</em> <code>RestClient.Builder</code>. Full treatment
+        in <a href="../../spring/spring-05-spring-mvc-web-layer.html#75-outbound-calls-three-clients">Volume&nbsp;5 &sect;7.5</a>.</p>
       </div>
 
       <div class="callout callout--tradeoff">

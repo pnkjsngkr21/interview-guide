@@ -15,19 +15,21 @@ or deleted in the content tree, no heading was renamed, no section was rewritten
 | `spring/spring-02-bean-lifecycle-scopes-di.html` | 6 | **Factual**, TOC leak |
 | `spring/spring-03-aop-proxying.html` | 3 | **Factual**, TOC leak |
 | `spring/spring-04-transaction-management.html` | 4 | **Factual**, TOC leak |
-| `spring/spring-05-spring-mvc-web-layer.html` | 2 | **Factual**, TOC leak |
+| `spring/spring-05-spring-mvc-web-layer.html` | 2 + **§7.5 rebuilt** | **Factual**, TOC leak, **new content** |
 | `spring/spring-06-spring-data-jpa-persistence.html` | 3 + **§4.6 added** | **Factual**, TOC leak, bold leak, **new section** |
 | `spring/spring-07-spring-boot-auto-configuration.html` | 2 | Heading level, TOC leak |
 | `spring/spring-08-spring-security.html` | 2 | Malformed QA block, TOC leak |
-| `spring/spring-09-testing-production-troubleshooting.html` | 2 | **Factual**, TOC leak |
+| `spring/spring-09-testing-production-troubleshooting.html` | 2 + **§2.5 extended** | **Factual**, TOC leak, **new content** |
 | `spring/spring-10-webflux-project-reactor.html` | 3 | **Factual**, consistency, TOC leak |
 | `spring/spring-11-spring-cloud-distributed-systems.html` | 7 | **Factual**, TOC leak, 2 malformed QA blocks, bold leak |
 | `cheatsheets/spring/02-bean-lifecycle-scopes-di.html` | 1 | **Factual** |
+| `cheatsheets/spring/05-spring-mvc-web-layer.html` | **1 added** | **New callout** |
 | `cheatsheets/spring/06-spring-data-jpa-persistence.html` | **1 added** | **New section** |
+| `cheatsheets/spring/09-testing-production-troubleshooting.html` | **1 added** | **New callout** |
 | `cheatsheets/spring/04-transaction-management.html` | 1 | Markdown leak |
-| `cheatsheets/spring/11-spring-cloud-distributed-systems.html` | 2 | **Factual** |
+| `cheatsheets/spring/11-spring-cloud-distributed-systems.html` | 2 + **3 added** | **Factual**, **new sections** |
 
-**11 volumes + 4 cheatsheets = 15 files edited. 4 new files created, all under `_review/`.**
+**11 volumes + 6 cheatsheets = 17 files edited. 4 new files created, all under `_review/`.**
 
 ## Change-by-change
 
@@ -283,6 +285,53 @@ Also verified rather than assumed:
   `Ordered.LOWEST_PRECEDENCE`. `@EnableTransactionManagement.order()` defaults to the same value.
   Relative order is therefore genuinely undefined, which is what the `staff` callout says.
 
+## Fourth pass — `RestClient`, `@MockitoBean.enforceOverride`, cheat11 sync (2026-10-04)
+
+38. **`@MockitoBean`'s `enforceOverride` default** — vol09 §2.5 gained a paragraph, a 4-line
+    snippet, a trap callout and Q&A `2-spring-boot-test-annotations-8`; cheat09 gained a matching
+    trap callout. Closes item 8 of *Unverified*. Verified at source:
+    `boolean enforceOverride() default false;`, mapping to `BeanOverrideStrategy.REPLACE_OR_CREATE`.
+    The javadoc states the consequence twice — *"a mock will be created if a corresponding bean
+    does not exist"* — so a typo'd field name, an unregistered bean or a `@ConditionalOnProperty`
+    that did not fire all produce a **passing** test. Worth flagging because the migration narrative
+    runs backwards here: `@MockBean` failed loudly in that situation, so the replacement is
+    *quieter*, not stricter. Two adjacent restrictions from the same javadoc were added too — only
+    **singleton** beans can be mocked, and under `@ContextHierarchy` every `@MockitoBean` applies to
+    **all** levels unless `contextName` pins one (the javadoc marks this `WARNING`).
+39. **`RestClient` added to vol05 §7.5**, which already owned outbound HTTP but compared only
+    `RestTemplate` with `WebClient`. §7.5 is now a three-client comparison, with a snippet, a
+    three-column table, a callout and a Q&A; cheat05 gained the matching one-liners.
+
+### Claims the research falsified — corrected rather than written
+
+The `RestClient` facts were gathered by a research agent against Framework 6.2.x source, and four
+claims that would have been natural to write were **false**. All four are recorded because they are
+the claims a candidate is most likely to have absorbed from blog posts:
+
+| Claim that would have been written | Verified truth |
+| --- | --- |
+| "`RestClient` does not throw on 4xx/5xx by default" | **False — it does.** `RestClient.java`: *"By default, 4xx response code result in a `HttpClientErrorException` and 5xx response codes in a `HttpServerErrorException`."* The real difference is *mechanism and granularity*: `RestTemplate` has one global pluggable `ResponseErrorHandler`; `RestClient` has a **per-request** chain of `Predicate<HttpStatusCode>` → handler via `onStatus(...)`, with user handlers inserted **before** the defaults (`DefaultRestClient.java`: `// Default handlers always last`) and first-match-wins. |
+| "`RestTemplate` is deprecated / in maintenance mode" | **False in 6.2.x.** Not `@Deprecated`; no such javadoc. The source says only *"As of 6.1, `RestClient` offers a more modern API"* and *"`RestClient` is the focus for new higher-level features."* See item 3 above. |
+| "`RestClient` is reactive, or has async support" | **False.** The class javadoc says *"a fluent, synchronous API"*, and an exhaustive grep for `AsyncExchangeFunction` / `CompletableFuture` / `Mono` across `RestClient.java` and `DefaultRestClient.java` returns zero hits. The old `AsyncRestClient` is gone from 6.2.x entirely. The `exchange(...)` on `RestClient` is a **synchronous** callback, not an async exchange. |
+| "`RestClientAdapter` lets you pass a `RestClient` where a `RestTemplate` is expected" | **False.** It lives in the `support` subpackage and adapts `RestClient` to `HttpExchangeAdapter` for `HttpServiceProxyFactory` / `@HttpInterface`. The RestTemplate→RestClient direction is `RestClient.create(RestTemplate)`, not an adapter. |
+
+Verified and used:
+
+- `RestClient` is `@since 6.1`.
+- `RestClient.Builder` is **prototype-scoped** and auto-configured by Boot **3.2.0**
+  (`RestClientAutoConfiguration`), pre-configured with `HttpMessageConverters` and a request factory.
+  Boot's own wording: *"It is strongly advised to inject it in your components."* The prototype
+  scope is the non-obvious part — each injection point gets a freshly cloned builder, so a
+  component cannot rely on a shared mutated builder.
+- Builders are **stateful**: *"Any change on the builder is reflected in all clients subsequently
+  created with it"*, hence `builder.clone()`.
+- `retrieve()` is **lazy** — *"this method does not actually execute the request until you call one
+  of the returned `ResponseSpec`"*.
+- `exchange()` applies **no** status handling by design: *"Status handlers are not applied when use
+  `exchange()`, because the exchange function already provides access to the full response."*
+- Infrastructure is **shared** with `RestTemplate` — same request factories, interceptors,
+  initializers and message converters, so an interceptor written for one works on the other.
+
 ## Verification
 
 All 22 Spring pages re-checked after every edit batch, plus the site index:
@@ -308,7 +357,7 @@ backtick conversions were all in sidebar TOCs and prose, never inside a `<pre>`.
 | Volumes PASS `check.js --volume` | 11 | 11 |
 | Cheatsheets PASS `check.js --cheatsheet` | 11 | 11 |
 | Markdown leaks outside `<pre>` | 316 backticks + 2 bold, all 22 files | **0** |
-| High-priority topics closed | 1 (Spring Cache) | 2 |
+| High-priority topics closed | 1 (Spring Cache) | 4 (Spring Cache, RestClient, `enforceOverride`, cheat11 ch.1/7/8) |
 
 ### By version
 
@@ -327,6 +376,9 @@ backtick conversions were all in sidebar TOCs and prose, never inside a `<pre>`.
 | `sync = true` restrictions | `Cacheable` javadoc source |
 | Default `CacheManager`; Boot's SIMPLE provider | `ConcurrentMapCacheManager`, `SimpleCacheConfiguration` (Boot 3.5.x), Boot caching reference |
 | Cache-advice vs transaction-advice ordering | `BeanFactoryCacheOperationSourceAdvisor`, `BeanFactoryTransactionAttributeSourceAdvisor`, `AbstractBeanFactoryPointcutAdvisor`, `AbstractPointcutAdvisor`, `ProxyCachingConfiguration` source |
+| `enforceOverride` default + singleton-only + `@ContextHierarchy` warning | `MockitoBean.java` (6.2.x) source; `BeanOverrideStrategy` enum |
+| `RestClient` `@since`, sync-only, default-throws, `onStatus` ordering, lazy `retrieve()`, `exchange()` bypass | `RestClient.java`, `DefaultRestClient.java`, `StatusHandler.java`, `RestTemplate.java` (6.2.x) source; `rest-clients.adoc` |
+| Boot prototype-scoped `RestClient.Builder`, stateful builder | `RestClientAutoConfiguration` (3.5.x), Boot `io/rest-client.adoc` |
 
 ## Unverified / needs human check
 
@@ -337,10 +389,24 @@ backtick conversions were all in sidebar TOCs and prose, never inside a `<pre>`.
    rather than half-written. **Recommend a dedicated section in vol07 or vol09.**
 2. ~~**Spring Cache abstraction is absent**~~ — **CLOSED 2026-10-03.** Added as vol06 §4.6 with a
    matching cheat06 block; see the third pass above. `CacheManager` now appears throughout §4.6.
-3. **`RestClient` is absent from vol05 §7.5**, which owns outbound HTTP, and from `cheat05`
-   entirely. `RestTemplate` entered maintenance mode in Framework 6.1 and `RestClient` is its
-   designated successor. The one place `RestClient` appears in the corpus is a Further Reading
-   link label. **Recommend §7.5 be extended to the three-client comparison.**
+3. **`RestClient` was absent from vol05 §7.5**, which owns outbound HTTP, and from `cheat05`
+   entirely. **CLOSED 2026-10-04** — §7.5 is now a three-client comparison. See the fourth pass
+   above.
+
+   **Correction to this entry's own original wording.** It previously said *"`RestTemplate` entered
+   maintenance mode in Framework 6.1."* That phrasing is **not in the Framework source** and has
+   been removed. Grepping `RestTemplate.java`, `RestClient.java` and `DefaultRestClient.java` in
+   6.2.x for `maintenance`, `freeze` and `deprecat` returns one hit, a single protected
+   `doExecute` overload. `RestTemplate` is **not** `@Deprecated` and carries no class-level
+   deprecation javadoc. What the source actually says:
+
+   > "As of 6.1, `RestClient` offers a more modern API for synchronous HTTP access."
+   > "`RestClient` is the focus for new higher-level features."
+
+   That is a *softer* deprecation — pointed at as legacy and explicitly not the focus for new
+   features, without the `@Deprecated` annotation. The distinction matters for an interview answer,
+   because "maintenance mode" and "deprecated" are different statements and only the second one
+   would be checkable.
 4. **Messaging has no home.** `KafkaTemplate`, `@KafkaListener`, `@RabbitListener` are absent from
    all 11 volumes, and vol11 §6 builds its outbox argument on an unnamed "broker". The brief lists
    messaging as in-scope, but no existing volume owns it — a proper treatment is a new

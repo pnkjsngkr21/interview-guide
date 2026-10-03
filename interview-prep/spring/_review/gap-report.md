@@ -81,13 +81,13 @@ backticks and zero bold leaks outside `<pre>`, with only legitimate `/**` glob p
 | Topic | Rating | Decision |
 | --- | --- | --- |
 | **Spring Cache abstraction** (`CacheManager`, `@Cacheable`, `@EnableCaching`, self-invocation trap, key generation) | High | **Closed 2026-10-03 — added as vol06 §4.6**, plus cheat06 ch4. Placed immediately after §4.5 because the interview question is almost always "how do these two interact?", and the answer is that the Spring Cache, the persistence context and the Hibernate L2 cache are three layers with three different invalidation models. Stampede was left to Database Vol 9 per the linking-not-restating rule. |
-| **`RestClient`** (Framework 6.1) | High | **Gap. Not added this pass.** vol05 §7.5 owns outbound HTTP and compares only `RestTemplate` vs `WebClient`; `RestClient` appears once, as a Further Reading link label. |
+| **`RestClient`** (Framework 6.1) | High | **Closed 2026-10-04.** §7.5 is now a three-client comparison. The research falsified four claims that would otherwise have been written — most importantly that `RestClient` does not throw on 4xx/5xx (it does) and that `RestTemplate` is deprecated or in "maintenance mode" (it is neither). See the fourth pass in `change-log.md`. |
 | **Messaging — `KafkaTemplate`, `@KafkaListener`, `@RabbitListener`** | High | **Gap, and a scope decision.** Zero occurrences across all 11 volumes. vol11 §6 builds its entire outbox argument on an unnamed "broker". Adding it properly means a new volume (`spring-12-messaging.html`), which is a file creation, not a targeted edit — outside "minimal, targeted edits". |
 | Virtual threads | High | Thin. Present in vol07/v09 but as prose, not mechanism. `spring.threads.virtual.enabled=true` + the pinning-to-carrier consequence is the senior answer. |
 | Boot 4 / Framework 7 | Medium | Not covered. Justified: Boot 4 is recent enough that interview pools still centre on 3.x, and the corpus consistently tags its claims to 3.x. Adding it would require re-verifying every version tag in the set. |
 | Structured logging | Medium | Not covered. |
 | `@Scheduled` | Medium | Not covered. |
-| Cheat-sheet sync gaps (cheat07 missing 3.5/1.5/2.5; cheat08 missing attack-surface table, `AuthorizationManager`, session fixation; cheat11 missing ch. 1, 7, 8) | Medium | Not added this pass. |
+| Cheat-sheet sync gaps (cheat07 missing 3.5/1.5/2.5; cheat08 missing attack-surface table, `AuthorizationManager`, session fixation; cheat11 missing ch. 1, 7, 8) | Medium | **cheat11 closed 2026-10-04** — sections 9–11 added for the trade-off, service-to-service security and antipatterns, each linking back to vol11 rather than restating. cheat07 and cheat08 still open. |
 | Boot 2 → 3 migration as a dedicated treatment | High | Partial. The individual Jakarta/deprecation facts are covered in place; a consolidated migration chapter does not exist. |
 
 ## 5. Agent findings checked and rejected

@@ -23,6 +23,9 @@
       <li><a href="#ch6">6 — Saga &amp; compensation</a></li>
       <li><a href="#ch7">7 — Outbox, idempotency, reads</a></li>
       <li><a href="#ch8">8 — Tracing &amp; observability</a></li>
+      <li><a href="#ch9">9 — Should you split at all?</a></li>
+      <li><a href="#ch10">10 — Service-to-service security</a></li>
+      <li><a href="#ch11">11 — Antipatterns &amp; their causes</a></li>
       <li><a href="#numbers">Numbers</a></li>
     </ol>
     <h2>Series</h2>
@@ -1028,6 +1031,176 @@ public void on(OrderPlacedEvent event) {
       a customer), or the typical case &mdash; your sample is biased towards errors and slow
       requests, so percentiles computed from kept traces will not match metric percentiles and
       should not be compared.</p>
+    </section>
+
+    <!-- ============ 9 ============ -->
+    <section id="ch9" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">09</span>
+        <h2>Should you split at all?</h2>
+      </div>
+
+      <p>The question that precedes every other one in this sheet. Splitting a monolith is a
+      <em>reversible</em> mistake only in the code; the data migration behind it is not, which is
+      why the decision inputs are mostly organisational rather than technical.</p>
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>The five inputs that actually decide it &mdash; only the second and third are
+          technical</caption>
+          <thead><tr><th>Signal</th><th>What it argues for</th></tr></thead>
+          <tbody>
+            <tr><td>Fewer than 5 independent teams</td><td><strong>Monolith.</strong> Conway's law
+            has no work to do. Splitting buys coordination, not autonomy</td></tr>
+            <tr><td>"We can't ship on Fridays"</td><td><strong>Fix the release process first.</strong>
+            This is the single most misdiagnosed symptom in the set</td></tr>
+            <tr><td>The candidate cannot own its tables without a cross-service join in the request
+            path</td><td><strong>Don't split.</strong> You are building a distributed monolith &mdash;
+            see below</td></tr>
+            <tr><td>Path already has 4 hops at 20ms and a 5th is proposed for organisational
+            reasons</td><td>Needs a justification to the SRE, not a design doc</td></tr>
+            <tr><td>The boundary has churned ("orders" was a module, then a service, then three)</td>
+            <td><strong>Wait.</strong> Boundaries drawn under a moving domain are expensive to
+            relocate</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — extraction is a data migration first and a
+        code move second</span>
+        <p>Teams that plan it the other way round underestimate by roughly an order of magnitude,
+        because the code is the easy part. Moving the class is two days; replacing the direct call
+        with a client is a week and turns it into a network call; adding a timeout is an hour. The
+        data move is the project: who owns this table now (an organisational negotiation), what
+        happens to the join in the request path, the foreign key from <code>order_line</code> to
+        <code>orders</code> becoming a cross-service consistency problem, then backfill,
+        dual-write, cutover, verification &mdash; and the rollback story if the cutover is wrong.
+        Full argument in
+        <a href="../../spring/spring-11-spring-cloud-distributed-systems.html#14-the-migration-cost-nobody-puts-in-the-estimate">Volume&nbsp;11 &sect;1.4</a>.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — the modular monolith is a real answer, not a
+        retreat</span>
+        <p>A single deployable whose code is organised into modules with
+        <em>enforced</em> boundaries &mdash; Spring Modulith at compile time, ArchUnit at test time
+        &mdash; gives you service boundaries before the runtime does. The modules are genuinely
+        independent in reasoning, in testing and in team ownership, and they cannot be extracted
+        later without a rewrite. A candidate who argues convincingly for <em>not</em> splitting is
+        demonstrating judgement, not hedging. Spring Modulith is a real project worth naming here;
+        the enforcement is the point, because convention does not survive a deadline.</p>
+      </div>
+    </section>
+
+    <!-- ============ 10 ============ -->
+    <section id="ch10" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">10</span>
+        <h2>Service-to-service security</h2>
+      </div>
+
+      <p>Distinct from the user-facing security in
+      <a href="08-spring-security.html">Volume 8</a>: this is authenticating <em>workloads</em>
+      calling each other, and the interesting question is what each mechanism does <strong>not</strong>
+      establish.</p>
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>mTLS authenticates the workload and encrypts the hop &mdash; it says nothing
+          about what the caller may do</caption>
+          <thead><tr><th>Mechanism</th><th>Establishes</th><th>Does <strong>not</strong> establish</th></tr></thead>
+          <tbody>
+            <tr><td>mTLS</td><td>The <em>caller's</em> identity, from a client certificate issued
+            by a CA the server trusts</td><td>Authorisation. Any workload with a valid certificate
+            can call any endpoint. It is authentication, not access control</td></tr>
+            <tr><td>Token propagation</td><td>The original <em>user's</em> identity, carried
+            downstream unchanged</td><td>A narrower audience. A token minted for service A is
+            routinely accepted by service B, which is how privilege leaks sideways</td></tr>
+            <tr><td>Token exchange (RFC 8693)</td><td>A <strong>new, narrower</strong> token minted
+            for the downstream audience</td><td>Anything, if not paired with authorisation &mdash;
+            and it is a real complexity cost in a synchronous call path</td></tr>
+            <tr><td>Workload identity</td><td>A short-lived credential with no long-lived secret
+            to rotate or leak</td><td>Authorisation. Identity is the precondition for it, not a
+            substitute</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — what the mesh actually buys you, and
+        what it does not</span>
+        <p>A sidecar gives you mTLS, retries and telemetry without touching application code, and
+        that consistency is genuinely valuable &mdash; especially for languages where retrofitting
+        it is painful. What it does <strong>not</strong> give you is authorisation, which still has
+        to live in the application because only the application knows what the caller is trying to
+        do. The honest framing is that the mesh moves transport-level guarantees out of your
+        codebase and leaves policy-level guarantees in it. Adopting a mesh to solve an
+        authorisation problem solves nothing.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "we have mTLS so our services are secure"</span>
+        <p>mTLS answers <em>who is calling</em>, never <em>what they may do</em>. Every workload
+        holding a trusted certificate can call every other, so a compromised or merely
+        over-permissioned service reaches everything. Zero trust applied honestly means every call
+        is authenticated <em>and</em> authorised, continuously &mdash; and it means assuming the
+        network position is not a trust boundary, which is a different design from "we encrypted
+        the internal network". Full treatment in
+        <a href="../../spring/spring-11-spring-cloud-distributed-systems.html#75-zero-trust-honestly">Volume&nbsp;11 &sect;7.5</a>.</p>
+      </div>
+    </section>
+
+    <!-- ============ 11 ============ -->
+    <section id="ch11" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">11</span>
+        <h2>The antipatterns, and the org causes</h2>
+      </div>
+
+      <p>Worth learning as a <em>list with causes</em> rather than symptoms. Each of these looks like
+      a coding error from the inside and is usually an organisational one from the outside.</p>
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>The symptom, and what is actually generating it</caption>
+          <thead><tr><th>Antipattern</th><th>What you see</th><th>The cause underneath</th></tr></thead>
+          <tbody>
+            <tr><td>Synchronous call chains</td><td>Latency multiplies down the chain; one slow hop
+            times out every caller</td><td>Availability coupled by dependency. Retry and timeout
+            budgets are section 4 above</td></tr>
+            <tr><td>The distributed monolith</td><td>Services that cannot be deployed
+            independently &mdash; the thing you split to avoid</td><td>Split by noun instead of by
+            business capability, then share the database to compensate</td></tr>
+            <tr><td>Shared database</td><td>A schema change requires coordinating every
+            service</td><td>The candidate service cannot own its tables. You have a network
+            boundary with no data boundary behind it</td></tr>
+            <tr><td>Retries without budgets</td><td>3&#179; amplification &mdash; 27 requests per
+            user request</td><td>No one owns the retry policy as a budget; each layer retries
+            independently because each looks locally reasonable</td></tr>
+            <tr><td>No timeouts, or timeouts above the caller's</td><td>Threads held long after
+            the caller gave up; pool exhaustion</td><td>Timeouts chosen per-client rather than
+            derived from the remaining budget &mdash; the chain-budget rule in
+            <a href="05-spring-mvc-web-layer.html">Volume&nbsp;5 &sect;7.5</a></td></tr>
+            <tr><td>Chatty interfaces</td><td>40ms to assemble one screen; N+1 over the network
+            instead of over SQL</td><td>The interface was designed around tables rather than around
+            what the caller needs</td></tr>
+            <tr><td>Cache as an unowned layer</td><td>Stale reads nobody can explain, and no
+            answer to "who invalidates this?"</td><td>No named owner and no invalidation contract.
+            Also the most common source of cross-layer confusion &mdash; see
+            <a href="06-spring-data-jpa-persistence.html">Volume&nbsp;6 &sect;4.6</a> for why the
+            Spring Cache, the persistence context and the Hibernate L2 cache are three different
+            layers</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — release process is an antipattern too</span>
+        <p>Deploying on Fridays is not superstition, it is a signal that the release process cannot
+        be made safe, so the team has substituted a schedule for engineering. The fix is automated
+        rollback and progressive delivery, not a better calendar. The predictive question worth
+        being able to ask is in
+        <a href="../../spring/spring-11-spring-cloud-distributed-systems.html#89-the-questions-that-predict-operability">Volume&nbsp;11 &sect;8.9</a>
+        &mdash; it is a better interview question than any single technology on this sheet.</p>
+      </div>
     </section>
 
     <!-- ============ numbers ============ -->
