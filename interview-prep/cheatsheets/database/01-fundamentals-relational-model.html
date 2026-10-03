@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fundamentals &amp; the Relational Model — Cheatsheet</title>
+<meta name="description" content="Condensed cheatsheet for Database Deep-Dive Volume 1: pages and the buffer pool, tuples and attributes, the relational model, keys and referential integrity, normalisation, and the scaling lenses applied to relational data.">
+<link rel="stylesheet" href="../../site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="page">
+
+  <nav class="sidebar" aria-label="Contents">
+    <h2>On this page</h2>
+    <ol>
+      <li><a href="#ch1">1 — What a database is doing</a></li>
+      <li><a href="#ch2">2 — Pages, heaps &amp; the physical layer</a></li>
+      <li><a href="#ch3">3 — The relational model</a></li>
+      <li><a href="#ch4">4 — Keys &amp; constraints</a></li>
+      <li><a href="#ch5">5 — Normalisation &amp; denormalisation</a></li>
+      <li><a href="#ch6">6 — Algebra &amp; the execution model</a></li>
+      <li><a href="#ch7">7 — Scaling lenses</a></li>
+      <li><a href="#numbers">Numbers</a></li>
+    </ol>
+    <h2>Series</h2>
+    <ul>
+      <li><a href="01-fundamentals-relational-model.html">01 — Fundamentals</a></li>
+      <li><a href="02-sql-ddl-dml-constraints.html">02 — DDL &amp; Constraints</a></li>
+      <li><a href="03-sql-queries-joins-window-functions.html">03 — Queries &amp; Joins</a></li>
+      <li><a href="04-indexes-query-planning-execution.html">04 — Indexes &amp; Planning</a></li>
+      <li><a href="05-transactions-isolation-concurrency.html">05 — Transactions</a></li>
+      <li><a href="06-schema-design-partitioning-scaling.html">06 — Schema &amp; Scaling</a></li>
+      <li><a href="07-postgresql.html">07 — PostgreSQL</a></li>
+      <li><a href="08-mysql.html">08 — MySQL &amp; InnoDB</a></li>
+      <li><a href="09-redis-caching.html">09 — Redis &amp; Caching</a></li>
+      <li><a href="10-nosql-distributed-stores.html">10 — NoSQL &amp; Distributed</a></li>
+      <li><a href="11-s3-elasticsearch-interview-bank.html">11 — S3, ES &amp; Bank</a></li>
+    </ul>
+    <h2>Repository</h2>
+    <ul>
+      <li><a href="../../../index.html">All cheatsheets</a></li>
+      
+    </ul>
+  </nav>
+
+  <main class="main" id="main">
+
+    <header class="masthead">
+      <p class="masthead__eyebrow">Database — The Database Complete Deep-Dive</p>
+      <h1>Volume 1 — Fundamentals &amp; the Relational Model</h1>
+      <p class="masthead__sub">
+        The layer between the SQL you type and the bytes that move: what a page is, why
+        row width beats row count, and where every abstraction stops paying for itself.
+      </p>
+      <ul class="masthead__meta">
+        <li>8 sections</li>
+        
+      </ul>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <input type="search" data-filter-input placeholder="Filter sections — press /" aria-label="Filter sections">
+        <span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span>
+      </div>
+      <div class="pager">
+        <a href="02-sql-ddl-dml-constraints.html">Next &rarr;</a>
+      </div>
+    </div>
+
+    <div class="keyfacts">
+      <h2>If you only remember five things</h2>
+      <ol>
+        <li><strong>A database is three layers wearing one interface</strong> — a query
+        engine, a storage engine, and a concurrency protocol. SQL is declarative, so it
+        names the answer and never the route, and an incident is almost always one of the
+        three layers disagreeing with your intent.</li>
+        <li><strong>The page is the unit of I/O and it is read whole.</strong> Row
+        <em>width</em> therefore drives performance more than row count: a single-row
+        <code>SELECT</code> on a 16 kB page reads 16 kB, and
+        <code>SELECT *</code> on 50M rows of 200 bytes touches roughly 625,000 pages
+        against about 40,000 for four narrow columns.</li>
+        <li><strong>The heap is an unordered pile of slotted pages.</strong> Deleting frees
+        nothing until <code>VACUUM</code>, an update appends rather than moves, and steady-state
+        tuple size is a function of the largest the row <em>ever</em> got.</li>
+        <li><strong>Schema or application is decided by how many things can write the
+        table.</strong> A foreign key costs a lock on the parent row for the duration of the
+        statement; an application check costs nothing and covers only the writers you
+        control.</li>
+        <li><strong>Normalisation removes anomalies, not write cost.</strong> It makes a fact
+        safe to store in one place; denormalising is a separate, physical decision that is
+        only justified when the slow path is measured and the sync mechanism is named.</li>
+      </ol>
+    </div>
+
+    <p class="empty" data-filter-empty hidden>No section matches that filter.</p>
+
+    <!-- ============ 1 ============ -->
+    <section id="ch1" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">01</span>
+        <h2>What a database is actually doing</h2>
+      </div>
+
+      <p>"A database stores data so you can retrieve it" describes the storage engine's job
+      and skips the part that generates incidents. The useful decomposition is three layers,
+      and the layering is load-bearing: <strong>SQL describes what you want, and the engine
+      decides how to get it.</strong> When a query is slow the answer is almost never "the
+      query is wrong" — it is the optimiser mispredicting a row count, the storage engine
+      reading 40,000 pages instead of 40, or the concurrency layer making you wait behind a
+      long transaction, which then shows up as query time.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 300" role="img" aria-label="A database is three layers. The query engine parses, rewrites, optimises, plans and executes. The storage engine owns pages, tuples, indexes, the write log, checkpoints and compaction. Concurrency control owns locks, MVCC snapshots, isolation and deadlock detection. All three are invisible from SQL.">
+          <defs>
+            <marker id="arw-d1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node node--accent" x="90" y="14" width="480" height="66" rx="8"/>
+          <text class="label" x="330" y="42" text-anchor="middle">QUERY ENGINE</text>
+          <text class="label label--sub" x="330" y="62" text-anchor="middle">parse &rarr; rewrite &rarr; optimise &rarr; plan &rarr; execute</text>
+
+          <path class="edge" d="M 330 80 L 330 104" marker-end="url(#arw-d1-a)"/>
+
+          <rect class="node" x="90" y="104" width="480" height="66" rx="8"/>
+          <text class="label" x="330" y="132" text-anchor="middle">STORAGE ENGINE</text>
+          <text class="label label--sub" x="330" y="152" text-anchor="middle">pages, tuples, indexes, write log, checkpoints, compaction</text>
+
+          <path class="edge" d="M 330 170 L 330 194" marker-end="url(#arw-d1-a)"/>
+
+          <rect class="node" x="90" y="194" width="480" height="66" rx="8"/>
+          <text class="label" x="330" y="222" text-anchor="middle">CONCURRENCY CONTROL</text>
+          <text class="label label--sub" x="330" y="242" text-anchor="middle">locks, MVCC snapshots, isolation, deadlock detection</text>
+
+          <text class="edge-label edge-label--strong" x="330" y="288" text-anchor="middle">all three are invisible from SQL</text>
+        </svg>
+        <figcaption>
+          <strong>SQL names the answer, never the route.</strong> The optimiser's entire job
+          is cost estimation: it reads histograms and row counts, not your data, and produces
+          a numeric guess that every downstream join decision compares. That is why a stale
+          <code>ANALYZE</code> yields a confidently wrong plan with no error, and why "run
+          <code>ANALYZE</code> after a bulk load" is load-bearing advice rather than folklore.
+        </figcaption>
+      </figure>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "where does the database store my data?"</span>
+        <p>"On disk" is true in a way that is useless, because working sets live in RAM and
+        there are <strong>three</strong> layers of caching between your <code>SELECT</code>
+        and the platter. A cache hit in the buffer pool and a cache hit on disk are completely
+        different latencies, which is why <code>EXPLAIN (ANALYZE, BUFFERS)</code> reports
+        shared hits and reads separately: that ratio is your real measure of how well the
+        pool is sized for this workload. An I/O counter showing zero does not mean the query
+        was cheap — it means the OS was willing to serve it.</p>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 350" role="img" aria-label="Three caches sit between a query and the disk. The query first looks in the database buffer pool, which is the engine's own cache of pages. On a miss it looks in the operating system page cache, the kernel's cache of file blocks. On a second miss it reads the storage device.">
+          <defs>
+            <marker id="arw-d1-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <text class="label" x="330" y="24" text-anchor="middle">your SELECT</text>
+          <path class="edge" d="M 330 34 L 330 62" marker-end="url(#arw-d1-b)"/>
+
+          <rect class="node node--accent" x="140" y="62" width="380" height="70" rx="8"/>
+          <text class="label" x="330" y="90" text-anchor="middle">DB BUFFER POOL</text>
+          <text class="label label--sub" x="330" y="110" text-anchor="middle">PostgreSQL shared_buffers &middot; InnoDB buffer pool &middot; Oracle SGA</text>
+
+          <path class="edge" d="M 330 132 L 330 160" marker-end="url(#arw-d1-b)"/>
+          <text class="edge-label" x="340" y="152" text-anchor="start">miss</text>
+
+          <rect class="node" x="140" y="160" width="380" height="66" rx="8"/>
+          <text class="label" x="330" y="186" text-anchor="middle">OS PAGE CACHE</text>
+          <text class="label label--sub" x="330" y="206" text-anchor="middle">the kernel's cache of file blocks</text>
+
+          <path class="edge" d="M 330 226 L 330 254" marker-end="url(#arw-d1-b)"/>
+          <text class="edge-label" x="340" y="246" text-anchor="start">miss</text>
+
+          <rect class="node node--bad" x="140" y="254" width="380" height="66" rx="8"/>
+          <text class="label" x="330" y="280" text-anchor="middle">STORAGE DEVICE</text>
+          <text class="label label--sub" x="330" y="300" text-anchor="middle">SSD, NVMe, or a spinning disk</text>
+
+          <text class="edge-label" x="330" y="340" text-anchor="middle">a miss at one level is a read at the next — and the last level has three orders of magnitude more latency</text>
+        </svg>
+        <figcaption>
+          <strong>Latency has three tiers, not two.</strong> Two practical consequences: a
+          database restart can be fast for reads and slow for recovery, because log replay
+          can benefit from the cache; and on shared cloud hardware a noisy neighbour can
+          evict your pages from the OS cache, which is why the working set has to be small
+          enough for the engine's own pool to hold it.
+        </figcaption>
+      </figure>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — what the write-ahead log is actually for</span>
+        <p>If the data file were authoritative, every commit would have to force the modified
+        pages to disk in a random-access pattern while holding locks, so throughput would be
+        bounded by device random-write latency. The WAL inverts that: changes are appended
+        sequentially and forced once per commit, and the data file is updated lazily. Two
+        things follow. Durability is a property of the <em>log</em>, not the data file — which
+        is why <code>fsync</code> on the log is the only thing standing between "committed"
+        and "committed for real". And a dirty page can be evicted from the buffer pool as a
+        <code>memcpy</code>, because the log already has the change and will replay it.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Storage-engine vocabulary, in PostgreSQL's words</caption>
+          <thead><tr><th>Component</th><th>What it is</th><th>What breaks if you get it wrong</th></tr></thead>
+          <tbody>
+            <tr><td>Page <code>(8 kB block)</code></td><td>Fixed-size unit of I/O</td><td>Everything — row width stops being free</td></tr>
+            <tr><td>Tuple <code>(heap tuple)</code></td><td>One row version</td><td>Tuple bloat and <code>VACUUM</code> load</td></tr>
+            <tr><td>Heap file <code>(relation)</code></td><td>Unordered pile of tuple pointers</td><td>No locality; scans read everything</td></tr>
+            <tr><td>Index <code>(btree)</code></td><td>Sorted structure pointing at tuples</td><td>Write amplification, bloat</td></tr>
+            <tr><td>Write log <code>(WAL)</code></td><td>Every change, before it is applied</td><td>Nothing — this <em>is</em> durability</td></tr>
+            <tr><td>Free space <code>(FSM / VM)</code></td><td>Where to put new tuples, what is dead</td><td>Insert failures, bloat</td></tr>
+            <tr><td>Statistics <code>(pg_statistic)</code></td><td>Histograms the planner reads</td><td>Wrong plans, silently</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>InnoDB names the same ideas differently — page, record, <strong>clustered index</strong>
+      (which <em>is</em> the table), undo log, redo log, change buffer. Different words,
+      identical structure. Naming these five things for an unfamiliar engine is what lets you
+      read its documentation and triage "the database is slow" without an hour of guessing.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Relational, or not — and the condition that flips it</caption>
+          <thead><tr><th>Signal</th><th>Verdict</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Several of these at once: data is relational, it is the source of truth, you need transactions across rows, you need ad-hoc queries, write volume is human-scale</td>
+              <td><strong>Relational</strong></td><td>The joins are not incidental, and no other store reproduces them cheaply</td></tr>
+            <tr><td>Append-only blobs</td><td>Object storage</td><td>Volume 11</td></tr>
+            <tr><td>Known fixed access pattern, enormous volume</td><td>DynamoDB or Cassandra</td><td>Volume 10 — a fixed key lookup is exactly their shape</td></tr>
+            <tr><td>Derived and recomputable</td><td>Cache or materialised view</td><td>A table for it is a sync mechanism with no benefit</td></tr>
+            <tr><td>Nothing ever filters it — 4M rows only ever <code>SELECT *</code></td>
+              <td>Not a table</td><td>No useful indexes, no primary key worth the name: a file with a query interface</td></tr>
+            <tr><td><strong>The flip:</strong> will you ever join across entity types and filter on more than one of them simultaneously?</td>
+              <td>Stay relational</td><td>A document store wins while query patterns are still being discovered, and becomes a liability the moment they are known</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — when the planner stops searching</span>
+        <p>The join-order search space is <code>n!</code> for <code>n</code> tables, so no
+        engine enumerates it. PostgreSQL and MySQL both use dynamic programming over
+        <em>interesting</em> orderings: for six tables an exhaustive permutation search is 720
+        plans, which is tractable, so they consider all of them. Past roughly
+        <strong>8&ndash;10 tables</strong> the space outgrows exhaustive search and the
+        optimiser falls back to heuristics. A join across more than about eight tables is
+        usually a schema problem wearing a query costume, and the fix is a denormalised
+        bridge table, not a planner hint.</p>
+      </div>
+    </section>
+
+    <!-- ============ 2 ============ -->
+    <section id="ch2" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">02</span>
+        <h2>Pages, heaps &amp; the physical layer</h2>
+      </div>
+
+      <p>Every performance question in this volume eventually reduces to one question:
+      <em>how many pages did this touch?</em> A page is the unit of I/O, the unit of
+      buffer-pool occupancy, the unit of coarse locking, and — in most engines — the unit
+      that must be written entirely to make one small change durable in the data file. It is
+      fixed at initialisation, not per table, which is why managed services rarely let you
+      touch it: you choose it at the point where you know the workload, and that point is
+      usually gone by the time you want to change it.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Default page sizes, and the setting that fixes them</caption>
+          <thead><tr><th>Engine</th><th>Default page size</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>PostgreSQL</td><td>8 kB</td><td>Fixed at cluster init, <code>BLCKSZ</code></td></tr>
+            <tr><td>MySQL InnoDB</td><td>16 kB</td><td>Fixed at init, <code>innodb_page_size</code></td></tr>
+            <tr><td>SQL Server</td><td>8 kB</td><td>—</td></tr>
+            <tr><td>Oracle</td><td>8 kB</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — why is <code>SELECT *</code> slow?</span>
+        <p>The reflexive answer is "it transfers more over the network." That is the last
+        stage and often the smallest. The real cost is upstream, in five stages, and only the
+        fifth is the network: (1) every column is read, so no index-only scan is possible,
+        because that needs every referenced column present in the index; (2) if the row exceeds
+        the page size, TOAST chunks are fetched — an extra random read per oversized row, on
+        top of the scan; (3) more bytes per row means fewer rows per page, so the same logical
+        row count touches proportionally more pages; (4) serialisation moves from "parse four
+        columns" to "parse forty"; (5) <em>then</em> the network. Quantified: on a 50M-row
+        table with 200-byte rows and a 16 kB page, <code>SELECT *</code> touches roughly
+        625,000 pages against about 40,000 for four narrow columns — and the second number is
+        the one that changes your latency.</p>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 330" role="img" aria-label="A slotted page. A 24-byte page header holds the page LSN, checksum and links. Below it a slot array holds four-byte pointers, one per tuple, each naming the offset where that tuple lives. Below that is the free space, where three tuples sit at the offsets the slots name, beside a hole left behind by a deleted tuple. Nothing compacts, so an update appends a new tuple and the old bytes stay.">
+          <defs>
+            <marker id="arw-d1-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node" x="40" y="16" width="580" height="280" rx="8"/>
+
+          <rect class="node node--accent" x="40" y="16" width="580" height="38" rx="8"/>
+          <text class="label" x="330" y="40" text-anchor="middle">PAGE HEADER &mdash; 24 bytes: LSN, checksum, links</text>
+
+          <text class="label" x="330" y="76" text-anchor="middle">SLOT ARRAY &mdash; 4 bytes per tuple</text>
+          <text class="label label--sub" x="140" y="106" text-anchor="middle">slot 0</text>
+          <text class="label label--sub" x="330" y="106" text-anchor="middle">slot 1</text>
+          <text class="label label--sub" x="520" y="106" text-anchor="middle">slot 2</text>
+
+          <path class="edge" d="M 140 112 L 140 152" marker-end="url(#arw-d1-c)"/>
+          <path class="edge" d="M 330 112 L 330 152" marker-end="url(#arw-d1-c)"/>
+          <path class="edge" d="M 520 112 L 520 152" marker-end="url(#arw-d1-c)"/>
+
+          <text class="label label--sub" x="60" y="144">free space</text>
+
+          <rect class="node" x="60" y="156" width="160" height="40" rx="5"/>
+          <text class="label" x="140" y="181" text-anchor="middle">tuple 0 @ 12</text>
+
+          <rect class="node" x="250" y="156" width="160" height="40" rx="5"/>
+          <text class="label" x="330" y="181" text-anchor="middle">tuple 1 @ 180</text>
+
+          <rect class="node" x="440" y="156" width="160" height="40" rx="5"/>
+          <text class="label" x="520" y="181" text-anchor="middle">tuple 2 (HOT)</text>
+
+          <rect class="node node--bad" x="140" y="212" width="380" height="40" rx="5"/>
+          <text class="label" x="330" y="237" text-anchor="middle">hole &mdash; a deleted tuple's bytes, still here</text>
+
+          <text class="edge-label" x="330" y="276" text-anchor="middle">an UPDATE appends a new version; a DELETE leaves a hole</text>
+          <text class="edge-label edge-label--strong fill-bad" x="330" y="294" text-anchor="middle">nothing compacts until VACUUM</text>
+        </svg>
+        <figcaption>
+          <strong>One design choice explains an entire family of behaviours.</strong> Deletions
+          mark the tuple dead in its header and clear the slot pointer; the bytes stay on the
+          page, and a later insert reuses the hole only if the new tuple fits. Inserts do
+          <em>not</em> split pages — that is an index behaviour, not a heap behaviour. And
+          because the slot array keeps growing while the page fills with pointers, very small
+          tuples get fewer rows per page than arithmetic suggests.
+        </figcaption>
+      </figure>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — steady-state tuple size</span>
+        <p>Measure with <code>pg_column_size(row)</code>, diagnose with
+        <code>pgstattuple</code>. A table carrying 20 bytes of tuple in an 8 kB page where you
+        expected 8 kB's worth of rows has usually survived thousands of in-place updates.
+        <strong>Steady-state tuple size is a function of the largest the row ever got</strong>,
+        not its current width, because a slotted page never compacts. A table that once held a
+        4 kB JSON blob permanently pays the 4 kB per-row cost long after the blob is gone,
+        until a <code>VACUUM FULL</code> — a rewrite under an <code>ACCESS EXCLUSIVE</code>
+        lock, so a scheduled operation, never a live one — or a logical rewrite clears it.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "is the data in the order I inserted it?"</span>
+        <p>Only until something is updated. An updated row is usually written to
+        <em>new free space</em> rather than moved back — a PostgreSQL HOT update appends a new
+        tuple version at the end of the page and leaves a dead one behind. So physical order
+        degrades toward "order of last update," not "order of insertion." The useful reply to
+        a colleague who says the heap is insertion-ordered is: <em>"until the first update —
+        and the first update is always the first update."</em> It is also the mechanism behind
+        index-only-scan regressions: the visibility map stops covering the pages and reads
+        that were free start re-fetching the heap.</p>
+      </div>
+
+      <p>The consequence engineers miss most often is that <strong>a range predicate on the
+      primary key is a full scan</strong>. <code>WHERE id BETWEEN 1 AND 100</code> is not a
+      range scan on a heap: the optimiser has no basis for assuming those rows live anywhere
+      in particular, and without an index the information does not exist anywhere in the file.
+      Related: <code>SELECT</code> without <code>ORDER BY</code> has no defined order at all,
+      even though it appears to return insertion order — so any test that depends on row order
+      without <code>ORDER BY</code> is a test that passes on Tuesday and fails on Friday.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Does the index contain the row, or a pointer to it?</caption>
+          <thead><tr><th>Engine</th><th>What the leaf holds</th><th>What that costs</th></tr></thead>
+          <tbody>
+            <tr><td>PostgreSQL</td><td>A <code>(block, offset)</code> pointer into the heap</td>
+              <td>A second, <strong>random</strong> page read per lookup. A range fetch over a large index degrades because index adjacency is not heap adjacency</td></tr>
+            <tr><td>MySQL InnoDB</td><td>The <strong>whole row</strong> — the clustered index <em>is</em> the table; secondaries hold <code>(key, primary_key)</code></td>
+              <td>Bigger, more uniform read cost per lookup; a much bigger write cost, because a row update is a delete-plus-insert at the leaf and every secondary index update moves the primary key</td></tr>
+            <tr><td>Elasticsearch</td><td>The document sits adjacent to the postings in <code>_source</code></td>
+              <td>Write amplification on every index update; the right trade when reads dominate</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Which is why "MySQL feels slower than PostgreSQL for the same indexed query on a wide
+      table" is not necessarily a MySQL problem. The crossover depends on read-to-write ratio
+      and row width, and you find it by measuring both, not by asking which engine is faster.</p>
+
+      <p>One more write-path fact that earns its place: <strong>every indexed column is
+      written on every insert</strong>. An insert into a table with six indexes is six B+ tree
+      insertions plus one heap write, each with its own WAL record, so the common "why is
+      insert slow" answer is not the table — it is the index count. The free-space map
+      explains the rest: a table that was once huge and is now small is still slow to insert
+      into if there are no free pages, because every insert may extend the relation.</p>
+    </section>
+
+    <!-- ============ 3 ============ -->
+    <section id="ch3" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">03</span>
+        <h2>The relational model</h2>
+      </div>
+
+      <p>Codd's model is a <em>logical</em> theory: it says what a relation is, what a
+      functional dependency is, what normalisation means, and it says nothing whatsoever
+      about how bytes are laid out on a device. The separation is deliberate and it is
+      load-bearing, because the whole performance discussion in section 2 lives in the gap
+      between the two layers.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>What the model says, and what SQL actually gives you</caption>
+          <thead><tr><th>Concept</th><th>The model</th><th>SQL</th></tr></thead>
+          <tbody>
+            <tr><td>Relation</td><td>A <strong>set</strong> of tuples — no duplicates possible</td><td>A <strong>bag</strong> of rows; duplicates survive unless you remove them</td></tr>
+            <tr><td>Tuple</td><td>An ordered list of attribute-value pairs</td><td>A row, but names resolve by position or name, and <code>NULL</code> is a marker, not a value</td></tr>
+            <tr><td>Domain</td><td>A named set of permissible values</td><td>A type — which most engines extend with arrays, JSON, ranges, <code>hstore</code></td></tr>
+            <tr><td>Foreign key</td><td><strong>Does not exist.</strong> A relation can only contain values</td><td>FK constraints with <code>ON DELETE</code> actions, layered on by every engine</td></tr>
+            <tr><td><code>NULL</code></td><td><strong>Does not exist.</strong> "No value" is not a value</td><td>Everywhere, and three-valued logic as the consequence</td></tr>
+            <tr><td>Ordering</td><td>None</td><td><code>ORDER BY</code>, indexes, and a planner that cares about both</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — why is <code>UNION</code> slower than <code>UNION ALL</code>?</span>
+        <p>Because the model says a relation is a set, and a set has no duplicates, so
+        <code>UNION</code> is <em>defined</em> as set union and must eliminate duplicates —
+        which means a hash aggregate or a sort of the whole result, usually a spill to disk on
+        anything large. The correct code-review question is not "is <code>UNION</code> bad" but
+        <strong>"do these two branches actually overlap?"</strong> If they are provably
+        disjoint by construction — different date ranges, disjoint status values, an
+        <code>id</code> range above the other's — then <code>UNION ALL</code> is not an
+        optimisation, it is the same query written correctly. The mirror-image mistake is worse:
+        reaching for <code>UNION ALL</code> on branches that can overlap converts a slow query
+        into a wrong one, and the duplicate surfaces as a double-counted total in a financial
+        report.</p>
+      </div>
+
+      <p>Adding <code>NULL</code> is the model's permanent price, and knowing the shape of the
+      bill is worth a sentence in an interview: <code>WHERE</code> admits a row only when the
+      predicate is <em>definitely</em> true, so <code>NOT IN</code> against a list containing a
+      <code>NULL</code> is never true, <code>COUNT(col)</code> skips nulls,
+        <code>SUM</code> over no non-null values is <code>NULL</code> rather than zero, and a
+        comparison to <code>NULL</code> must be written <code>IS NULL</code> rather than
+      <code>= NULL</code>. The depth belongs to <a href="02-sql-ddl-dml-constraints.html">Volume
+        2</a>; the shape is enough here.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Key vocabulary — and what it tells you about the schema</caption>
+          <thead><tr><th>Term</th><th>Definition</th><th>In <code>users(id, email, created_at)</code></th></tr></thead>
+          <tbody>
+            <tr><td>Superkey</td><td>Any attribute set that uniquely identifies a tuple</td><td><code>{id}</code>, <code>{id, email}</code>, <code>{id, email, created_at}</code> — all three</td></tr>
+            <tr><td>Candidate key</td><td>A <em>minimal</em> superkey: remove any attribute and uniqueness breaks</td><td><code>{id}</code> and <code>{email}</code> — two of them</td></tr>
+            <tr><td>Primary key</td><td>The chosen candidate key, made <code>NOT NULL</code> and <code>UNIQUE</code></td><td><code>id</code></td></tr>
+            <tr><td>Alternate key</td><td>The remaining candidate keys</td><td><code>email</code> — and it should carry a <code>UNIQUE</code> constraint whether or not you query on it</td></tr>
+            <tr><td>Foreign key</td><td>A candidate key of table B referenced by a column in A</td><td>References a <em>candidate key</em> of the parent, which is usually but not always its PK</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The highest-value schema check in a design review is naming the alternate candidate
+      keys: if <code>email</code> is a candidate key then <code>email</code> identifies a user,
+      and that is a domain fact belonging in a constraint. The vocabulary also makes two other
+      answers cheap — why <code>PRIMARY KEY</code> implies <code>NOT NULL</code> and
+      <code>UNIQUE</code> (a key that permits <code>NULL</code> identifies nothing, because
+      <code>NULL = NULL</code> is unknown), and why an FK targeting
+      <code>customers.email</code> would be valid and considerably worse: an email change
+      becomes an update to every referencing row.</p>
+
+      <pre class="snippet" data-lang="sql" data-title="Candidate keys as constraints" data-hl-line="3,4"><code>-- {id} and {email} are BOTH minimal superkeys.
+-- {id} is chosen as the primary key; email is an alternate key
+-- and still identifies a user, so it gets a UNIQUE.
+CREATE TABLE users (
+  id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  email       text NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT users_email_key UNIQUE (email)  -- the row people forget
+);
+
+-- a CHECK cannot see other rows, so "at most one NULL" is not a CHECK
+CREATE UNIQUE INDEX users_email_one_null ON users (email) WHERE email IS NULL;</code></pre>
+
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "<code>UNIQUE</code> allows one <code>NULL</code>, right?"</span>
+        <p>This is a genuine integrity hole produced by an accident of the standard's
+        duplicate rule: two rows are duplicates only if no column is <em>distinctly</em>
+        unequal, and <code>NULL</code> is never distinctly unequal to anything. So
+        <code>email VARCHAR(255) UNIQUE</code> will happily accept 4,000 rows with
+        <code>email IS NULL</code> on PostgreSQL. The result is engine-dependent, which is
+        itself worth saying out loud:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Engine</th><th>Multiple <code>NULL</code>s under <code>UNIQUE</code></th></tr></thead>
+            <tbody>
+              <tr><td>PostgreSQL</td><td>Allowed (9.0+ treats <code>NULL</code>s as distinct)</td></tr>
+              <tr><td>MySQL / InnoDB</td><td>Allowed</td></tr>
+              <tr><td>SQL Server</td><td><strong>Not</strong> allowed — one <code>NULL</code> per <code>UNIQUE</code> column</td></tr>
+              <tr><td>Oracle</td><td>Allowed</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>If the column is genuinely optional and unique-if-present, several <code>NULL</code>s
+        are the intended behaviour. If every row <em>should</em> have an email, the constraint
+        did not stop the bug and those rows are ones your application cannot look up. The fix
+        is a partial unique index (<code>WHERE col IS NULL</code>) or a filtered index — not a
+        <code>CHECK</code>, because <code>CHECK</code> cannot see other rows.</p>
+      </div>
+    </section>
+
+    <!-- ============ 4 ============ -->
+    <section id="ch4" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">04</span>
+        <h2>Keys, constraints &amp; referential integrity</h2>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — four facts that answer most constraint questions</span>
+        <p><code>PRIMARY KEY</code> is unique plus not-null, enforced on every write.
+        <code>FOREIGN KEY</code> is <strong>a lock on the parent row for the duration of the
+        statement</strong>. <code>CHECK</code> is a per-row boolean and is useless across
+        rows. <code>DEFERRABLE</code> moves the check to <code>COMMIT</code> rather than per
+        statement. Everything else in this section is a consequence of those four.</p>
+      </div>
+
+      <pre class="snippet" data-lang="sql" data-title="Constraint by invariant" data-hl-line="5,11"><code>-- a range a type could nearly express
+ALTER TABLE subscriptions
+  ADD CONSTRAINT subscriptions_dates_valid CHECK (starts_at &lt; ends_at);
+
+-- a cross-column invariant on one row: the valuable CHECK
+ALTER TABLE employees
+  ADD CONSTRAINT salary_within_band CHECK (salary BETWEEN 0 AND salary_cap),
+  ADD CONSTRAINT manager_not_self  CHECK (manager_id IS NULL OR manager_id &lt;&gt; id);
+
+-- a reference across rows: only a FOREIGN KEY can enforce this
+ALTER TABLE orders
+  ADD CONSTRAINT orders_customer_fk
+  FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE RESTRICT;</code></pre>
+
+
+      <p>The framing that earns the staff answer is that these answer <em>different
+      questions</em>. Service-layer validation answers "did this request arrive well-formed?"
+      A constraint answers "is this row, right now, in a state the rest of the system can
+      assume is impossible?" <strong>Validation protects a request; a constraint protects a
+      dataset.</strong> They come apart in four ordinary ways:</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "I validate in the service, why do I need a constraint?"</span>
+        <p><strong>1. The second write path.</strong> A backfill script, a data import, an
+        admin tool, a migration. All of them can write; none go through your service.
+        <strong>2. The race.</strong> Two requests both pass validation against "quantity
+        &gt; available". Both succeed, the invariant is violated, and no <code>throw</code>
+        ever fired, because each request was individually valid.
+        <strong>3. Partial failure.</strong> The service validates, writes to two tables, the
+        second write fails, the transaction rolls back — good — but the same path invoked from
+        a queue consumer with a slightly different ordering does not.
+        <strong>4. The rule changes.</strong> The code deploys on Tuesday; the constraint is
+        dropped on Wednesday by a migration that relaxes it. For a day the old rule is gone
+        and the new one is not yet in the code, which is exactly when bad data gets written.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — should the database enforce the foreign key?</span>
+        <p><strong>Enforce it</strong> when the data outlives the code that writes it, when
+        more than one service or job writes the table, or when the reference is load-bearing.
+        A foreign key is a distributed assertion that a certain kind of bad state is now
+        impossible, and it holds for every future writer including the one you have not
+        written. <strong>Do not enforce it</strong> when the referenced rows live in another
+        service, when the table is sharded or the reference is intentionally soft, or when the
+        write path cannot tolerate the lock — a hot parent row, a customer with 40,000 orders,
+        serialises inserts and shows up as lock waits rather than as slow queries.
+        <strong>Flips on:</strong> who else can write this table. One writer deployed with the
+        schema, an application check is fine and cheaper. Three writers, one a data import that
+        runs outside your deploy, the constraint is what stops a bad import corrupting the
+        table and the lock cost is the price of that.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption><code>ON DELETE</code> is a data-destruction policy, not a convenience setting</caption>
+          <thead><tr><th>Action</th><th>What happens to children</th><th>Use when</th></tr></thead>
+          <tbody>
+            <tr><td><code>RESTRICT</code></td><td>Rejects the parent delete immediately</td><td><strong>The default worth defaulting to.</strong> Children must be explicitly re-homed first</td></tr>
+            <tr><td><code>NO ACTION</code></td><td>Rejects at statement or constraint-check time — deferrable, so at commit</td><td>You want to move rows, then delete</td></tr>
+            <tr><td><code>CASCADE</code></td><td>Deletes the children</td><td>The child is a genuine <em>component</em> of the parent — <code>order_line</code> rows have no independent meaning — and there are few of them</td></tr>
+            <tr><td><code>SET NULL</code></td><td>Nulls the child's FK column</td><td>The child survives; the link is optional. Pairs with a <code>deleted_at</code> soft delete on the parent</td></tr>
+            <tr><td><code>SET DEFAULT</code></td><td>Sets the FK to its default</td><td>Rarely — it needs the default to be a valid existing row</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The production shape of the <code>CASCADE</code> mistake is worth knowing because it
+      has happened. An engineer runs a one-off <code>DELETE FROM users WHERE email = ...</code>;
+      it takes 4.7 seconds and locks two tables, and nobody is down. Six weeks later a support
+      ticket arrives because a customer's entire order history has vanished from the admin UI.
+      The cascade had been applied by habit for an unrelated child table and took 41,000
+      <code>orders</code> rows with it. The delete was not inside an explicit transaction
+      because the client wraps a single statement in an implicit one — which is correct
+      behaviour, and is exactly why nothing could be rolled back. Prevention: default to
+      <code>RESTRICT</code>, treat <code>CASCADE</code> on a table that grows without bound as
+      a review flag, and wrap any large <code>DELETE</code> in an explicit transaction after a
+      <code>SELECT count(*)</code>.</p>
+
+      <pre class="snippet" data-lang="sql" data-title="Deferrable constraint swap" data-hl-line="4"><code>ALTER TABLE category
+  ADD CONSTRAINT category_parent_fk
+  FOREIGN KEY (parent_id) REFERENCES category(id)
+  DEFERRABLE INITIALLY DEFERRED;   -- checked at COMMIT, not per row
+
+BEGIN;
+  -- swap two parents. Each step transiently violates the constraint.
+  UPDATE category SET parent_id = 12 WHERE id = 11;
+  UPDATE category SET parent_id = 11 WHERE id = 12;
+COMMIT;   -- the only place the constraint is evaluated, and it passes</code></pre>
+
+      <p>The lesson in a small feature is large: <strong>a constraint is a statement about
+      transaction boundaries, not about rows.</strong> It exists for invariants spanning
+      multiple rows whose correct write order is not the obvious one — building a tree from
+      the leaves up, swapping two adjacent parents, a multi-row re-parenting. And the first
+      question when you find yourself working around a constraint is whether the invariant
+      genuinely is per-row.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Adding a constraint to a table that already has 400 million rows</caption>
+          <thead><tr><th>Form</th><th>Lock</th><th>Cost</th></tr></thead>
+          <tbody>
+            <tr><td><code>ALTER TABLE ... ADD CONSTRAINT</code></td><td><code>ACCESS EXCLUSIVE</code> for the duration</td><td>Full scan to validate every existing row, then a long lock. If rows violate it, the migration fails — so finding and remediating the violations is a prerequisite, not a detail</td></tr>
+            <tr><td>PostgreSQL: <code>ADD CONSTRAINT ... NOT VALID</code>, then <code>VALIDATE CONSTRAINT</code> separately</td>
+              <td><code>SHARE UPDATE EXCLUSIVE</code></td><td>Can be run incrementally; existing rows are not re-checked until validation</td></tr>
+            <tr><td>MySQL: <code>ADD CONSTRAINT ..., ALGORITHM=INPLACE, LOCK=NONE</code></td>
+              <td>Minimal, where the engine supports it</td><td>The equivalent online form</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Adding a constraint to a large table is a <em>migration with a data-quality
+      prerequisite</em>, not a schema change. Related: constraints are validated on
+      <code>UPDATE</code> as well as <code>INSERT</code>, so an update touching a
+      <code>CHECK</code>ed column is validated the same way.</p>
+    </section>
+
+    <!-- ============ 5 ============ -->
+    <section id="ch5" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">05</span>
+        <h2>Normalisation &amp; denormalisation</h2>
+      </div>
+
+      <p>Normalisation is not tidiness and not a purity ladder. It is a set of rules for
+      removing redundancy caused by functional-dependency violations, and the reason to remove
+      it is mechanical: <strong>it is only safe to store a fact in one place if updating the
+      fact requires updating that one place.</strong> A functional dependency <code>A &rarr; B</code>
+      means any two rows agreeing on <code>A</code> must also agree on <code>B</code>.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "normalisation makes writes slower, so it's outdated"</span>
+        <p>The claim fails on its own terms, because it compares an insert into one
+        denormalised table against an insert into one normalised table <em>with no joins</em> —
+        which is not the comparison normalisation asks for, since the denormalised form is not
+        admissible: it stores the same fact three times, so the cost model differs in kind,
+        not in degree. You cannot move Alice without touching three rows. The honest trade-off
+        is that normalisation removes <em>anomalies</em> — classes of incorrect data no
+        application code can prevent, because the code is not the only writer — while
+        denormalisation buys read latency and join avoidance at the cost of a second
+        consistency mechanism you now have to build, run, and monitor. The common failure is
+        the reverse sequence: denormalise everywhere "to be fast," then discover you have
+        three code paths that must update five tables in the right order or they disagree.
+        That is not performance engineering; it is a distributed system with no transactions,
+        and it is far more expensive than a join.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The normal forms, and the anomaly each one removes</caption>
+          <thead><tr><th>Form</th><th>Rule</th><th>Fixes</th></tr></thead>
+          <tbody>
+            <tr><td>1NF</td><td>Atomic values — no arrays, no repeating groups, no <code>col1, col2, col3</code> columns</td><td>Multi-valued attributes and ragged rows</td></tr>
+            <tr><td>2NF</td><td>1NF + no <em>partial</em> dependency on a composite key; every non-key column depends on the whole key</td><td>Update and insertion anomalies in tables with composite keys</td></tr>
+            <tr><td>3NF</td><td>2NF + no <em>transitive</em> dependency: no non-key column depends on another non-key column</td><td><strong>The update anomaly — the one that actually bites</strong></td></tr>
+            <tr><td>BCNF</td><td>3NF + every determinant is a candidate key</td><td>Non-trivial FD violations a 3NF schema still permits</td></tr>
+            <tr><td>4NF</td><td>3NF + no non-trivial multi-valued dependency</td><td>Insertion anomalies where the redundancy is an MVD, not an FD</td></tr>
+            <tr><td>5NF</td><td>4NF + no join dependency</td><td>MVD cases 4NF cannot decompose further. Rarely reached</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — what is the difference between 3NF and BCNF?</span>
+        <p>Both forbid a non-key attribute from depending on a non-key attribute; the gap is
+        who the determinant is. <strong>3NF relaxes this when the determinant is a candidate
+        key</strong> — it only requires that no non-key attribute depends on a non-key
+        attribute, so <code>A &rarr; B</code> where <code>A</code> is <em>another</em> candidate
+        key is fine. BCNF does not relax it: every determinant must be a candidate key, so
+        <code>A &rarr; B</code> is illegal unless <code>A</code> itself is one. The gap appears with
+        overlapping candidate keys — say <code>(student, subject)</code> and
+        <code>(student, exam)</code> are both candidate keys and there is a dependency
+        <code>student &rarr; tutor</code>. That is legal in 3NF and illegal in BCNF. The pragmatic
+        answer: 3NF is almost always good enough, BCNF is the theoretical refinement, and the
+        difference matters far less than whether anyone has actually checked what the
+        candidate keys are.</p>
+      </div>
+
+      <p>Three anomalies follow from the unnormalised <code>orders</code> table that carries
+      <code>customer_name</code> and <code>customer_city</code> alongside the order, and each
+      one is an incident someone has already had. <strong>Update:</strong> Alice moves to
+      Manchester — update one row and every report about her city is wrong, or update three
+      and you have a loop that misses rows added while it runs. <strong>Insertion:</strong> a
+      new customer with no orders cannot be recorded at all, because there is no row in which
+      to put them without inventing an order. <strong>Deletion:</strong> you delete order 3,
+      the only order that happened to record her city that month, and you have now destroyed
+      information about a customer who still exists — deleting an <em>order</em> destroyed data
+      about a <em>customer</em>, which is the tell that the table is holding two entities'
+      facts at one grain.</p>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — state the grain, in one sentence, in the table comment</span>
+        <p>"One row per <code>order_line</code>" costs nothing and prevents an entire class of
+        incident. Grain determines the primary key, what a <code>UNIQUE</code> constraint can
+        even mean, which aggregations are possible without double-counting, and whether a join
+        to another table multiplies rows. Almost every schema design disagreement is a grain
+        disagreement in disguise: two engineers each build a correct <code>orders</code> table
+        and the bug appears when the code assumes one row per order and gets three.
+        <strong>Every double-counting bug in production is a grain bug that nobody wrote
+        down.</strong></p>
+      </div>
+
+      <pre class="snippet" data-lang="sql" data-title="Fixing join fan-out" data-hl-line="2,3"><code>-- WRONG: joins order-level to line-level, then sums a line measure
+SELECT o.id, o.status, SUM(l.amount) AS revenue
+FROM orders o JOIN order_lines l ON l.order_id = o.id
+GROUP BY o.id, o.status;   -- revenue is multiplied by average lines per order
+
+-- RIGHT: aggregate to the grain you need BEFORE joining
+WITH lines AS (
+    SELECT order_id, SUM(amount) AS line_total
+    FROM order_lines
+    GROUP BY order_id
+)
+SELECT o.id, o.status, l.line_total AS revenue
+FROM orders o
+JOIN lines l ON l.order_id = o.id;</code></pre>
+
+      <p>Two shapes of this bug are worth naming. The simple one is a join that also selects an
+      order-level column and <em>looks</em> fine, because the order columns are simply repeated
+      on each output row and only the aggregate is wrong. The dangerous one is the three-way
+      join — adding <code>products</code> to get a product name, where a line's product joins to
+      five variants, produces fifteen rows and a <code>SUM</code> that is five times too large.
+      In a financial report that passes review, because the headers are right and the numbers
+      are plausible. The detective step before the fix is <code>SUM(DISTINCT ...)</code>, which
+      confirms the diagnosis; the real fix is the CTE above; the prevention is the table
+      comment.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Three ways to denormalise — and they fail differently</caption>
+          <thead><tr><th>Mechanism</th><th>Freshness</th><th>Write cost</th><th>Failure mode</th></tr></thead>
+          <tbody>
+            <tr><td>Trigger or <code>GENERATED</code> column</td><td>Immediate</td><td>+1 write per row on the parent</td><td>Slows the write path. The usual choice when the value is read constantly</td></tr>
+            <tr><td>Materialised view</td><td>Until <code>REFRESH</code></td><td>Zero on the base tables</td><td>Silently stale with no error at all. Needs a refresh schedule and a staleness SLA</td></tr>
+            <tr><td>Application event or async job</td><td>Seconds to minutes</td><td>One message per write</td><td>Partition-boundary failure means permanently wrong numbers with nothing to alert on</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — should I denormalise?</span>
+        <p>The condition that says yes needs all three: <strong>the join is on a measured hot
+        path, you have the numbers to prove it, and you can name how the redundancy stays
+        consistent.</strong> If any one is missing — it is a slow suspicion, you cannot say how
+        the copy is kept in step, or the "denormalised" column is one three services write to
+        — the answer is no. The reason to be conservative is that denormalisation converts a
+        consistency problem the database already solves in one transaction into a distributed
+        consistency problem you must solve yourself across a trigger, a refresh, or a service
+        boundary. The database's version is synchronous and already tested; trading it for a
+        millisecond of join latency is usually a bad deal, and it is <em>always</em> a bad deal
+        if you are guessing rather than measuring. <strong>Flips on:</strong> reversibility —
+        denormalising is cheap to add and expensive to remove, because by the time you want the
+        redundancy gone there are four code paths and a job that read the column and cached
+        it. So normalise first, then denormalise one measured path deliberately and own the
+        sync.</p>
+      </div>
+    </section>
+
+    <!-- ============ 6 ============ -->
+    <section id="ch6" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">06</span>
+        <h2>Relational algebra &amp; the execution model</h2>
+      </div>
+
+      <p>Relational algebra is a small closed set of operators; SQL is a syntax for a subset
+      of it. The reason to know it is not academic — the fixed clause order follows directly
+      from the operators, and every one of the SQL questions candidates get wrong is explained
+      by that order.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The operators every plan is a composition of</caption>
+          <thead><tr><th>Operator</th><th>SQL form</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Selection <code>&sigma;</code></td><td><code>WHERE</code></td><td>Filters rows by a predicate</td></tr>
+            <tr><td>Projection <code>&pi;</code></td><td><code>SELECT col_list</code></td><td>Chooses columns — and is what gives them names</td></tr>
+            <tr><td>Join <code>&bowtie;</code></td><td><code>JOIN ... ON</code></td><td>Combines relations on a condition</td></tr>
+            <tr><td>Union <code>&cup;</code></td><td><code>UNION</code></td><td>Combines relations, removing duplicates</td></tr>
+            <tr><td>Rename <code>&rho;</code></td><td><code>AS</code></td><td>Renames attributes</td></tr>
+            <tr><td>Aggregation <code>&gamma;</code></td><td><code>GROUP BY</code>, <code>COUNT</code>, <code>SUM</code></td><td>Groups and reduces</td></tr>
+            <tr><td>Semi-join</td><td><code>EXISTS</code>, <code>IN</code></td><td>Keeps left rows that have a match in right</td></tr>
+            <tr><td>Anti-join</td><td><code>NOT EXISTS</code></td><td>Keeps left rows that have <em>no</em> match in right</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 410" role="img" aria-label="The fixed SQL clause order, top to bottom: FROM and JOIN build the working relation; WHERE is a selection that drops rows early but cannot see a SELECT alias; GROUP BY partitions and reduces; HAVING selects groups rather than rows; SELECT is the projection that names the columns; DISTINCT dedupes by sort or hash; ORDER BY sorts, turning the bag into an ordered relation; LIMIT truncates. Because the order is fixed, a window function cannot be filtered by WHERE.">
+          <defs>
+            <marker id="arw-d1-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node" x="160" y="16" width="300" height="30" rx="5"/>
+          <text class="label" x="310" y="36" text-anchor="middle">FROM + JOIN</text>
+          <text class="edge-label" x="150" y="36" text-anchor="end">build</text>
+          <text class="edge-label" x="470" y="36" text-anchor="start">the working relation</text>
+          <path class="edge" d="M 310 46 L 310 60" marker-end="url(#arw-d1-d)"/>
+
+          <rect class="node node--good" x="160" y="62" width="300" height="30" rx="5"/>
+          <text class="label" x="310" y="82" text-anchor="middle">WHERE</text>
+          <text class="edge-label" x="150" y="82" text-anchor="end">&sigma;</text>
+          <text class="edge-label fill-bad" x="470" y="82" text-anchor="start">no SELECT alias exists yet</text>
+          <path class="edge" d="M 310 92 L 310 106" marker-end="url(#arw-d1-d)"/>
+
+          <rect class="node" x="160" y="108" width="300" height="30" rx="5"/>
+          <text class="label" x="310" y="128" text-anchor="middle">GROUP BY</text>
+          <text class="edge-label" x="150" y="128" text-anchor="end">&gamma;</text>
+          <text class="edge-label" x="470" y="128" text-anchor="start">partition, then reduce</text>
+          <path class="edge" d="M 310 138 L 310 152" marker-end="url(#arw-d1-d)"/>
+
+          <rect class="node" x="160" y="154" width="300" height="30" rx="5"/>
+          <text class="label" x="310" y="174" text-anchor="middle">HAVING</text>
+          <text class="edge-label" x="150" y="174" text-anchor="end">&sigma;</text>
+          <text class="edge-label" x="470" y="174" text-anchor="start">on the groups, not the rows</text>
+          <path class="edge" d="M 310 184 L 310 198" marker-end="url(#arw-d1-d)"/>
+
+          <rect class="node node--accent" x="160" y="200" width="300" height="30" rx="5"/>
+          <text class="label" x="310" y="220" text-anchor="middle">SELECT</text>
+          <text class="edge-label" x="150" y="220" text-anchor="end">&pi;</text>
+          <text class="edge-label" x="470" y="220" text-anchor="start">projection names the columns</text>
+          <path class="edge" d="M 310 230 L 310 244" marker-end="url(#arw-d1-d)"/>
+
+          <rect class="node" x="160" y="246" width="300" height="30" rx="5"/>
+          <text class="label" x="310" y="266" text-anchor="middle">DISTINCT</text>
+          <text class="edge-label" x="150" y="266" text-anchor="end">set</text>
+          <text class="edge-label" x="470" y="266" text-anchor="start">dedupe by sort or hash</text>
+          <path class="edge" d="M 310 276 L 310 290" marker-end="url(#arw-d1-d)"/>
+
+          <rect class="node" x="160" y="292" width="300" height="30" rx="5"/>
+          <text class="label" x="310" y="312" text-anchor="middle">ORDER BY</text>
+          <text class="edge-label" x="150" y="312" text-anchor="end">sort</text>
+          <text class="edge-label" x="470" y="312" text-anchor="start">the bag becomes ordered</text>
+          <path class="edge" d="M 310 322 L 310 336" marker-end="url(#arw-d1-d)"/>
+
+          <rect class="node" x="160" y="338" width="300" height="30" rx="5"/>
+          <text class="label" x="310" y="358" text-anchor="middle">LIMIT</text>
+          <text class="edge-label" x="150" y="358" text-anchor="end">truncate</text>
+          <text class="edge-label" x="470" y="358" text-anchor="start">result set</text>
+
+          <text class="edge-label edge-label--strong" x="330" y="394" text-anchor="middle">a window function cannot be filtered by WHERE — windowing happens after GROUP BY</text>
+        </svg>
+        <figcaption>
+          <strong>It is not the order you write the clauses, and it is not arbitrary.</strong>
+          It is the order that makes the operators compose, because each one consumes the output
+          of the last. Reading a plan is largely reading <em>where the filters ended up</em>.
+        </figcaption>
+      </figure>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — why can I not use a <code>SELECT</code> alias in <code>WHERE</code>?</span>
+        <p>Because <code>WHERE</code> filters rows, and the alias does not exist until
+        <code>SELECT</code> has run, and <code>SELECT</code> runs after <code>WHERE</code>. It
+        is not a parser quirk — it follows from the algebra. <code>WHERE</code> operates on a
+        relation of tuples of the <em>base</em> schema; projection is what produces the relation
+        with your chosen names. <code>ORDER BY</code> is different because it is specified to
+        run after <code>SELECT</code>, which is why <code>ORDER BY total</code> works while
+        <code>WHERE total &gt; 100</code> does not. The useful half of the answer is the
+        workaround and its cost: <strong>repeating the expression is free</strong>, because the
+        optimiser evaluates it once. The <em>wrong</em> workaround — wrapping the query in a
+        subquery or CTE and filtering on the alias in the outer query — works and frequently
+        blocks predicate pushdown to the scan, putting the filter above a materialisation
+        boundary. If the expression is expensive enough that you want to name it, the right fix
+        is a generated column or a functional index.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — predicate pushdown, and the three cases it cannot do</span>
+        <p>Pushing filters toward the leaves is the optimiser's most valuable transformation: a
+        filter applied early removes rows that would otherwise be joined, aggregated, sorted,
+        or shipped. Joining 41M orders to 8M customers and then filtering to 40K is a different
+        cost model from scanning 41M, filtering to 40K, scanning 8M, and joining 40K to 40K.
+        It fails in three cases worth naming. <strong>1.</strong> A predicate on the nullable
+        side of an outer join cannot be pushed past the join without changing the result:
+        <code>LEFT JOIN customers ... WHERE c.tier = 'GOLD'</code> would drop the unmatched
+        orders the outer join was meant to preserve. <strong>2.</strong> A volatile expression
+        cannot be pushed, because evaluating it earlier may produce a different answer.
+        <strong>3.</strong> A correlated subquery predicate is pushable only when the subquery
+        is uncorrelated. Add the sting: filtering <em>after</em> an outer join also discards
+        the unmatched rows, silently converting the <code>LEFT JOIN</code> into an inner join
+        — so the optimiser is right not to push it, but the query is still wrong.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — does join order matter?</span>
+        <p>The reflexive answer is "no, the optimiser handles it"; the sharper answer is "yes,
+        and here are the three cases where it does." For most queries the planner permutes
+        orderings and picks by estimated cost, so your ordering is noise. It becomes yours when
+        the planner stops searching exhaustively, when it is misinformed — since order is
+        chosen from estimated row counts, a stale statistic gives a bad order exactly as
+        readily as a bad access path, and the fix is <code>ANALYZE</code>, not reordering —
+        and, the case that actually bites, <strong>when the join types make the order
+        semantically load-bearing.</strong> <code>LEFT JOIN</code> is not associative:
+        <code>a LEFT JOIN b JOIN c</code> and <code>a LEFT JOIN (b JOIN c)</code> are different
+        queries with different results, and the parser is entitled to regroup them. That is a
+        correctness hazard rather than a performance one, and raising it unprompted is the
+        difference between a senior answer and a staff one.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>One logical plan, many physical candidates</caption>
+          <thead><tr><th>Logical operator</th><th>Physical implementations</th></tr></thead>
+          <tbody>
+            <tr><td>selection</td><td>Index scan, index-only scan, bitmap heap scan, filter on a sequential scan</td></tr>
+            <tr><td>join</td><td>Nested loop, hash join, merge join</td></tr>
+            <tr><td>aggregate</td><td>Hash aggregate, group aggregate over a sort, index-only scan in order</td></tr>
+            <tr><td>sort</td><td>Top-N heapsort for <code>ORDER BY</code> + <code>LIMIT</code>, full sort</td></tr>
+            <tr><td>set operation</td><td>Hash set operation, merge set operation, dedupe</td></tr>
+            <tr><td>subquery</td><td>Semi-join, anti-join, decorrelated nested loop, materialise</td></tr>
+            <tr><td>distinct</td><td>Hash aggregate, sort-based unique, index-only scan</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>There is exactly one logical plan for your query and a very large number of physical
+      plans, and choosing between them is a cost-estimation problem driven by statistics that
+      may be wrong. Which is why <strong>"add an index and see what happens" is not a debugging
+      method</strong> — you are perturbing the cost model and hoping the guess changes. The
+      method is to make the statistics true (<code>ANALYZE</code>), then read what the optimiser
+      does with the truth. A monthly report that used to take 4 seconds and now takes 3 minutes
+      with unchanged SQL is a changed plan, and a changed plan needs a changed cause: stale
+      statistics, a lock, or index bloat after a year of churn. Diagnose by comparing estimated
+      to actual rows at the first node where they diverge by more than roughly an order of
+      magnitude — everything below it is a consequence.</p>
+    </section>
+
+    <!-- ============ 7 ============ -->
+    <section id="ch7" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">07</span>
+        <h2>Scaling lenses on relational data</h2>
+      </div>
+
+      <p>"Relational databases don't scale" is half true in a way that makes it worse than
+      useless: the true half names a specific structural limit, and the false half lets people
+      skip the fix. The accurate statement is that <strong>a relational database's ceiling is a
+      write-concurrency ceiling, not a data ceiling</strong> — and a missing composite index or
+      a stale statistic looks exactly like hitting it. Teams that conclude "NoSQL" from a slow
+      table usually needed <code>ANALYZE</code> and one index, and end up with a document store
+      that is slower, has no transactions, and cannot answer the join they needed six weeks
+      later.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>What actually bounds a relational write path</caption>
+          <thead><tr><th>Bound</th><th>Mechanism</th><th>What it is <em>not</em> bounded by</th></tr></thead>
+          <tbody>
+            <tr><td>One writer</td><td>The primary is a single point of serialisation; throughput is how fast one instance can <code>fsync</code></td><td rowspan="4">Number of columns. Joins. The relational model itself</td></tr>
+            <tr><td>One log</td><td>The redo/WAL append must be sequential and durable</td></tr>
+            <tr><td>One hot set</td><td>Every transaction touching the same row or page serialises on it, regardless of core count</td></tr>
+            <tr><td>Structured contention</td><td>Index maintenance on a hot table is a serial cost per write</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "which database for a high-write system?"</span>
+        <p>The reflexive answer is DynamoDB or Cassandra, and it is usually driven by a
+        benchmark that measured single-row puts against a database that was misconfigured. The
+        senior answer starts by asking <em>what the write actually is</em>. If it is
+        append-only telemetry, the Postgres write path is a sequential WAL append and a heap
+        insert — partition by time, and most NoSQL stores handle that no better. If it is a
+        <strong>hot key</strong>, every write touching the same row or partition, then no store
+        helps: a single partition is a single-node bottleneck in every system, and the fix is
+        to spread the key, not to change databases. The genuinely hard case is high write volume
+        <em>plus</em> rich ad-hoc queries, and the answer there is usually "shard by tenant on a
+        relational engine" — keeping the joins you cannot give up and giving up only the write
+        throughput you were not using. The point worth making out loud: the bottleneck is
+        concurrency, and <strong>every store has a concurrency ceiling, at a different
+        shape</strong>.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The scaling ladder, ordered by reversibility</caption>
+          <thead><tr><th>Rung</th><th>Buys</th><th>Reversible in</th></tr></thead>
+          <tbody>
+            <tr><td>1. Index it properly, refresh statistics, kill the N+1</td><td>The fix for a large fraction of "we need to shard"</td><td>An afternoon</td></tr>
+            <tr><td>2. Read replicas</td><td>Read scale, which is the majority of load</td><td>Immediate. Adds replica lag as a new correctness concern, and does nothing for a write ceiling</td></tr>
+            <tr><td>3. Bigger instance</td><td>Memory &rarr; buffer pool &rarr; everything</td><td>Until you have designed around its limits</td></tr>
+            <tr><td>4. Vertical table splitting</td><td>Breaks up one hot wide table</td><td>Cheap. Often mistaken for sharding</td></tr>
+            <tr><td>5. Partitioning</td><td>Pruning, and making old-data deletion a <code>DROP</code> instead of a multi-hour <code>DELETE</code></td><td>One node, many partitions. Buys no cross-node throughput</td></tr>
+            <tr><td>6. Read/write split with a proxy or sharding library</td><td>Now you own the routing</td><td>Harder</td></tr>
+            <tr><td>7. Sharding</td><td>Write throughput beyond one node</td><td><strong>Not a quarter.</strong> The shard key is a one-way door</td></tr>
+            <tr><td>8. Change the data model</td><td>—</td><td>Only when everything above has failed and you can name why</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>A design review that jumps to rung 7 without having measured rungs 1 and 3 is not
+      making a technical decision, it is making a social one. The related staffing trap:
+      sharding early to "prepare for scale" while the schema is small is the worst possible
+      timing, because the resharding procedure is the one part that cannot be rehearsed at
+      small scale — the moment you have 4 million rows, the shard key is chosen, cross-shard
+      uniqueness is lost, and the only options are a live resharding migration or accepting the
+      mistake. Spend the same quarter making the shard key <em>discoverable</em>: identify the
+      candidate keys, find the one every query already carries, check its cardinality and
+      distribution, and note the one or two queries that would fan out.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>What sharding actually costs — the row to memorise is the foreign key</caption>
+          <thead><tr><th>Concern</th><th>Single database</th><th>Sharded</th></tr></thead>
+          <tbody>
+            <tr><td>Transaction</td><td>ACID, no effort</td><td>ACID <em>within</em> a shard; a cross-shard transaction is a saga or nothing</td></tr>
+            <tr><td>Join</td><td>Free, planner-optimised</td><td>Shard key in both tables, or a scatter-gather, or a denormalised copy</td></tr>
+            <tr><td><strong>Foreign key</strong></td><td>Enforced</td><td><strong>Cannot be enforced across nodes</strong>; becomes an application invariant with a race window</td></tr>
+            <tr><td><code>UNIQUE</code> constraint</td><td>Enforced</td><td>Only within a shard, unless the key <em>is</em> the shard key</td></tr>
+            <tr><td>Index maintenance</td><td>One place</td><td>Every shard, and rebalancing rebuilds them</td></tr>
+            <tr><td>Backup / restore</td><td>One consistent snapshot</td><td>Per-shard snapshots; a restore consistent only to the last cross-shard write</td></tr>
+            <tr><td>Query</td><td>Any query works</td><td>The shard key decides which queries are fast, and you learn that in production</td></tr>
+            <tr><td>Resharding</td><td>N/A</td><td>The most expensive operation in the trade</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Sharding does not remove distributed-systems problems; it converts each relational
+      guarantee into a harder one you now have to build, test, and monitor. And the two you
+      lose first — a <code>UNIQUE</code> constraint and a foreign key — are the two cheapest
+      integrity guarantees in SQL. That is not a performance regression you can buy back with
+      more hardware; it is a correctness property you have to re-implement, and the
+      application-level replacement is strictly weaker.</p>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — when is sharding the right answer?</span>
+        <p>The condition is that <strong>you have a tenant or region key that every query can
+        carry, and the data for one key genuinely belongs together.</strong> Not "we expect
+        high traffic" — at high traffic, rungs 1&ndash;5 get you a long way. The specific shape
+        is a multi-tenant system where one query almost always touches one tenant, the tenant
+        boundary is also a compliance or ownership boundary, and growth within a tenant is
+        genuinely unbounded. Under those conditions sharding is close to free: the shard key
+        <em>is</em> the partition key, joins stay within a shard, and the foreign key problem
+        largely disappears because related rows travel together. Under any other condition you
+        are buying cross-shard transactions, cross-shard uniqueness, cross-shard joins, and a
+        resharding procedure, in exchange for write throughput a bigger instance and one more
+        index would probably have bought. The question that decides it, and that you should ask
+        in the review, is: <strong>"what is our shard key, and show me the three most common
+        queries — which shard does each touch?"</strong> If any of them touches all of them,
+        you have not chosen a shard key, you have chosen a fan-out.</p>
+      </div>
+
+      <p>Which closes with the framing that makes "which database" a sequence rather than a
+      preference, and the <em>order</em> is the point. <strong>1.</strong> What is the access
+      pattern — one fixed key lookup, a few known queries, or arbitrary ad-hoc predicates? This
+      alone eliminates most candidates. <strong>2.</strong> What is the write volume, and is
+      it append-only or a hot key? <strong>3.</strong> What is the consistency requirement,
+      stated as a bound? "Immediately" or "within one second" are specifications; "eventually"
+      is not. <strong>4.</strong> What is the query flexibility requirement? Ad-hoc
+      predicates across entity types is the one thing relational engines are uniquely good at.
+      <strong>5.</strong> What does the team already operate? A new store is an on-call
+      rotation, a backup story, a restore test, and a runbook before it is a data model.
+      <strong>6.</strong> What does it cost to undo? This is the one that gets skipped — the
+      answer for "add a cache" is small; the answer for "move to a document store" is a rewrite
+      of every query and every test. If the answers to 1 and 2 are a fixed key lookup and high
+      volume with no ad-hoc queries, DynamoDB is right and the conversation was short.</p>
+    </section>
+
+    <!-- ============ numbers ============ -->
+    <section id="numbers" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">&nbsp;</span>
+        <h2>Numbers worth memorising</h2>
+      </div>
+      <div class="numbers">
+        <div class="number"><span class="number__value">3</span><span class="number__label">layers &mdash; query engine, storage engine, concurrency control</span></div>
+        <div class="number"><span class="number__value">3</span><span class="number__label">caches between a SELECT and the platter</span></div>
+        <div class="number"><span class="number__value">8 kB</span><span class="number__label">PostgreSQL page, fixed at init as BLCKSZ</span></div>
+        <div class="number"><span class="number__value">16 kB</span><span class="number__label">InnoDB page, fixed at init as innodb_page_size</span></div>
+        <div class="number"><span class="number__value">24 / 4</span><span class="number__label">bytes of page header, then bytes per slot pointer</span></div>
+        <div class="number"><span class="number__value">625,000</span><span class="number__label">pages for SELECT * on 50M rows &times; 200 bytes &mdash; against ~40,000 for four narrow columns</span></div>
+        <div class="number"><span class="number__value">720</span><span class="number__label">exhaustive join plans at six tables; heuristics kick in past 8&ndash;10</span></div>
+        <div class="number"><span class="number__value">3</span><span class="number__label">anomalies &mdash; update, insertion, deletion</span></div>
+        <div class="number"><span class="number__value">3</span><span class="number__label">ways to denormalise, each with a different failure mode</span></div>
+        <div class="number"><span class="number__value">8</span><span class="number__label">rungs of the scaling ladder, by reversibility</span></div>
+        <div class="number"><span class="number__value">6</span><span class="number__label">questions that decide which database &mdash; asked in this order</span></div>
+        <div class="number"><span class="number__value">41,000</span><span class="number__label">order rows taken by one accidental ON DELETE CASCADE</span></div>
+        <div class="number"><span class="number__value">5&times;</span><span class="number__label">overstatement from a three-way join through 5 product variants</span></div>
+        <div class="number"><span class="number__value">11s</span><span class="number__label">COUNT(*) on 40M rows, fully cached &mdash; CPU, not I/O</span></div>
+      </div>
+    </section>
+
+    <footer class="pagefoot">
+      <span>Volume 1 of 11 &mdash; Database Complete Deep-Dive</span>
+      <div class="pager">
+        <a href="02-sql-ddl-dml-constraints.html">DDL &amp; Constraints &rarr;</a>
+      </div>
+    </footer>
+
+  </main>
+</div>
+
+<script src="../../search.js"></script>
+<script src="../../highlight.js"></script>
+</body>
+</html>

@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Testing &amp; Production Troubleshooting — Cheatsheet</title>
+<meta name="description" content="Condensed cheatsheet for Spring Deep-Dive Volume 9: the test slices and what each one actually wires, Testcontainers and its lifecycle cost, and the failure signatures for diagnosing a running Spring application.">
+<link rel="stylesheet" href="../../site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="page">
+
+  <nav class="sidebar" aria-label="Contents">
+    <h2>On this page</h2>
+    <ol>
+      <li><a href="#ch1">1 — The test pyramid</a></li>
+      <li><a href="#ch2">2 — Test slices &amp; the context cache</a></li>
+      <li><a href="#ch3">3 — Testcontainers</a></li>
+      <li><a href="#ch4">4 — Mocking &amp; test design</a></li>
+      <li><a href="#ch5">5 — Pools, memory &amp; triage</a></li>
+      <li><a href="#ch6">6 — Distributed failure modes</a></li>
+      <li><a href="#ch7">7 — Production practice</a></li>
+      <li><a href="#numbers">Numbers</a></li>
+    </ol>
+    <h2>Series</h2>
+    <ul>
+      <li><a href="01-spring-core-ioc.html">01 — Core &amp; IoC</a></li>
+      <li><a href="02-bean-lifecycle-scopes-di.html">02 — Lifecycle &amp; DI</a></li>
+      <li><a href="03-aop-proxying.html">03 — AOP &amp; Proxying</a></li>
+      <li><a href="04-transaction-management.html">04 — Transactions</a></li>
+      <li><a href="05-spring-mvc-web-layer.html">05 — Spring MVC</a></li>
+      <li><a href="06-spring-data-jpa-persistence.html">06 — Data JPA</a></li>
+      <li><a href="07-spring-boot-auto-configuration.html">07 — Boot &amp; Auto-Config</a></li>
+      <li><a href="08-spring-security.html">08 — Security</a></li>
+      <li><a href="09-testing-production-troubleshooting.html">09 — Testing &amp; Ops</a></li>
+      <li><a href="10-webflux-project-reactor.html">10 — WebFlux</a></li>
+      <li><a href="11-spring-cloud-distributed-systems.html">11 — Spring Cloud</a></li>
+    </ul>
+    <h2>Repository</h2>
+    <ul>
+      <li><a href="../../../index.html">All cheatsheets</a></li>
+      
+    </ul>
+  </nav>
+
+  <main class="main" id="main">
+
+    <header class="masthead">
+      <p class="masthead__eyebrow">Spring — The Spring Complete Deep-Dive</p>
+      <h1>Volume 9 — Testing &amp; Production Troubleshooting</h1>
+      <p class="masthead__sub">
+        Which tier can catch which bug, what each test slice actually wires, and the two-minute
+        diagnostic that separates a deadlocked thread from a starved connection pool.
+      </p>
+      <ul class="masthead__meta">
+        <li>8 sections</li>
+        
+      </ul>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <input type="search" data-filter-input placeholder="Filter sections — press /" aria-label="Filter sections">
+        <span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span>
+      </div>
+      <div class="pager">
+        <a href="08-spring-security.html">&larr; Prev</a>
+        <a href="10-webflux-project-reactor.html">Next &rarr;</a>
+      </div>
+    </div>
+
+    <div class="keyfacts">
+      <h2>If you only remember five things</h2>
+      <ol>
+        <li><strong>A unit test structurally cannot see the container.</strong> It builds the
+        object graph itself, so a missing bean, an unbound property, a failed
+        <code>@Conditional</code> and a <code>@Transactional</code> self-invocation all ship
+        behind a green suite. That — not "more confidence" — is the argument for integration
+        tests.</li>
+        <li><strong><code>@MockBean</code> is deprecated as of Spring Boot 3.4.</strong> The
+        replacement is the Framework's <code>@MockitoBean</code>, and it is <em>not</em> a
+        rename: it cannot go on a <code>@Configuration</code> class, so migrating one means
+        restructuring the configuration.</li>
+        <li><strong>Mock at the process boundary, run against the data boundary.</strong> H2 in
+        PostgreSQL-compatibility mode emulates syntax, not semantics — a
+        <code>SELECT FOR UPDATE</code> test passes there and double-processes in production
+        because the row lock was never real.</li>
+        <li><strong>The heap is not the process.</strong> 200 Tomcat threads reserve roughly
+        200&nbsp;MB of stack before any business code runs, which is why
+        <code>MaxRAMPercentage</code> sits at 70&ndash;75% and why an <code>-Xmx</code> equal to
+        the container limit guarantees a silent <code>OOMKill</code> — exit 137, no heap dump,
+        no <code>OutOfMemoryError</code>.</li>
+        <li><strong>Three <code>jcmd &lt;pid&gt; Thread.print -l</code> dumps, ten seconds
+        apart.</strong> One dump cannot tell a thread that is working from one that is stuck.
+        What <em>never changes</em> across all three is the bug.</li>
+      </ol>
+    </div>
+
+    <p class="empty" data-filter-empty hidden>No section matches that filter.</p>
+
+    <!-- ============ 1 ============ -->
+    <section id="ch1" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">01</span>
+        <h2>The test pyramid</h2>
+      </div>
+
+      <p>The pyramid is not three counts. It is a map of <strong>which tier is the only one
+      capable of catching a given class of bug</strong> — and in Spring the mapping is unusually
+      sharp, because only the high-level tiers execute the container.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Four tiers, and the last column is the one that decides the budget</caption>
+          <thead><tr><th>Tier</th><th>What it is in Spring</th><th>Runs in</th><th>Structurally CANNOT catch</th></tr></thead>
+          <tbody>
+            <tr><td>Unit</td><td>Plain JUnit, no Spring. <code>new OrderService(repo, clock)</code></td>
+              <td>Milliseconds, hundreds of them</td><td>Wiring. Anything the container does</td></tr>
+            <tr><td>Slice</td><td>One auto-configuration, real context. <code>@WebMvcTest</code>, <code>@DataJpaTest</code></td>
+              <td>~1&ndash;3s, tens</td><td>Cross-slice wiring. Anything the slice's filter excludes</td></tr>
+            <tr><td>Integration</td><td>Full context, real or containerised infrastructure. <code>@SpringBootTest</code></td>
+              <td>3&ndash;15s per <em>distinct context</em>, tens</td><td>Cross-service. Anything outside the JVM</td></tr>
+            <tr><td>E2E</td><td>The deployed system, real HTTP, real dependencies</td>
+              <td>Minutes, a handful</td><td>The internals. Anything behind a mock</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — why the expensive tier exists at all</span>
+        <p>Component scanning, conditional beans, <code>@ConfigurationProperties</code> binding,
+        JSR-380 validation, auto-configuration ordering, the <code>BeanPostProcessor</code> chain
+        and proxy creation all happen at context refresh. A unit suite <strong>cannot observe any
+        of it</strong> — not because nobody wrote the test, but because the technique has no
+        container in it. The mirror image is the reason teams over-invest: a
+        <code>@SpringBootTest</code> that mocks the repository is a slow test that proves the
+        context loaded and that Mockito works.</p>
+      </div>
+
+      <p>So rank the backlog by evidence rather than by a tool. Pull the last three production
+      incidents, write down the test that fails before each fix, and queue those. Three winners
+      recur: a <strong>transaction-boundary</strong> test that asserts a rollback really happens
+      (<a href="04-transaction-management.html">V4</a>), a <strong>query-shape</strong> test that
+      fails when a query becomes N+1 (<a href="06-spring-data-jpa-persistence.html">V6</a>), and
+      a <strong>configuration-binding</strong> test that fails when a required property is
+      absent. A "happy path for every service method" backlog feels productive and is almost
+      never what the incidents needed.</p>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — coverage as an outlier signal, not a threshold</span>
+        <p>Coverage has exactly one genuinely useful property: it finds code nobody thought
+        about. A class at 0% in a two-year-old service is alarming, because nobody is sure what
+        happens there. <strong>Flips on:</strong> it works as an <em>outlier</em> detector
+        ("this file is 4%, why?") and fails as a <em>threshold</em> ("we must be above 90%"). Once
+        90% is a target, the cheapest lines to cover are getters, constructors and
+        <code>toString</code> — and that work displaces the rollback test which would have caught
+        a real incident. The staff-level version: a 90% suite with no rollback assertion is
+        <em>more</em> dangerous than a 40% suite with one, because the number suppresses the
+        discussion.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Four sources of nondeterminism, and the replacement for each</caption>
+          <thead><tr><th>Source</th><th>How it fails</th><th>Deterministic replacement</th></tr></thead>
+          <tbody>
+            <tr><td><code>Thread.sleep(500)</code></td><td>A coin flip costing half a second a run, failing at exactly the probability the async work missed 500ms</td>
+              <td><code>await().atMost(2, SECONDS)</code> on a condition, or a real completion signal — and if the code offers no hook, that is a production finding</td></tr>
+            <tr><td><code>Instant.now()</code></td><td>Passes in CI, fails on a machine whose timezone crosses midnight</td>
+              <td>Inject a <code>Clock</code> — a production design change the test forced into existence</td></tr>
+            <tr><td>Execution order</td><td>A static fixture mutated by one test, asserted by the next; fails on reorder</td>
+              <td>Per-test data ownership. <code>@TestMethodOrder</code> is a code smell except for genuinely stateful lifecycle tests</td></tr>
+            <tr><td>Shared external state</td><td>Two suites on one dev database, a fixed port, a fixed S3 prefix — collides in CI when two branches run</td>
+              <td>Own the resource: a per-run identifier, a per-class container, port 0. <code>@ActiveProfiles("test")</code>, never <code>"dev"</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — the test of a suite</span>
+        <p>Not "how many tests pass" but <strong>"does the suite ever fail for a reason
+        unrelated to a change?"</strong> Order-dependent tests are worse than no tests, because
+        they are unreliable — and an unreliable suite trains the team to re-run failures rather
+        than read them, which makes a real failure look like a flake. The re-run becomes the
+        workflow and the flake budget quietly becomes "whatever we can tolerate".</p>
+      </div>
+    </section>
+
+    <!-- ============ 2 ============ -->
+    <section id="ch2" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">02</span>
+        <h2>Test slices &amp; the context cache</h2>
+      </div>
+
+      <p>Each slice is one auto-configuration applied to a minimal context, plus a type filter
+      that decides what survives. The design rests on a single rule you must learn per slice:
+      <strong>what it includes and what it excludes.</strong> The figure below is that rule,
+      drawn — because a slice's blind spot is invisible until you see the whole context with one
+      column missing.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 700 268" role="img" aria-label="Grid of context components against four test annotations. @SpringBootTest loads everything for real. @WebMvcTest loads the web layer and Jackson for real but replaces @Service beans with mocks. @DataJpaTest loads repositories for real but swaps the DataSource for an embedded one and excludes the web layer entirely. @JsonTest loads only Jackson.">
+          <text class="label" x="236" y="24" text-anchor="middle">@SpringBootTest</text>
+          <text class="label" x="368" y="24" text-anchor="middle">@WebMvcTest</text>
+          <text class="label" x="501" y="24" text-anchor="middle">@DataJpaTest</text>
+          <text class="label" x="633" y="24" text-anchor="middle">@JsonTest</text>
+
+          <text class="label" x="8" y="66">Web layer</text>
+          <rect class="node node--good" x="180" y="46" width="112" height="32" rx="5"/>
+          <text class="label" x="236" y="66" text-anchor="middle">real</text>
+          <rect class="node node--good" x="312" y="46" width="112" height="32" rx="5"/>
+          <text class="label" x="368" y="66" text-anchor="middle">real</text>
+          <rect class="node" x="445" y="46" width="112" height="32" rx="5"/>
+          <text class="label label--sub" x="501" y="66" text-anchor="middle">absent</text>
+          <rect class="node" x="577" y="46" width="112" height="32" rx="5"/>
+          <text class="label label--sub" x="633" y="66" text-anchor="middle">absent</text>
+
+          <text class="label" x="8" y="106">Jackson</text>
+          <rect class="node node--good" x="180" y="86" width="112" height="32" rx="5"/>
+          <text class="label" x="236" y="106" text-anchor="middle">real</text>
+          <rect class="node node--good" x="312" y="86" width="112" height="32" rx="5"/>
+          <text class="label" x="368" y="106" text-anchor="middle">real</text>
+          <rect class="node" x="445" y="86" width="112" height="32" rx="5"/>
+          <text class="label label--sub" x="501" y="106" text-anchor="middle">absent</text>
+          <rect class="node node--good" x="577" y="86" width="112" height="32" rx="5"/>
+          <text class="label" x="633" y="106" text-anchor="middle">real</text>
+
+          <text class="label" x="8" y="146">@Service beans</text>
+          <rect class="node node--good" x="180" y="126" width="112" height="32" rx="5"/>
+          <text class="label" x="236" y="146" text-anchor="middle">real</text>
+          <rect class="node node--warn" x="312" y="126" width="112" height="32" rx="5"/>
+          <text class="label" x="368" y="146" text-anchor="middle">mock</text>
+          <rect class="node" x="445" y="126" width="112" height="32" rx="5"/>
+          <text class="label label--sub" x="501" y="146" text-anchor="middle">absent</text>
+          <rect class="node" x="577" y="126" width="112" height="32" rx="5"/>
+          <text class="label label--sub" x="633" y="146" text-anchor="middle">absent</text>
+
+          <text class="label" x="8" y="186">Repositories</text>
+          <rect class="node node--good" x="180" y="166" width="112" height="32" rx="5"/>
+          <text class="label" x="236" y="186" text-anchor="middle">real</text>
+          <rect class="node" x="312" y="166" width="112" height="32" rx="5"/>
+          <text class="label label--sub" x="368" y="186" text-anchor="middle">absent</text>
+          <rect class="node node--good" x="445" y="166" width="112" height="32" rx="5"/>
+          <text class="label" x="501" y="186" text-anchor="middle">real</text>
+          <rect class="node" x="577" y="166" width="112" height="32" rx="5"/>
+          <text class="label label--sub" x="633" y="186" text-anchor="middle">absent</text>
+
+          <text class="label" x="8" y="226">DataSource + JPA</text>
+          <rect class="node node--good" x="180" y="206" width="112" height="32" rx="5"/>
+          <text class="label" x="236" y="226" text-anchor="middle">real*</text>
+          <rect class="node" x="312" y="206" width="112" height="32" rx="5"/>
+          <text class="label label--sub" x="368" y="226" text-anchor="middle">absent</text>
+          <rect class="node node--warn" x="445" y="206" width="112" height="32" rx="5"/>
+          <text class="label" x="501" y="226" text-anchor="middle">swapped</text>
+          <rect class="node" x="577" y="206" width="112" height="32" rx="5"/>
+          <text class="label label--sub" x="633" y="226" text-anchor="middle">absent</text>
+
+          <text class="edge-label" x="350" y="258" text-anchor="middle">real = built by the container · mock = replaced by @MockitoBean · absent = dropped by the slice's type filter</text>
+        </svg>
+        <figcaption>
+          <strong>The green cells are the only wiring the test of that annotation actually
+          exercises.</strong> That is why a <code>@DataJpaTest</code> with a mocked repository
+          proves nothing about SQL — you have paid for a database and replaced it with a mock
+          that answers whatever the test told it to answer. It is also why
+          <code>@SpringBootTest</code> only proves SQL when its <code>DataSource</code> is real
+          (the <code>real*</code> cell), and why the <code>@DataJpaTest</code>
+          <code>swapped</code> cell is a trap: the default is an <em>embedded</em> database,
+          which is a different database from the one in production.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Every slice, what it wires, and what it cannot see</caption>
+          <thead><tr><th>Annotation</th><th>Loads for real</th><th>Excludes</th><th>Fails when</th></tr></thead>
+          <tbody>
+            <tr><td><code>@WebMvcTest</code></td>
+              <td><code>@Controller</code>, <code>@ControllerAdvice</code>, <code>WebMvcConfigurer</code>, filters, Jackson, message converters</td>
+              <td><code>@Service</code>, <code>@Repository</code>, <code>@Component</code> generally</td>
+              <td>You need a service — which is exactly when you reach for <code>@MockitoBean</code>, and the slice stops being one</td></tr>
+            <tr><td><code>@DataJpaTest</code></td>
+              <td><code>@Entity</code>, JPA repositories, <code>JpaRepository</code> query methods, an <strong>in-memory or replaced</strong> <code>DataSource</code></td>
+              <td>Everything that is not persistence</td>
+              <td>You need a service or a controller</td></tr>
+            <tr><td><code>@JsonTest</code></td>
+              <td>Jackson auto-configuration, <code>ObjectMapper</code></td>
+              <td>Everything else</td>
+              <td>You need Spring at all, arguably</td></tr>
+            <tr><td><code>@RestClientTest</code></td>
+              <td>The HTTP client under test, Jackson, a mock <code>ClientHttpRequestFactory</code></td>
+              <td>The server side entirely</td>
+              <td>You want to test what the server <em>returns</em> — this slice fakes the request, not the response</td></tr>
+            <tr><td><code>@JdbcTest</code></td>
+              <td><code>JdbcTemplate</code>, an embedded or replaced <code>DataSource</code>, SQL initialisation</td>
+              <td>JPA, services, controllers</td>
+              <td>You are using JPA</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — a slice that needs mocks is testing too much</span>
+        <p>That is the design rule the slice annotations exist to enforce. <code>@WebMvcTest</code>
+        plus three mocked services is not a slice — it is a slow <code>@SpringBootTest</code> with
+        extra steps, and worse, because the mocks hide exactly the wiring the slice was supposed
+        to check. <strong>The correct move is to move the assertion down a level:</strong> test
+        the controller's collaboration contract as a plain unit test with a mocked service and no
+        Spring at all, and let <code>@WebMvcTest</code> cover only what is slice-specific —
+        message converters, validation, status codes, <code>@ControllerAdvice</code> handling.</p>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="WebMvcTest slice" data-hl-line="4,5"><code>@WebMvcTest(OrderController.class)          // NOT a @Configuration class
+class OrderControllerTest {
+
+    @MockitoBean OrderService orders;       // Framework 6.2 / Boot 3.4+
+    @Autowired MockMvcTester mvc;           // the fluent successor to MockMvc
+
+    @Test
+    void rejectsMissingSku() {
+        mvc.post().uri("/orders")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                         {"qty": 2}
+                         """)
+                .assertThat()
+                .hasStatus(HttpStatus.BAD_REQUEST)
+                .bodyJson().extractingPath("$.errors[0].field").isEqualTo("sku");
+    }
+}</code></pre>
+
+      <pre class="snippet" data-lang="java" data-title="DataJpaTest rollback trap" data-hl-line="6,15"><code>@DataJpaTest
+class OrderRepositoryTest {
+
+    @Autowired TestEntityManager em;        // flush() forces the SQL to happen NOW
+
+    @Test
+    void rejectsNegativeQuantity() {
+        em.persist(new Order(-1));          // pending — nothing has reached the database
+        assertThatThrownBy(em::flush)       // the constraint fires HERE, not at teardown
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)   // the slice's default only
+    void rollsBackOnFailure() { /* ... */ }                  // means "roll back after me"
+}</code></pre>
+
+      <p>The default <code>@Transactional</code> on <code>@DataJpaTest</code> is a
+      <em>convenience</em> — it means "roll back after each test", not "you are testing
+      transactions". A test asserting on a row that only exists inside the test transaction
+      proves less than it looks, so the moment the subject <em>is</em> the boundary you switch it
+      off with <code>NOT_SUPPORTED</code> and own the transaction yourself. What propagation and
+      rollback actually do is owned by
+      <a href="04-transaction-management.html">Volume 4</a>; what belongs here is the fact that
+      the slice's default hides the thing you came to test.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — <code>@MockBean</code> is not a Boot annotation anymore</span>
+        <p>As of <strong>Spring Boot 3.4</strong>,
+        <code>org.springframework.boot.test.mock.mockito.MockBean</code> and
+        <code>@SpyBean</code> are <strong>deprecated</strong> in favour of the Spring
+        Framework's <code>org.springframework.test.context.bean.override.mockito.MockitoBean</code>
+        and <code>@MockitoSpyBean</code>. The senior answer adds the <em>why</em>: the capability
+        moved into the framework so bean overriding works in any test context, not just Boot's,
+        and the move was a deprecation rather than a removal <strong>because it is a migration,
+        not a rename</strong> — <code>@MockitoBean</code> is not supported on
+        <code>@Configuration</code> classes, so a configuration that declared
+        <code>@MockBean</code> on itself must be restructured to declare it on test-class
+        fields.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption><code>webEnvironment</code> — the attribute that decides whether a real server exists</caption>
+          <thead><tr><th>Value</th><th>What happens</th><th>Use for</th><th>Cost / trap</th></tr></thead>
+          <tbody>
+            <tr><td><code>MOCK</code> <em>(default)</em></td>
+              <td><code>MockServletContext</code>; the whole MVC stack is real, but there is no socket</td>
+              <td>Controller tests; service tests that merely have web config on the classpath</td>
+              <td>Fastest. <code>MockMvc</code> runs in-thread, so it cannot catch a timeout, a real serialisation difference, a container-level filter, a character-encoding default or an error-page dispatch</td></tr>
+            <tr><td><code>RANDOM_PORT</code></td>
+              <td>A real server on an ephemeral port; <code>@LocalServerPort</code> is injected</td>
+              <td>Tests through <code>TestRestTemplate</code> or <code>WebTestClient</code> that need real HTTP</td>
+              <td>Real Tomcat, real socket, real serialisation — and <code>TestRestTemplate</code> does <strong>not</strong> throw on 4xx or 5xx, which surprises people in shared helpers</td></tr>
+            <tr><td><code>DEFINED_PORT</code></td>
+              <td>A real server on <code>server.port</code> (8080)</td>
+              <td>Only when something outside the process must reach it</td>
+              <td>Port collisions with whatever else owns 8080, and a suite that cannot run in parallel</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><code>MOCK</code> does not mean "the web layer is untested" — it means
+      <em>the servlet container is not under test</em>. <code>TestRestTemplate</code>,
+      <code>WebTestClient</code> and <code>MockRestServiceServer</code> all bind to it, so a
+      controller test that "needs the socket" is usually testing the wrong layer. The flip is
+      narrow and worth naming: a handful of <code>RANDOM_PORT</code> tests covering an agreed
+      list — filters, security, error handling — is the right proportion; a suite of them is not.</p>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — the context cache is why a container-backed suite takes 25 minutes</span>
+        <p><code>SpringExtension</code> keeps a static cache of <code>ApplicationContext</code>
+        instances keyed on the <strong>MergedContextConfiguration</strong> — classes, locations,
+        active profiles, property sources, context customisers, parent. So suite cost is linear
+        in <em>distinct configurations</em>, not tests. Thirty classes sharing one configuration
+        refresh once; thirty classes each adding a <code>@TestPropertySource</code> entry or a
+        <code>@MockitoBean</code> refresh thirty times at 3&ndash;15s each. The default cache
+        size is <strong>32</strong> and raising it via
+        <code>spring.test.context.cache.maxSize</code> only helps when you have more than 32
+        genuinely reused contexts.</p>
+        <p>The bill has a second column: each cached context holds live singletons, and a
+        <code>HikariDataSource</code> in one can hold up to 10 real connections. 32 cached
+        contexts is up to <strong>320 idle connections</strong> against whatever the test profile
+        points at — and if that is shared staging, the suite is a resource leak with a build
+        pipeline attached. And note the correctness side: a shared context means a shared
+        singleton, so a bean mutated by one class is still mutated when the next class reuses
+        it.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Test-profile divergences that hide production bugs — the rule is <em>where it points</em>, never <em>how it behaves</em></caption>
+          <thead><tr><th>Setting</th><th>Typical test value</th><th>The bug it hides</th></tr></thead>
+          <tbody>
+            <tr><td><code>spring.jpa.open-in-view</code></td><td><code>false</code> in tests, default <code>true</code> in prod</td><td>Lazy loading works in tests, throws <code>LazyInitializationException</code> in prod</td></tr>
+            <tr><td>Connection pool size</td><td>Tiny, or 1</td><td>Starvation and cascade failure at real concurrency</td></tr>
+            <tr><td>HTTP client timeouts</td><td>Long, or absent</td><td>Latency is invisible; the retry storm never shows up</td></tr>
+            <tr><td>Lazy initialisation</td><td><code>true</code> in tests</td><td>Startup work moves into the first request in prod</td></tr>
+            <tr><td>Feature flags</td><td>All on, or all off</td><td>Combination bugs only appear in the real combination</td></tr>
+            <tr><td><code>show-sql</code> / log level</td><td><code>true</code></td><td>Log volume alone changes timings</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Pointing a test at a container instead of a developer's laptop is correct. Halving a
+      pool size or dropping a timeout is a behavioural change that removes exactly the code path
+      you need to test — and a test profile is the one place someone gets to make the
+      application easier to work with, so every such relaxation is invisible unless somebody
+      deliberately goes looking.</p>
+    </section>
+
+    <!-- ============ 3 ============ -->
+    <section id="ch3" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">03</span>
+        <h2>Testcontainers</h2>
+      </div>
+
+      <p>A container makes the data boundary real: the SQL, the dialect, the locking and the
+      constraints are the production ones. The value is not convenience — it is the specific
+      class of bug that a six-month-green service then ships on its first production
+      migration.</p>
+
+      <pre class="snippet" data-lang="java" data-title="Singleton container base" data-hl-line="6,7"><code>@Testcontainers
+@SpringBootTest
+abstract class PostgresITBase {                    // ONE container for the whole JVM
+
+    @Container
+    @ServiceConnection                               // Boot 3.1+ — no @DynamicPropertySource
+    static final PostgreSQLContainer&lt;?&gt; POSTGRES =
+            new PostgreSQLContainer&lt;?&gt;("postgres:16-alpine")
+                    .withDatabaseName("test")
+                    .withInitScript("db/migration.sql");
+    // .withReuse(true)  — local inner loop only. NEVER in CI.
+
+    @DynamicPropertySource                            // per-CLASS schema: the container is
+    static void perClassSchema(DynamicPropertyRegistry r) {   // shared, the schema is not
+        r.add("spring.datasource.hikari.schema", () -&gt; SCHEMA);
+    }
+}</code></pre>
+
+      <p><code>@ServiceConnection</code> matters beyond line count. With
+      <code>@DynamicPropertySource</code> you hand-write the property <em>names</em>, and a typo
+      there produces a context that quietly starts against whatever else was on the classpath,
+      with no error. <code>@ServiceConnection</code> reads the container's own metadata, so the
+      mapping cannot be wrong — and adding Postgres plus Kafka plus Redis does not multiply the
+      boilerplate. It can coexist with a <code>@DynamicPropertySource</code>: the base class
+      supplies the connection statically, the subclass adds its per-class schema.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>What H2 in PostgreSQL-compatibility mode actually changes</caption>
+          <thead><tr><th>What differs</th><th>H2, even in PG mode</th><th>PostgreSQL</th><th>The bug H2 hides</th></tr></thead>
+          <tbody>
+            <tr><td>Locking</td><td>Simulated</td><td>Real <code>SELECT FOR UPDATE</code> / <code>SKIP LOCKED</code></td>
+              <td>A queue-worker test proving single-processing passes, and production double-processes because the row lock was never taken</td></tr>
+            <tr><td>Type system</td><td>Wider, looser, implicit casts</td><td>Stricter — no implicit <code>varchar</code> &rarr; <code>integer</code></td>
+              <td>A JPQL query that compiles against H2 and throws <code>PSQLException</code> in prod</td></tr>
+            <tr><td>MVCC &amp; isolation</td><td>Own implementation, subtly different visibility</td><td>True MVCC, per-statement snapshots</td>
+              <td>Lost-update and anomaly tests that pass locally and fail under real concurrency</td></tr>
+            <tr><td>Functions</td><td>Emulates a subset</td><td>Full set, plus extensions</td>
+              <td><code>DATE_TRUNC</code>, <code>ILIKE</code>, <code>generate_series</code>, <code>jsonb</code> operators — commonly missing entirely</td></tr>
+            <tr><td>Case / collation</td><td>Case-sensitive by default</td><td>Locale- and collation-dependent</td>
+              <td>A unique constraint on <code>Email</code> that passes locally and collides in prod on a case-insensitive collation</td></tr>
+            <tr><td>Date &amp; time</td><td>Simplified <code>TIMESTAMP</code> semantics</td><td><code>timestamptz</code> vs <code>timestamp</code> is a real distinction</td>
+              <td>Timezone bugs from a <code>timestamp without time zone</code> written and read in two zones</td></tr>
+            <tr><td>Empty string</td><td><code>''</code> behaves like <code>FALSE</code></td><td><code>''</code> is distinct</td>
+              <td>Validation tests that pass because an empty string is falsy in H2</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — the rule for where to mock</span>
+        <p><strong>Mock at your process boundary; run against your data boundary.</strong>
+        Outbound HTTP, message brokers, clocks and randomness get faked; databases get
+        containers. The reason is not ideology. An HTTP client's contract is a small documented
+        set of responses, and the interesting behaviour is in <em>your</em> handling of them —
+        serialisation, error mapping, timeout, retry — which a mocked interface skips entirely.
+        A database's contract is the actual behaviour of your SQL against your schema under your
+        concurrency, which is exactly what cannot be faked: a mocked repository proves the
+        service calls <code>findById</code> and branches on the result, and passes identically on
+        a schema where the column was renamed.</p>
+        <p>Fakes rather than mocks where the dependency has behaviour worth exercising — an
+        in-memory <code>PaymentClient</code> that stores idempotency keys makes "never charged
+        twice" a real test; a mock makes it <code>verify(payment).charge(anyTimes())</code>, which
+        proves nothing about the key.</p>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — <code>withReuse(true)</code>: right locally, catastrophic in CI</span>
+        <p>Reuse exists for a real reason: a developer pays container start-up on every
+        <code>mvn test</code>, and reuse removes it entirely — the difference between a
+        3-second and a 40-second inner loop. <strong>Flips on the environment:</strong> it is a
+        local developer-loop optimisation and belongs in <strong>zero CI configurations</strong>,
+        because the whole value of a green build is that it means something.</p>
+        <p>The failure it causes is local-only and baffling: the data directory survives between
+        runs, so a schema from a migration you have since reverted is still there (tests pass
+        locally), a Flyway baseline created on first run means migrations are now skipped, and
+        you are debugging against data you did not create. Reuse also requires an explicit
+        opt-in on the consuming side, so behaviour differs between "I ran it once" and "someone
+        else ran it".</p>
+      </div>
+
+      <p>Container start-up dominates: <strong>1&ndash;3 seconds</strong> for Postgres to become
+      ready, <strong>30&ndash;60 seconds</strong> to pull the image the first time. One container
+      per test class turns a 60-second suite into a 25-minute one, so the fix is a singleton
+      container inherited from a base class, a unique schema per class so classes can run in
+      parallel, and a rollback transaction per test so cleanup costs no <code>DELETE</code>. In
+      CI, pre-pull the image in the build image and share one container per JVM; if the suite is
+      still too slow, shard it across runners — <strong>do not go back to H2</strong>, because
+        the alternative is a suite that is fast and wrong.</p>
+    </section>
+
+    <!-- ============ 4 ============ -->
+    <section id="ch4" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">04</span>
+        <h2>Mocking &amp; test design</h2>
+      </div>
+
+      <p>The Mockito mechanics matter less than the design rule they serve. What a senior
+      interviewer is testing is whether you know where the boundary is — and the boundary is the
+      process, not the class.</p>
+
+      <pre class="snippet" data-lang="java" data-title="Mockito without magic" data-hl-line="2,7"><code>@ExtendWith(MockitoExtension.class)        // STRICT_STUBS is the default — leave it
+class CheckoutTest {
+
+    @Mock PaymentClient payment;
+    @Mock PaymentClient fraudCheck;        // same type: @InjectMocks would GUESS
+
+    // Construct the subject explicitly. It fails to compile the moment a
+    // dependency is added, added wrong, or added in the wrong order.
+    private final Checkout checkout = new Checkout(payment, fraudCheck);
+
+    @Test
+    void chargesOnceOnDecline() {
+        given(fraudCheck.passes(any())).willReturn(true);
+        checkout.settle(Cart.of("A-1"));
+
+        verify(payment).charge(argThat(r -&gt; r.amount().signum() &gt; 0));
+    }
+}</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — <code>@InjectMocks</code> hides the thing you want checked</span>
+        <p>For constructor injection, Mockito picks the constructor with the <strong>largest</strong>
+        number of arguments and assigns the mocks <strong>positionally, by type</strong>. With two
+        <code>PaymentClient</code> fields the assignment is arbitrary, declaration order is not
+        guaranteed, and the swap is silent. For setter or field injection it matches by type
+        first and then by field name — less dangerous, still implicit. An explicit
+        <code>new Checkout(payment, fraudCheck)</code> fails to compile when a dependency is
+        added, makes the test's own wiring visible, and by construction shows you how many
+        collaborators the class really has. <strong>Rule: <code>@InjectMocks</code> for a
+        one-dependency class, explicit construction for everything else.</strong></p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Four stubbing mistakes that cost real debugging hours</caption>
+          <thead><tr><th>Pitfall</th><th>What you see</th><th>The fix</th></tr></thead>
+          <tbody>
+            <tr><td>Stubbing with an argument the code never passes</td>
+              <td>A silent <code>null</code>, then an <code>NPE</code> pointing nowhere near the cause</td>
+              <td><code>STRICT_STUBS</code> raises <code>PotentialStubbingProblem</code> at the real call site</td></tr>
+            <tr><td>Mixing raw values with matchers</td>
+              <td><code>InvalidUseOfMatchersException</code> at the <em>next</em> interaction, not at the line that caused it</td>
+              <td>Once you use <code>any()</code>, <code>eq()</code> or <code>argThat()</code>, <strong>every</strong> argument must be a matcher</td></tr>
+            <tr><td><code>thenReturn(a, b, c)</code> for changing values</td>
+              <td>The same <code>Order</code> for all three calls</td>
+              <td>Chain <code>.thenReturn(a).thenReturn(b)</code>, or <code>thenAnswer</code> for a cursor or a value derived from the argument</td></tr>
+            <tr><td><code>any()</code> matching <code>null</code></td>
+              <td>Since Mockito 2, <code>any()</code> matches null and <code>any(Class)</code> does not — a null-related failure instead of a stubbing one</td>
+              <td>Choose the matcher deliberately for the null case</td></tr>
+            <tr><td><code>when(spy.method())</code></td>
+              <td>Stubbing <em>calls the real method</em> — fatal if the spy's constructor touches the database</td>
+              <td><code>doReturn(x).when(spy).method()</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — why teams keep turning <code>STRICT_STUBS</code> off</span>
+        <p>Both exceptions it raises point at a real defect in the test.
+        <code>UnnecessaryStubbingException</code> means the test carries state nothing exercises —
+        usually copy-paste from a neighbour, and usually a sign it asserts less than its author
+        thinks. <code>PotentialStubbingProblem</code> is the silent-null failure above, caught at
+        the call site instead of twenty lines later. Teams disable the mode because the noise is
+        unwelcome, not because the diagnosis is wrong; the alternative is a suite that quietly
+        returns <code>null</code> and <code>false</code> from unstubbed calls. The related trap
+        is <code>verifyNoMoreInteractions</code>, which fails on calls the code makes for reasons
+        unrelated to the assertion — a <code>toString()</code> inside a log statement, a
+        <code>hashCode()</code> when the mock enters a set.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — over-mocking re-implements the system</span>
+        <p>A test that mocks every collaborator asserts only that the class <em>calls</em> its
+        collaborators. It fails on every refactoring — rename a field, reorder two calls, extract
+        a private method — and it does not fail when the business logic is inverted. Charge the
+        customer twice and notify once, and it passes, because it was written against the shape
+        of the old code. <strong>The cost is review throughput:</strong> every PR needs two or
+        three "fix the mock" commits, so teams stop refactoring, which is a far worse outcome
+        than a weak suite. The useful diagnostic is one line: <em>if your mock has no I/O in it,
+        you probably should not have mocked it.</em> Everything in-process with real logic is a
+        candidate for a fake or a real object.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Stub, mock, fake — and the cost of each</caption>
+          <thead><tr><th></th><th>Stub</th><th>Mock</th><th>Fake</th></tr></thead>
+          <tbody>
+            <tr><td>Has working behaviour</td><td>No</td><td>No</td><td><strong>Yes</strong></td></tr>
+            <tr><td>You configure it</td><td>Yes</td><td>Yes</td><td>Sometimes</td></tr>
+            <tr><td>You assert on it</td><td>Rarely</td><td><strong>Yes</strong> — calls and arguments</td><td>Its <em>state</em></td></tr>
+            <tr><td>Cost to write</td><td>Trivial</td><td>Trivial</td><td>Real work, once</td></tr>
+            <tr><td>Fails when</td><td>The behaviour is interesting</td><td>The behaviour is interesting</td><td>The fake drifts from the real thing</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Test data is a compiler-error decision. Positional constructor literals break at every
+      call site when a field is added — and they break in test files, so the error message points
+      at a test. A builder turns that into <strong>one</strong> compile error, and
+      <code>new OrderBuilder().customer("cus-9").status(PAID)</code> declares its own
+      preconditions where a nine-argument call makes the reader count. Build defaults for every
+      field: a builder whose point is naming only the relevant fields has to make the irrelevant
+      ones safe. An object mother is right for a small, genuinely business-wide set of scenarios
+      and becomes a builder with a shared, stale API past about ten.</p>
+    </section>
+
+    <!-- ============ 5 ============ -->
+    <section id="ch5" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">05</span>
+        <h2>Pools, memory &amp; triage</h2>
+      </div>
+
+      <p>This is the chapter that is worth memorising: a number, a command, and a failure mode.
+      JVM heap sizing, GC internals and the <code>jmap</code>/<code>jstat</code> mechanics are
+      owned by the <a href="../java/07-jvm-internals-memory.html">Java track</a> — what belongs
+      here is the arithmetic that decides whether a <em>Spring</em> service survives a container,
+      a connection pool and a slow dependency.</p>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — the container that OOM-kills the JVM</span>
+        <p>A pod requests <code>512Mi</code>; a JVM that cannot see the cgroup filesystem reads
+        the <em>host's</em> 64&nbsp;GiB and sizes a 16&nbsp;GiB heap; the kernel kills the
+        process at 512&nbsp;MiB. Result: <strong>exit 137, no stack trace, no
+        <code>OutOfMemoryError</code>, no heap dump</strong> — because the kernel acted before the
+        JVM could throw. The log line that gives it away is the reported
+        <strong>max heap</strong> at startup. <strong>Flips on:</strong> the flag is only correct
+        if the JVM can see the limit — JDK 10+ is cgroup-aware by default, but a different base
+        image, <code>-XX:+IgnoreUnrecognizedVMOptions</code> swallowing the flag, or a launcher
+        overriding <code>JAVA_TOOL_OPTIONS</code> all defeat it. Verification is never the
+        flag's presence, it is the number in the log.</p>
+        <p>The fix is one flag — <code>-XX:MaxRAMPercentage=70 -XX:InitialRAMPercentage=30</code>,
+        leaving roughly 150&nbsp;MiB of a 512&nbsp;MiB limit for metaspace, code cache, thread
+        stacks and direct buffers. <strong>The heap is not the process:</strong> 200 Tomcat
+        threads at about 1&nbsp;MB of stack each is ~200&nbsp;MB committed before a line of
+        business code runs, so <code>-Xmx</code> equal to the container limit guarantees an
+        <code>OOMKill</code> on the first request that touches all of it.</p>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Interrogated Hikari config" data-hl-line="4,5"><code>HikariConfig cfg = new HikariConfig();
+cfg.setJdbcUrl(url);
+cfg.setMaximumPoolSize(10);        // DEFAULT — sized as if every app were a monolith
+cfg.setMinimumIdle(2);             // default TIES TO MAX: 20 instances = 200 idle connections
+cfg.setConnectionTimeout(2_500);   // DEFAULT 30_000 — half a minute holding a Tomcat thread
+cfg.setMaxLifetime(1_800_000);     // DEFAULT 30m — must be BELOW any proxy's idle timeout
+cfg.setLeakDetectionThreshold(0);  // DEFAULT off — set 5000 while debugging, then off again</code></pre>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>The two defaults that decide whether a blocking service is healthy</caption>
+          <thead><tr><th>Setting</th><th>Default</th><th>What it actually bounds</th><th>When it bites</th></tr></thead>
+          <tbody>
+            <tr><td><code>server.tomcat.threads.max</code></td><td><strong>200</strong></td>
+              <td>In-flight requests. <em>Not</em> a source of throughput</td>
+              <td>200 threads &times; 100&nbsp;ms CPU work ≈ 2,000 req/s; 200 threads &times; 2&nbsp;s latency ≈ <strong>100</strong> req/s, and the threads are idle — the dependency is slow</td></tr>
+            <tr><td><code>server.tomcat.accept-count</code></td><td>100</td>
+              <td>Accept-queue depth before the OS refuses connections</td>
+              <td>Shows up in metrics as <strong>connection-refused</strong>, not as latency</td></tr>
+            <tr><td><code>server.tomcat.max-connections</code></td><td>8192</td>
+              <td>Per-connector connection cap</td>
+              <td>Unreachable before the thread count on a small instance, so the thread count is the real ceiling</td></tr>
+            <tr><td><code>minimumIdle</code></td><td>= <code>maximumPoolSize</code></td>
+              <td>Connections held open <em>while idle</em></td>
+              <td>20 instances &times; 10 = 200 permanent connections, which alone can exceed the database's <code>max_connections</code>. Set 2&ndash;3; 0 hands connection establishment to every request</td></tr>
+            <tr><td><code>connectionTimeout</code></td><td><strong>30000 ms</strong></td>
+              <td>How long a caller waits for a connection</td>
+              <td>Thirty seconds is an eternity: ten starved requests hold ten of your 200 threads, turning a fast failure into a latency cliff. Set it to the request budget, commonly 2,000&ndash;3,000&nbsp;ms</td></tr>
+            <tr><td><code>max-lifetime</code></td><td>1,800,000 ms</td>
+              <td>Connection retirement</td>
+              <td>Must be <strong>below</strong> any PgBouncer, RDS-proxy or NAT idle timeout, or you get a <code>CommunicationsException</code> on a connection the pool handed out perfectly validly</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "make the connection pool bigger"</span>
+        <p>The correction is the interesting part. Past the knee of the
+        <code>cores + disks</code> curve, more connections mean <strong>less</strong> throughput
+        — more lock contention, worse buffer-pool locality, a longer tail. And a small pool is a
+        <em>containment mechanism</em>: it bounds how much concurrency this service can push at
+        the database, which is exactly what stops a traffic spike cascading into a database
+        outage. The sentence most candidates get wrong is the cost of a too-small pool:
+        <strong>it is queueing latency, not lost throughput.</strong> If a query holds a
+        connection for 1&nbsp;ms and the database does 8,000 queries a second, eight connections
+        already sustain 8,000/sec — ten is past the knee, and if the service is not achieving
+        that the bottleneck is the network call, not the pool. The signal to look for is threads
+        visibly parked in <code>HikariPool.getConnection</code>, which looks exactly like a slow
+        database in every latency metric.</p>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 280" role="img" aria-label="Thread-dump triage path. Take three jcmd Thread.print -l dumps ten seconds apart, then read what never changes. A frame unchanged in HikariPool.getConnection means the pool is exhausted, not undersized. An unchanged SocketInputStream frame means a downstream. A BLOCKED frame with a named owner means lock contention. A Found one Java-level deadlock line is the only machine-detected diagnosis.">
+          <defs>
+            <marker id="arw-s9-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node node--accent" x="140" y="10" width="380" height="40" rx="6"/>
+          <text class="label" x="330" y="35" text-anchor="middle">jcmd &lt;pid&gt; Thread.print -l   &times; 3, 10s apart</text>
+
+          <path class="edge" d="M 330 50 L 330 74" marker-end="url(#arw-s9-b)"/>
+
+          <rect class="node" x="175" y="76" width="310" height="36" rx="6"/>
+          <text class="label" x="330" y="99" text-anchor="middle">What NEVER changes?</text>
+
+          <path class="edge edge--warn" d="M 330 112 Q 330 148 84 166" marker-end="url(#arw-s9-b)"/>
+          <path class="edge edge--warn" d="M 330 112 Q 330 150 248 166" marker-end="url(#arw-s9-b)"/>
+          <path class="edge edge--warn" d="M 330 112 Q 330 150 412 166" marker-end="url(#arw-s9-b)"/>
+          <path class="edge edge--good" d="M 330 112 Q 330 148 576 166" marker-end="url(#arw-s9-b)"/>
+
+          <rect class="node node--warn" x="6" y="170" width="156" height="64" rx="6"/>
+          <text class="label" x="84" y="190" text-anchor="middle">HikariPool</text>
+          <text class="edge-label" x="84" y="206" text-anchor="middle">.getConnection</text>
+          <text class="edge-label" x="84" y="222" text-anchor="middle">pool exhausted</text>
+
+          <rect class="node node--warn" x="170" y="170" width="156" height="64" rx="6"/>
+          <text class="label" x="248" y="190" text-anchor="middle">SocketInputStream</text>
+          <text class="edge-label" x="248" y="206" text-anchor="middle">socket read</text>
+          <text class="edge-label" x="248" y="222" text-anchor="middle">a downstream</text>
+
+          <rect class="node node--warn" x="334" y="170" width="156" height="64" rx="6"/>
+          <text class="label" x="412" y="190" text-anchor="middle">BLOCKED</text>
+          <text class="edge-label" x="412" y="206" text-anchor="middle">+ named owner</text>
+          <text class="edge-label" x="412" y="222" text-anchor="middle">lock contention</text>
+
+          <rect class="node node--good" x="498" y="170" width="156" height="64" rx="6"/>
+          <text class="label" x="576" y="190" text-anchor="middle">Found one Java-level</text>
+          <text class="edge-label" x="576" y="206" text-anchor="middle">deadlock</text>
+          <text class="edge-label" x="576" y="222" text-anchor="middle">machine-detected</text>
+
+          <text class="edge-label edge-label--strong" x="330" y="262" text-anchor="middle">One dump cannot tell a thread that is working from a thread that is stuck.</text>
+        </svg>
+        <figcaption>
+          <strong>Read bottom-up from the frames you recognise.</strong> A dump lists frames
+          innermost-first, so frame one is where the thread is <em>now</em> and the last is the
+          entry point; the useful line is usually the middle one, naming which of <em>your</em>
+          classes called the thing that is stuck. Use <code>-l</code>, because it prints lock
+          ownership — every <code>BLOCKED</code> frame then carries the owning thread's ID. And
+          note the fourth column: <code>Found one Java-level deadlock</code> is the only
+          unambiguous machine-detected condition, and it is rarer than "deadlocks are detected so
+          they are handled" suggests — the report is a post-mortem the load balancer may never
+          let you read. Deadlock <em>prevention</em> is owned by
+          <a href="../java/06-multithreading-concurrency.html">Java Volume 6</a>; the Spring
+          source of one is lock ordering across service calls, not <code>synchronized</code>.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Every thread-dump signature, and what it actually means &mdash; the failure-signature table</caption>
+          <thead><tr><th>Signature in the dump</th><th>Diagnosis</th><th>Do not do this</th></tr></thead>
+          <tbody>
+            <tr><td><code>Found one Java-level deadlock</code></td>
+              <td>A real deadlock. The dump names both threads and the monitor each holds and wants. <strong>The only unambiguous, machine-detected condition</strong></td>
+              <td>Do not go looking for one first &mdash; it is rarer than "the JVM detects them" implies</td></tr>
+            <tr><td>Many threads in <code>com.zaxxer.hikari.pool.HikariPool.getConnection</code></td>
+              <td><strong>Pool exhausted.</strong> Every request thread is waiting for a connection. The frame below names the query</td>
+              <td>Do not raise <code>maximumPoolSize</code>. The fix is the slow query or the missing index</td></tr>
+            <tr><td>Many threads in <code>sun.nio.ch.SocketInputStream</code></td>
+              <td><strong>Downstream.</strong> Your service is waiting on someone else, and the frame <em>below</em> names who</td>
+              <td>Do not raise <code>max-threads</code> &mdash; you are adding in-flight work to a system already failing to complete it</td></tr>
+            <tr><td><code>BLOCKED</code> threads on the same monitor</td>
+              <td><strong>Lock contention.</strong> The <code>-ownable synchronizers</code> section names the owner; if the owner is not in the dump, it is itself parked</td>
+              <td>Do not assume it is a deadlock &mdash; without the owner thread you cannot tell contention from circularity</td></tr>
+            <tr><td>Many <code>RUNNABLE</code> with high CPU</td>
+              <td>A genuine CPU hot spot. <strong>Reach for JFR or a profiler, do not guess</strong> &mdash; the dump cannot say which method is burning it</td>
+              <td>Do not keep reading the dump. Only a profiler attributes CPU to a method</td></tr>
+            <tr><td>Threads <code>WAITING</code> on <code>Object.wait()</code>, few <code>RUNNABLE</code></td>
+              <td><strong>Normal.</strong> That is an idle thread pool &mdash; this is what a <em>healthy idle</em> service looks like</td>
+              <td>Do not report it as a problem. WAITING is a state, not a symptom</td></tr>
+            <tr><td>Hundreds of threads, many distinct pool names</td>
+              <td><strong>Leak.</strong> Something creates a pool per request, or never shuts one down. Search for the distinct pool names</td>
+              <td>Do not raise <code>max-threads</code> &mdash; the threads exist because something is creating them</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The last row is the one that catches people, because the instinct is to raise the thread
+      limit. The seven signatures are not seven severities &mdash; they are <strong>seven
+      different owners of the fix</strong>, and in four of them the fix is somewhere other than
+      the JVM. Read the row as "<em>who do I go and talk to</em>": the database team, the
+      dependency's team, the author of the class holding the lock, the author of whatever is
+      creating pools.</p>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — the two-minute diagnostic, in order</span>
+        <ol>
+          <li><code>jcmd &lt;pid&gt; Thread.print -l</code> <strong>three times, ten seconds
+          apart.</strong> Costs nothing, needs no restart and no APM licence, and it separates
+          the four failure modes that look identical from outside. What never changes is the
+          bug.</li>
+          <li><code>jcmd &lt;pid&gt; JFR.start name=diag settings=profile duration=60s</code>
+          when the dumps say <em>waiting</em> without saying <em>on what</em>. JFR shows
+          allocation, locking, GC, socket and exception data a dump cannot, and it shows the
+          <em>inlined</em> stack that makes teams wrongly conclude "it's all in the
+          framework".</li>
+          <li>The GC log, because a latency spike with flat CPU is very often a full GC — and
+          that one needs no process access at all.</li>
+        </ol>
+        <p><strong>JFR profiles:</strong> <code>default</code> is ~1&ndash;2% overhead and is what
+        you leave on permanently with a rotating buffer
+        (<code>maxsize=500m,maxage=2h</code>); <code>profile</code> is ~5&ndash;10% with 10&nbsp;ms
+        sampling plus every exception, lock and socket operation, and is for a bounded capture or
+        a load test. Leaving <code>profile</code> on continuously is the common mistake, and the
+        resulting 3% latency rise gets attributed to something else. The reason to record
+        continuously is retrospective: <strong>a recording started at the beginning of an incident
+        has already missed the interesting part.</strong> The same argument applies to GC
+        logging, which costs well under 1% of throughput — and which must be
+        <em>rotated</em> (<code>filecount=5,filesize=50M</code>), because an unrotated GC log
+        fills the disk and takes the pod down.</p>
+      </div>
+    </section>
+
+    <!-- ============ 6 ============ -->
+    <section id="ch6" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">06</span>
+        <h2>Distributed failure modes</h2>
+      </div>
+
+      <p>Every mechanism in this chapter is the same defensive move: <strong>a bound on how much
+      a dependency can take from you.</strong> A service with none of them has no answer when a
+      collaborator misbehaves, and availability becomes a function of its dependencies' patience
+      rather than of its own design.</p>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 190" role="img" aria-label="Cascading failure timeline. At zero a payments dependency degrades from 40 ms to 8 s while still returning 200s. At plus two seconds 30-second timeouts park request threads in socket reads. At plus four seconds no threads are free, so health checks queue behind the parked requests. At plus five seconds traffic shifts to the surviving instances. At plus six seconds they park too and are marked unhealthy. At plus eight seconds the service is fully down, although the root cause was a dependency that was never down.">
+          <defs>
+            <marker id="arw-s9-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <text class="edge-label edge-label--strong" x="330" y="24" text-anchor="middle">200 request threads, a 30-second downstream timeout, and a dependency that is slow but never down</text>
+
+          <rect class="node node--warn" x="2" y="44" width="96" height="76" rx="6"/>
+          <text class="label" x="50" y="60" text-anchor="middle">t=0</text>
+          <text class="edge-label" x="50" y="78" text-anchor="middle">payments p99</text>
+          <text class="edge-label" x="50" y="94" text-anchor="middle">40ms &rarr; 8s</text>
+          <text class="edge-label" x="50" y="110" text-anchor="middle">still UP</text>
+
+          <path class="edge" d="M 99 82 L 112 82" marker-end="url(#arw-s9-c)"/>
+
+          <rect class="node node--warn" x="114" y="44" width="96" height="76" rx="6"/>
+          <text class="label" x="162" y="60" text-anchor="middle">+2s</text>
+          <text class="edge-label" x="162" y="78" text-anchor="middle">30s timeout</text>
+          <text class="edge-label" x="162" y="94" text-anchor="middle">threads park</text>
+          <text class="edge-label" x="162" y="110" text-anchor="middle">in the socket</text>
+
+          <path class="edge" d="M 211 82 L 224 82" marker-end="url(#arw-s9-c)"/>
+
+          <rect class="node node--bad" x="226" y="44" width="96" height="76" rx="6"/>
+          <text class="label" x="274" y="60" text-anchor="middle">+4s</text>
+          <text class="edge-label" x="274" y="78" text-anchor="middle">no free threads</text>
+          <text class="edge-label" x="274" y="94" text-anchor="middle">/health queues</text>
+          <text class="edge-label" x="274" y="110" text-anchor="middle">behind them</text>
+
+          <path class="edge" d="M 323 82 L 336 82" marker-end="url(#arw-s9-c)"/>
+
+          <rect class="node node--warn" x="338" y="44" width="96" height="76" rx="6"/>
+          <text class="label" x="386" y="60" text-anchor="middle">+5s</text>
+          <text class="edge-label" x="386" y="78" text-anchor="middle">traffic shifts</text>
+          <text class="edge-label" x="386" y="94" text-anchor="middle">1.5x to the</text>
+          <text class="edge-label" x="386" y="110" text-anchor="middle">survivors</text>
+
+          <path class="edge" d="M 435 82 L 448 82" marker-end="url(#arw-s9-c)"/>
+
+          <rect class="node node--bad" x="450" y="44" width="96" height="76" rx="6"/>
+          <text class="label" x="498" y="60" text-anchor="middle">+6s</text>
+          <text class="edge-label" x="498" y="78" text-anchor="middle">they park too</text>
+          <text class="edge-label" x="498" y="94" text-anchor="middle">go unhealthy</text>
+          <text class="edge-label" x="498" y="110" text-anchor="middle">removed too</text>
+
+          <path class="edge" d="M 547 82 L 560 82" marker-end="url(#arw-s9-c)"/>
+
+          <rect class="node node--bad" x="562" y="44" width="96" height="76" rx="6"/>
+          <text class="label" x="610" y="60" text-anchor="middle">+8s</text>
+          <text class="edge-label" x="610" y="78" text-anchor="middle">total outage</text>
+          <text class="edge-label" x="610" y="94" text-anchor="middle">root cause was</text>
+          <text class="edge-label" x="610" y="110" text-anchor="middle">never down</text>
+
+          <text class="edge-label" x="330" y="152" text-anchor="middle">The root cause was a service that was never down. It was slow, and nothing bounded what it could take.</text>
+          <text class="edge-label edge-label--strong" x="330" y="174" text-anchor="middle">An incident becomes an outage when one slow dependency consumed the whole service's capacity.</text>
+        </svg>
+        <figcaption>
+          The mechanism in one sentence: <strong>a service is only as available as its slowest
+          dependency multiplied by its own capacity.</strong> A dependency that gets 10&times;
+          slower consumes 10&times; more of your capacity per in-flight request, and your
+          capacity is finite and small — 200 threads, 10 connections. Note the <code>+4s</code>
+          box: <code>/health</code> queues behind the parked requests, so the load balancer
+          removes the instance for the wrong reason and the traffic has nowhere good to go. And
+          note what makes this hard to diagnose: a dependency returning <em>200s</em> produces
+          no error signal, so error-rate alerting and exception-based resilience both stay
+          silent while the thread pool drains.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Four bounds. Read the "does NOT bound" column — that is the whole distinction</caption>
+          <thead><tr><th>Mechanism</th><th>Bounds</th><th>Does NOT bound</th><th>Fails by</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Timeout</strong></td><td>How long you <em>wait</em> for one call</td>
+              <td>How many concurrent calls you make — 200 threads &times; 30&nbsp;s is still an outage</td>
+              <td>Returning an error after the deadline</td></tr>
+            <tr><td><strong>Bulkhead</strong></td><td>How many concurrent calls you make</td>
+              <td>How long each takes — 20 permits against a 30&nbsp;s hang still parks 20 of your threads</td>
+              <td>Rejecting immediately when the bulkhead is full</td></tr>
+            <tr><td><strong>Circuit breaker</strong></td><td>How many calls you <em>attempt</em> at all, over time</td>
+              <td>What a single in-flight call consumes</td>
+              <td>Opening the circuit and failing fast</td></tr>
+            <tr><td><strong>Load limiter</strong></td><td>The arrival rate</td>
+              <td>Whether the work already in flight can finish</td>
+              <td>Shedding deliberately, with <code>Retry-After</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The most often missing is the simplest: a <strong>timeout set to your end-to-end request
+      budget</strong>, not to the dependency's characteristic latency. At its 30-second default a
+      failing dependency consumes the whole thread pool <em>before</em> it fails, which is how an
+      incident becomes the outage. If your SLA is two seconds, no downstream call gets thirty —
+      and a dependency that needs thirty seconds to answer is one that should not be on the
+      request path. Shedding follows the same discipline: reject <strong>before</strong> the
+      resource is exhausted, not after, so a limiter that starts refusing at 80% of thread
+      capacity still leaves room for accepted work to finish. Note also that load shedding is a
+      <strong>product decision disguised as a technical one</strong> &mdash; some requests are
+      refused on purpose, and somebody has to decide which, and tell the users.</p>
+
+      <pre class="snippet" data-lang="java" data-title="Three bounds, three beans" data-hl-line="11,19"><code>@Bean
+ThreadPoolTaskExecutor paymentBulkhead() {                   // BULKHEAD: its own threads
+    var pool = new ThreadPoolTaskExecutor();
+    pool.setCorePoolSize(20);                                // from the pool arithmetic
+    pool.setMaxPoolSize(20);
+    pool.setQueueCapacity(0);                                // reject, never queue
+    pool.setThreadNamePrefix("payment-");
+    pool.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+    return pool;
+}
+
+@Bean
+CircuitBreaker paymentBreaker(CircuitBreakerRegistry registry) {
+    return registry.circuitBreaker("payment", cfg -&gt; cfg
+            .failureRateThreshold(50)                        // % failures that open it
+            .minimumNumberOfCalls(20)                        // never open on 3am noise
+            .slidingWindowSize(100)                          // window of the last 100
+            .waitDurationInOpenState(Duration.ofSeconds(30)) // how long OPEN stays open
+            .permittedNumberOfCallsInHalfOpenState(5)       // trial calls
+            .build());
+}</code></pre>
+
+      <p class="snippet-note">The timeout is the third bound and the one with no bean: it belongs
+      on the HTTP client itself, set to your end-to-end request budget. It is also the one most
+      often left at its default.</p>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — thread starvation is a containment failure, not a capacity failure</span>
+        <p>Two hundred threads, 190 blocked waiting for a connection, 8 in flight each holding
+        one for four seconds, 2 serving trivial endpoints: 99% of the service cannot serve
+        <em>any</em> request &mdash; including <code>/health</code>, and including the endpoint
+        that would have told you what was wrong. That is the line between an <strong>incident</strong>
+        and an <strong>outage</strong>. A user asking for a status page is refused exactly as hard
+        as a user asking for their order. The fix that addresses the class rather than the
+        instance is <strong>a hard statement timeout on every connection</strong> &mdash;
+        <code>statement_timeout</code> in Postgres, a <code>queryTimeout</code> on the
+        <code>DataSource</code> &mdash; so a pathological query cannot hold a connection
+        indefinitely regardless of what the application code does. Raise
+        <code>maximumPoolSize</code> and you have made the collapse faster.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — a bad circuit breaker kills more traffic than the outage</span>
+        <p>A breaker that opens on one failure rejects 100% of traffic for the duration of its
+        open state, when the underlying error rate might have been 2%. That is
+        <strong>strictly worse than having no breaker</strong> — you converted a partial failure
+        into a total one. Three settings make it safe: a real
+        <code>minimumNumberOfCalls</code> so the rate is measured on a sample rather than on one
+        3&nbsp;am call; a <code>slowCallDurationThreshold</code> so slowness counts as failure,
+        because a breaker that only counts exceptions will never open for the slow-but-returning-200s
+        dependency that causes the actual cascade; and a fallback that is
+        <em>degraded rather than absent</em> — a stale value, a cached decision, a default.
+        A breaker that only rejects is a breaker that converts your dependency's problem into
+        yours.</p>
+        <p>And a degraded answer must be <strong>distinguishable in the data</strong>: a metric, a
+        log line, and a flag in the payload. A fallback returning a plausible value with no marker
+        is worse than an error, because the business acts on it believing it is real — an empty
+        recommendation list is indistinguishable from "there are none".</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — exactly one layer owns the retry budget</span>
+        <p>Three attempts with no backoff, on a service called three times per request, across
+        three hops, is <strong>27&times; at the bottom of the chain</strong> — 3 &times; 3 &times; 3,
+        not 3&times;. Then the degradation makes it worse: each retry takes longer, so each
+        request holds connections and threads longer, so throughput drops, so the retry rate
+        rises. Positive feedback. The rules that hold: <strong>exponential backoff with
+        jitter</strong> (a hundred instances retrying at 100/200/400&nbsp;ms arrive as a wall, and
+        turn a smooth recovery into a second outage); cap the total <em>time</em>, not the
+        attempt count; retry idempotent operations only, and never a 4xx, which will be wrong
+        again; and retry at <strong>one level of a call chain only</strong>. That last rule removes
+        the compounding factor entirely and is the cheapest resilience improvement available —
+        though it is an organisational decision about who retries, not a technical one.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Bulkheads — the second row is the whole argument for thread pools</caption>
+          <thead><tr><th>&nbsp;</th><th>Semaphore bulkhead</th><th>Thread-pool bulkhead</th></tr></thead>
+          <tbody>
+            <tr><td>Bounds concurrent calls</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Bounds the <em>time</em> a hung call takes from you</td>
+              <td><strong>No</strong> &mdash; it still parks the <em>caller's</em> thread for the full timeout</td>
+              <td>Yes &mdash; it only parks a pool thread</td></tr>
+            <tr><td>Thread cost</td><td>Free</td><td>20 threads (~20&nbsp;MB) per bulkhead</td></tr>
+            <tr><td>Context propagation across the hop</td><td>None needed</td>
+              <td>Must carry <code>SecurityContext</code>, <code>RequestContextHolder</code> and MDC</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Read the second row as the decision. Twenty semaphore permits against a thirty-second
+      timeout still parks twenty of your Tomcat threads for thirty seconds &mdash; the semaphore
+      bounded the count and none of the consequence. A thread-pool bulkhead puts the work on its
+      own threads, so a hang exhausts <em>that</em> pool and the rejection is immediate and
+      cheap. The fourth row is where thread-pool bulkheads lose in a Spring application, and it
+      is a <code>ThreadLocal</code> problem: <code>@Async</code> runs on a different thread, so
+      a <code>ThreadLocal</code>-backed <code>SecurityContextHolder</code> or MDC is
+      <strong>empty</strong> there unless the executor is configured with the
+      <code>TaskDecorator</code> that copies them. Per-mechanism configuration &mdash;
+      Resilience4j tuning, gateway patterns, sagas &mdash; is owned by
+      <a href="11-spring-cloud-distributed-systems.html">Volume 11</a>.</p>
+    </section>
+
+    <!-- ============ 7 ============ -->
+    <section id="ch7" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">07</span>
+        <h2>Production practice</h2>
+      </div>
+
+      <p>Production practice is mostly about making the system's state legible to someone who was
+      not in the room when it was decided.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Configuration: the environment decides, the repository does not</caption>
+          <thead><tr><th>Never committed</th><th>Always committed</th></tr></thead>
+          <tbody>
+            <tr><td><code>spring.profiles.active</code></td><td>Sensible, conservative defaults</td></tr>
+            <tr><td>Credentials, API keys, connection strings</td><td>The <em>shape</em> of configuration — the <code>@ConfigurationProperties</code> class</td></tr>
+            <tr><td>Per-environment hostnames and pool sizes</td><td>Health, metric and log configuration</td></tr>
+            <tr><td>A <code>prod</code> profile file with real values</td><td>Validation constraints on what must be present</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — a committed prod profile makes the repository lie</span>
+        <p>The failure mode is not a security breach, it is a <strong>silent
+        divergence</strong>: the file in the repository says pool size 50, the environment says
+        10, the environment wins — and someone reading the repository at 3am believes the
+        service runs with 50. Set <code>spring.profiles.default: prod</code> so a <em>missing</em>
+        profile setting fails toward production behaviour rather than toward a developer's
+        laptop, and put <code>@Validated</code> plus JSR-380 on the properties class so a missing
+        value is a startup failure rather than a <code>null</code> in a request path. The
+        precedence ladder itself is
+        <a href="01-spring-core-ioc.html">Volume 1</a>; binding is
+        <a href="07-spring-boot-auto-configuration.html">Volume 7</a> — note that
+        <code>@TestPropertySource</code> sits at position 2, above command-line arguments and
+        environment variables, so a test cannot be made to fail by setting the same property in
+        the environment.</p>
+      </div>
+
+      <p>Feature flags are cheap when they are build-time and expensive when they are dynamic.
+      <code>@ConditionalOnProperty</code> is evaluated once at startup, costs nothing per call,
+      and can never put two code paths in production at once — its rollback is a deploy. A
+      dynamic flag is a runtime branch, permanent until someone removes it, and two paths do run
+      simultaneously. The real risk is arithmetic: <strong>ten flags is 1,024 combinations</strong>,
+      and the useful question is not "can I enumerate them" — nobody can — but "can I explain,
+      for any given user, why they saw this". That answer has to come from an audit trail (flag,
+      value, subject, correlation ID) and a removal ticket with an owner, created in the same PR
+      as the flag. Deploy mechanics — readiness probes, canary analysis, blue/green — are in
+      <a href="07-spring-boot-auto-configuration.html">Volume 7</a> and
+      <a href="11-spring-cloud-distributed-systems.html">Volume 11</a>.</p>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>RED and saturation — four signals, one of which is leading</caption>
+          <thead><tr><th>Signal</th><th>What it is</th><th>Why it is on the list</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Rate</strong></td><td>Requests per second, per endpoint</td><td>The demand. Without it every other metric is uninterpretable</td></tr>
+            <tr><td><strong>Errors</strong></td><td>Failures per second and the non-2xx rate — a <em>count</em>, never a boolean</td><td>The outcome. A boolean loses the magnitude</td></tr>
+            <tr><td><strong>Duration</strong></td><td>p50 / p95 / p99 — never an average</td><td>An average is a number nobody can alert on; p99 is what users experience</td></tr>
+            <tr><td><strong>Saturation</strong></td><td>HikariCP <code>active</code>/<code>idle</code>/<code>pending</code>, Tomcat <code>busyThreads</code>, client pool utilisation, queue depth, GC pause</td><td><strong>The only leading indicator.</strong> Rate and errors are lagging; saturation is how you get warning. Published by Micrometer, almost never alerted on</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — alert on symptoms, measure with causes</span>
+        <p>Rate, errors and duration are what the user experiences, so they are what pages a
+        human. Saturation, pool depths and queue lengths are what <em>explain</em> an alert, so
+        they are what you open once you have been paged. Every alert has to answer three
+        questions: <strong>is this affecting users right now; what changed and when; what do I do
+        first.</strong> An alert that cannot answer all three should not page anyone — and an
+        alert named <code>service_error_rate_high</code> answers none of them, sending a 3am
+        responder on three round trips to find the threshold, the dashboard and the runbook link.
+        Alerting on every metric that crosses a threshold is alerting on nothing: the pager
+        becomes noise, responders learn to triage by volume, and the real page is dismissed as
+        the twenty-first one this hour.</p>
+      </div>
+
+      <p>Readiness is the other probe people get wrong, and the distinction is asymmetric on
+      purpose. Readiness means <strong>"this instance can serve this traffic correctly"</strong> —
+      can it get a connection from its own pool right now, are this version's migrations applied.
+      It does <em>not</em> mean "the process started", and it must not fail when a
+      <em>downstream</em> is degraded: if every instance fails readiness at once, a dependency's
+      blip removes the entire fleet from rotation. That is how one wobble becomes a total
+      outage, and it is why the readiness probe and the canary have to be designed together —
+      a probe too eager sends traffic to an instance that cannot serve it.</p>
+    </section>
+
+    <!-- ============ numbers ============ -->
+    <section id="numbers" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">&nbsp;</span>
+        <h2>Numbers worth memorising</h2>
+      </div>
+      <div class="numbers">
+        <div class="number"><span class="number__value">4</span><span class="number__label">tiers &mdash; and the last column is what each structurally cannot catch</span></div>
+        <div class="number"><span class="number__value">3&ndash;15s</span><span class="number__label">refresh cost per <em>distinct</em> context, not per test class</span></div>
+        <div class="number"><span class="number__value">32</span><span class="number__label">default test context cache size, and the ceiling on live contexts held</span></div>
+        <div class="number"><span class="number__value">320</span><span class="number__label">idle DB connections 32 cached contexts &times; 10 pooled each</span></div>
+        <div class="number"><span class="number__value">3.4</span><span class="number__label">Boot version deprecating <code>@MockBean</code> for <code>@MockitoBean</code></span></div>
+        <div class="number"><span class="number__value">1&ndash;3s</span><span class="number__label">container start; 30&ndash;60s for the first image pull</span></div>
+        <div class="number"><span class="number__value">27&times;</span><span class="number__label">retry amplification across a three-hop chain, 3 &times; 3 &times; 3</span></div>
+        <div class="number"><span class="number__value">200</span><span class="number__label">default <code>server.tomcat.threads.max</code> &mdash; in-flight requests, not throughput</span></div>
+        <div class="number"><span class="number__value">10</span><span class="number__label">default <code>maximumPoolSize</code>; <code>cores + disks</code> is usually smaller</span></div>
+        <div class="number"><span class="number__value">30000 ms</span><span class="number__label">default <code>connectionTimeout</code> &mdash; set it to the request budget instead</span></div>
+        <div class="number"><span class="number__value">70&ndash;75%</span><span class="number__label"><code>MaxRAMPercentage</code>, because 200 threads are already ~200 MB of stack</span></div>
+        <div class="number"><span class="number__value">137</span><span class="number__label">exit code of a kernel OOM-kill: no heap dump, no <code>OutOfMemoryError</code></span></div>
+        <div class="number"><span class="number__value">3 &times; 10s</span><span class="number__label">thread dumps before you diagnose anything at all</span></div>
+        <div class="number"><span class="number__value">1&ndash;2%</span><span class="number__label">JFR <code>default</code> overhead &mdash; leave it on; <code>profile</code> is 5&ndash;10%</span></div>
+        <div class="number"><span class="number__value">1024</span><span class="number__label">flag combinations at ten dynamic flags &mdash; none of them enumerable</span></div>
+      </div>
+    </section>
+
+    <footer class="pagefoot">
+      <span>Volume 9 of 11 &mdash; Spring Complete Deep-Dive</span>
+      <div class="pager">
+        <a href="08-spring-security.html">&larr; Security</a>
+        <a href="10-webflux-project-reactor.html">WebFlux &rarr;</a>
+      </div>
+    </footer>
+
+  </main>
+</div>
+
+<script src="../../search.js"></script>
+<script src="../../highlight.js"></script>
+</body>
+</html>

@@ -1,18 +1,19 @@
-# The guide pages are hand-authored now, but `guides/check-guide.js` still reads
-# them as raw bytes and fails on any CR — so line endings are still
-# load-bearing for them.
+# The pages are hand-authored, and `interview-prep/check.js` reads them as raw
+# bytes and fails on any CR — so line endings are load-bearing for them.
 #
 # With `core.autocrlf=true` (git's default on Windows) git rewrites LF to CRLF
 # on checkout, which would both churn every diff and make the checker report
 # CRLF on a file nobody touched. Declaring these `-text` pins them to LF in the
 # working tree on every platform.
-guides/**/*.html    -text
-guides/**/*.css     -text
-cheatsheets/**/*.css  -text
-# Same reason, and `check.js` enforces it just as strictly — it fails the page
-# with "CRLF found" / "stray CR" on a Windows checkout without this.
-cheatsheets/**/*.html  -text
+interview-prep/**/*.html    -text
+interview-prep/**/*.css     -text
+
+# The catalogue wall is checked by the same checker (`--index`) under the same
+# rules, and it was NOT pinned before the two index pages were retired — so on a
+# Windows checkout git would hand it CRLF and every `--index` run would fail on a
+# file nobody touched.
+index.html                  -text
 
 # The self-hosted webfonts are binary. Without this, git's text detection would
 # be free to rewrite them and quietly corrupt every face on the site.
-fonts/*.woff2       -text binary
+fonts/*.woff2               -text binary

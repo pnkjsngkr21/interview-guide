@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebFlux &amp; Project Reactor — Cheatsheet</title>
+<meta name="description" content="Condensed cheatsheet for Spring Deep-Dive Volume 10: reactive streams and backpressure, the event-loop threading rule, Mono versus Flux, and the blocking mistakes that break a reactive application.">
+<link rel="stylesheet" href="../../site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="page">
+
+  <nav class="sidebar" aria-label="Contents">
+    <h2>On this page</h2>
+    <ol>
+      <li><a href="#ch1">1 — The reactive model</a></li>
+      <li><a href="#ch2">2 — Reactor core</a></li>
+      <li><a href="#ch3">3 — Errors, retries, timeouts</a></li>
+      <li><a href="#ch4">4 — WebFlux vs MVC</a></li>
+      <li><a href="#ch5">5 — Writing endpoints</a></li>
+      <li><a href="#ch6">6 — Persistence &amp; remote calls</a></li>
+      <li><a href="#ch7">7 — Context propagation</a></li>
+      <li><a href="#ch8">8 — Testing &amp; production</a></li>
+      <li><a href="#numbers">Numbers</a></li>
+    </ol>
+    <h2>Series</h2>
+    <ul>
+      <li><a href="01-spring-core-ioc.html">01 — Core &amp; IoC</a></li>
+      <li><a href="02-bean-lifecycle-scopes-di.html">02 — Lifecycle &amp; DI</a></li>
+      <li><a href="03-aop-proxying.html">03 — AOP &amp; Proxying</a></li>
+      <li><a href="04-transaction-management.html">04 — Transactions</a></li>
+      <li><a href="05-spring-mvc-web-layer.html">05 — Spring MVC</a></li>
+      <li><a href="06-spring-data-jpa-persistence.html">06 — Data JPA</a></li>
+      <li><a href="07-spring-boot-auto-configuration.html">07 — Boot &amp; Auto-Config</a></li>
+      <li><a href="08-spring-security.html">08 — Security</a></li>
+      <li><a href="09-testing-production-troubleshooting.html">09 — Testing &amp; Ops</a></li>
+      <li><a href="10-webflux-project-reactor.html">10 — WebFlux</a></li>
+      <li><a href="11-spring-cloud-distributed-systems.html">11 — Spring Cloud</a></li>
+    </ul>
+    <h2>Repository</h2>
+    <ul>
+      <li><a href="../../../index.html">All cheatsheets</a></li>
+      
+    </ul>
+  </nav>
+
+  <main class="main" id="main">
+
+    <header class="masthead">
+      <p class="masthead__eyebrow">Spring — The Spring Complete Deep-Dive</p>
+      <h1>Volume 10 — WebFlux &amp; Project Reactor</h1>
+      <p class="masthead__sub">
+        The demand signal that makes a slow consumer survivable, the one rule about threads
+        that a reactive application lives or dies by, and the handful of operators whose
+        defaults decide whether you hold memory or lose data.
+      </p>
+      <ul class="masthead__meta">
+        <li>9 sections</li>
+        
+      </ul>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <input type="search" data-filter-input placeholder="Filter sections — press /" aria-label="Filter sections">
+        <span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span>
+      </div>
+      <div class="pager">
+        <a href="09-testing-production-troubleshooting.html">&larr; Prev</a>
+        <a href="11-spring-cloud-distributed-systems.html">Next &rarr;</a>
+      </div>
+    </div>
+
+    <div class="keyfacts">
+      <h2>If you only remember five things</h2>
+      <ol>
+        <li><strong>Reactive is demand, not async.</strong> The subscriber calls
+        <code>request(n)</code> and the publisher may never emit more — and <code>request(n)</code>
+        is a <em>hint</em>, so a publisher is free to emit fewer.</li>
+        <li><strong>Backpressure is automatic only for sources that can be slowed.</strong> Kafka, a
+        hot <code>Flux</code>, an already-materialised list cannot honour demand, so you must
+        insert an <code>onBackpressureX</code> — and the no-argument
+        <code>onBackpressureBuffer()</code> is unbounded heap waiting for a slow consumer.</li>
+        <li><strong>A blocking call on an event-loop thread stalls every other request on that
+        loop.</strong> Reactor catches <code>block()</code> and throws
+        <code>IllegalStateException</code>; an undeclared blocking library is worse, because it
+        shows up as a throughput plateau rather than an error.</li>
+        <li><strong>Laziness is per subscription, not per assembly.</strong> A cold
+        <code>Flux</code> re-runs its whole pipeline — the database query included — for every
+        subscriber, and a discarded <code>subscribe()</code> in a controller is a latent
+        double-execution bug.</li>
+        <li><strong><code>flatMap</code> runs 256 inner publishers concurrently by default.</strong>
+        That number is a real bound on in-flight work and is very often exactly the number that
+        trips a downstream rate limit.</li>
+      </ol>
+    </div>
+
+    <p class="empty" data-filter-empty hidden>No section matches that filter.</p>
+
+    <!-- ============ 1 ============ -->
+    <section id="ch1" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">01</span>
+        <h2>The reactive model: demand and backpressure</h2>
+      </div>
+
+      <p>Reactive is not "async with nicer syntax". It inverts control of the data flow. An
+      imperative producer decides when to produce and blocks if the consumer is slow; a
+      reactive producer hands a <code>Publisher</code> to a framework and waits to be asked. That
+      request is <strong>demand</strong>, and demand-based flow control is the entire point of the
+      Reactive Streams specification.</p>
+
+      <pre class="snippet" data-lang="java" data-title="Reactive Streams triad" data-hl-line="13"><code>public interface Publisher&lt;T&gt; {
+    void subscribe(Subscriber&lt;? super T&gt; s);
+}
+
+public interface Subscriber&lt;T&gt; {
+    void onSubscribe(Subscription s);   // 1. first, exactly once — the only route to a Subscription
+    void onNext(T t);                  // 2. only after request(n) with n &gt; 0
+    void onError(Throwable t);         // 3. terminal, at most once
+    void onComplete();                 // 4. terminal, at most once
+}
+
+public interface Subscription {
+    void request(long n);              // the demand signal — a HINT, not a counter
+    void cancel();                     // "no more, ever"
+}</code></pre>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 210" role="img" aria-label="The demand chain. A subscriber at the right requests items, and the request signal travels back up the chain through the response write, through flatMap, through map, and reaches the database cursor, which may then emit no more than was requested.">
+          <defs>
+            <marker id="arw-s10-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node" x="12" y="34" width="130" height="44" rx="6"/>
+          <text class="label" x="77" y="61" text-anchor="middle">DB cursor</text>
+
+          <rect class="node" x="172" y="34" width="110" height="44" rx="6"/>
+          <text class="label" x="227" y="61" text-anchor="middle">map</text>
+
+          <rect class="node" x="312" y="34" width="120" height="44" rx="6"/>
+          <text class="label" x="372" y="61" text-anchor="middle">flatMap</text>
+
+          <rect class="node" x="462" y="34" width="146" height="44" rx="6"/>
+          <text class="label" x="535" y="61" text-anchor="middle">response write</text>
+
+          <rect class="node node--accent" x="462" y="106" width="146" height="42" rx="6"/>
+          <text class="label" x="535" y="132" text-anchor="middle">subscriber</text>
+
+          <path class="edge" d="M 144 56 L 170 56" marker-end="url(#arw-s10-a)"/>
+          <path class="edge" d="M 284 56 L 310 56" marker-end="url(#arw-s10-a)"/>
+          <path class="edge" d="M 434 56 L 460 56" marker-end="url(#arw-s10-a)"/>
+          <path class="edge" d="M 535 80 L 535 104" marker-end="url(#arw-s10-a)"/>
+
+          <path class="edge edge--good" d="M 460 127 L 77 127 Q 65 127 65 115 L 65 84"
+                marker-end="url(#arw-s10-a)"/>
+          <text class="edge-label edge-label--strong" x="262" y="118" text-anchor="middle">request(n) — demand travels back upstream</text>
+
+          <text class="edge-label" x="330" y="176" text-anchor="middle">Intermediate operators translate and pass demand through, so the brake</text>
+          <text class="edge-label" x="330" y="192" text-anchor="middle">reaches the source. Where no brake exists, backpressure must be inserted.</text>
+        </svg>
+        <figcaption>
+          <strong>The consumer holds the only brake.</strong> Backpressure is not a property of
+          the chain; it is a number the downstream subscriber sends and every operator forwards.
+          If the source at the far left can honour that number, a producer that wants to emit
+          1,000 while the consumer wants 1 emits 1 and waits. That is the whole reason the
+          specification exists — to make "fast producer, slow consumer" a representable
+          situation rather than an out-of-memory error.
+        </figcaption>
+      </figure>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The contract, and the part people get wrong</caption>
+          <thead><tr><th>Rule</th><th>Consequence</th></tr></thead>
+          <tbody>
+            <tr><td><code>onSubscribe</code> is called first, exactly once</td><td>It is the <strong>only</strong> place you get a <code>Subscription</code></td></tr>
+            <tr><td><code>onNext</code> only after <code>request(n)</code> with <code>n &gt; 0</code></td><td>A publisher emitting without demand is a spec violation</td></tr>
+            <tr><td><code>request(n)</code> is a <em>hint</em>, not a demand counter</td><td>Publishers may emit fewer; they must never emit more</td></tr>
+            <tr><td><code>request(Long.MAX_VALUE)</code> means unbounded</td><td>A publisher honouring it has removed backpressure for that subscription</td></tr>
+            <tr><td><code>onError</code> and <code>onComplete</code> are terminal, at most one</td><td>Nothing follows — and a stream that terminates on error delivers nothing further</td></tr>
+            <tr><td><code>cancel()</code> means "no more, ever"</td><td>After cancel the publisher must stop producing</td></tr>
+            <tr><td>Signals are serialised</td><td>Never <code>onNext</code> from two threads concurrently</td></tr>
+            <tr><td>None of the four methods may block</td><td><strong>The rule that breaks imperative code</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — request(n) is a hint</span>
+        <p>A publisher is permitted to emit <em>fewer</em> items than requested —
+        <code>request(10)</code> on a source with three items left emits three and completes.
+        What it may never do is emit <em>more</em>. This is why <code>Flux.generate</code> and
+        <code>Flux.push</code> take request accounting seriously, and it is the single most
+        common source of "my backpressure settings aren't being respected" confusion.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Can this source be slowed? Backpressure is automatic only if yes</caption>
+          <thead><tr><th>Source</th><th>Honours <code>request(n)</code></th><th>What it costs instead</th></tr></thead>
+          <tbody>
+            <tr><td><code>Flux.fromIterable</code></td><td>Yes</td><td>A collection can be iterated lazily</td></tr>
+            <tr><td><code>Flux.range</code></td><td>Yes, trivially</td><td>Nothing</td></tr>
+            <tr><td>Database cursor (R2DBC streaming)</td><td>Yes</td><td>Requires a fetch-size-bounded cursor</td></tr>
+            <tr><td>Netty inbound read</td><td>Yes</td><td>Nothing — this is why TCP has a receive window</td></tr>
+            <tr><td>Kafka consumer</td><td><strong>No</strong></td><td>It polls into a fixed-size buffer</td></tr>
+            <tr><td>In-memory <code>List</code> turned into a hot <code>Flux</code></td><td><strong>No</strong></td><td>The data is already in memory</td></tr>
+            <tr><td>A <code>Schedulers.parallel()</code> timer</td><td><strong>No</strong></td><td>The clock does not stop</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>When you must insert backpressure yourself</caption>
+          <thead><tr><th>Operator</th><th>Behaviour on overflow</th><th>When it bites</th></tr></thead>
+          <tbody>
+            <tr><td><code>onBackpressureBuffer()</code></td><td>Unbounded growth</td><td>The answer that produces a production OOM. Never a safe default</td></tr>
+            <tr><td><code>onBackpressureBuffer(n)</code></td><td>Drops the <strong>oldest</strong>, silently</td><td>Bounded but lossy — a data stream cannot afford it</td></tr>
+            <tr><td><code>onBackpressureDrop()</code></td><td>Drops the <strong>newest</strong>, silently</td><td>Acceptable only where the newest values matter least</td></tr>
+            <tr><td><code>onBackpressureLatest()</code></td><td>Keeps only the newest</td><td>Correct for a <em>state</em> stream, wrong for a <em>data</em> stream</td></tr>
+            <tr><td><code>onBackpressureError(ex)</code></td><td>Converts overflow into a signal</td><td>The default you want: visible, bounded, diagnosable</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — "what if the consumer can't keep up?"</span>
+        <p>The reflexive answer is "backpressure kicks in and the producer slows down". That is
+        true <em>only</em> for sources that can honour demand. For a source that cannot — a Kafka
+        consumer, a hot publisher, a JDBC-style buffered source — backpressure has to be
+        <em>inserted</em> with an <code>onBackpressureX</code> operator, and the choice is
+        therefore a data decision you are making under load. The senior answer <strong>names
+        which operator and what it costs</strong>, because each of the five in the table above
+        gives up something different. <strong>"It just buffers" is the answer that produces a
+        production OOM.</strong></p>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — the no-argument buffer</span>
+        <p><code>onBackpressureBuffer()</code> with no size is <strong>unbounded</strong>. When
+        the consumer degrades — a GC pause, a slow downstream, a cache-miss storm — the buffer
+        grows until the heap dies, and the process takes the healthy event loops down with it.
+        The bounded form surfaces a visible, bounded, diagnosable failure instead. The second
+        question is always <em>why is the consumer slow</em>, because the buffer is usually a
+        symptom of a degradation that should have been found first.</p>
+      </div>
+    </section>
+
+    <!-- ============ 2 ============ -->
+    <section id="ch2" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">02</span>
+        <h2>Project Reactor core: Mono, Flux, cold, hot</h2>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th></th><th><code>Mono&lt;T&gt;</code></th><th><code>Flux&lt;T&gt;</code></th></tr></thead>
+          <tbody>
+            <tr><td>Cardinality</td><td>0 or 1</td><td>0 to N</td></tr>
+            <tr><td>Completes with</td><td>A value, or empty</td><td>A value, a completion, or neither</td></tr>
+            <tr><td><code>subscribe()</code> returns</td><td><code>Mono&lt;Void&gt;</code></td><td><code>Flux&lt;Void&gt;</code></td></tr>
+            <tr><td>Typical use</td><td>A single DB row, an HTTP response</td><td>A stream of records, a collection</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — lazy per subscription, not per assembly</span>
+        <p>"Reactive operators are lazy" is right, and the useful follow-up is the trap: a cold
+        <code>Flux</code> <strong>re-executes its whole pipeline, including the database
+        query, for every subscriber</strong>. Two subscribers to a cold pipeline means two
+        queries — the most common WebFlux N+1, and invisible in tests, which subscribe once.</p>
+        <p>The related bug is a discarded subscription: <code>hotFlux.subscribe(this::handle)</code>
+        inside a method throws the <code>Disposable</code> away, so the Flux keeps running with
+        nobody listening and can never be cancelled. The fix for "my controller method is being
+        called twice" is almost always to find the second subscription.</p>
+        <p><code>Mono.just(fetchExpensiveThing())</code> is the eager twin of the same mistake:
+        the argument is evaluated at assembly, so <code>Mono.defer</code> is what defers the
+        computation. And caching a cold <code>Mono</code> field does not merely cost less, it
+        <em>changes semantics</em> — every subscriber gets one result, including ones that
+        wanted fresh data, and a <code>Mono</code> field still looks lazy.</p>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 300" role="img" aria-label="One assembled cold pipeline subscribed twice. Each subscription runs the whole pipeline independently, so the source and its database query execute twice for one logical request.">
+          <defs>
+            <marker id="arw-s10-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node node--accent" x="140" y="16" width="380" height="46" rx="6"/>
+          <text class="label" x="330" y="36" text-anchor="middle">assembly: pipeline built, nothing run</text>
+          <text class="label label--sub" x="330" y="52" text-anchor="middle">Flux.just(..).map(f).filter(g).retry(3)</text>
+
+          <path class="edge" d="M 280 64 Q 200 90 186 108" marker-end="url(#arw-s10-b)"/>
+          <path class="edge" d="M 380 64 Q 460 90 474 108" marker-end="url(#arw-s10-b)"/>
+
+          <rect class="node" x="92" y="110" width="180" height="38" rx="6"/>
+          <text class="label" x="182" y="134" text-anchor="middle">subscribe(A)</text>
+
+          <rect class="node" x="388" y="110" width="180" height="38" rx="6"/>
+          <text class="label" x="478" y="134" text-anchor="middle">subscribe(B)</text>
+
+          <path class="edge" d="M 182 150 L 182 184" marker-end="url(#arw-s10-b)"/>
+          <path class="edge" d="M 478 150 L 478 184" marker-end="url(#arw-s10-b)"/>
+
+          <rect class="node node--bad" x="62" y="186" width="220" height="52" rx="6"/>
+          <text class="label" x="172" y="206" text-anchor="middle">map, filter, source</text>
+          <text class="label label--sub" x="172" y="224" text-anchor="middle">+ one database query</text>
+
+          <rect class="node node--bad" x="378" y="186" width="220" height="52" rx="6"/>
+          <text class="label" x="488" y="206" text-anchor="middle">map, filter, source</text>
+          <text class="label label--sub" x="488" y="224" text-anchor="middle">+ one database query</text>
+
+          <rect class="node node--bad" x="228" y="256" width="204" height="34" rx="6"/>
+          <text class="label" x="330" y="278" text-anchor="middle">one request, two queries</text>
+        </svg>
+        <figcaption>
+          <strong>Assembly is cheap and repeatable; subscription is where the work happens.</strong>
+          Two subscribers to one cold field means the pipeline runs twice and the database sees
+          two queries. The fixes are deliberately different: return the <code>Mono</code> and let
+          exactly one subscription happen, or make the source explicitly hot with
+          <code>share()</code> — never a silently cached <code>Mono</code> field, which trades
+          the bug for a stale-data bug.
+        </figcaption>
+      </figure>
+
+      <pre class="snippet" data-lang="java" data-title="Flattening operators" data-hl-line="2,3"><code>Flux.just(m1, m2, m3)
+    .flatMap(this::unwrap)            // concurrent, UNORDERED; default concurrency 256
+    .concatMap(this::unwrap)          // sequential, ordered — one at a time, no head-of-line surprise
+    .flatMapSequential(this::unwrap)  // concurrent AND emits in source order
+    .flatMap(this::call, 8);          // explicit concurrency bound, overriding 256</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — 256 is an operational number</span>
+        <p><code>flatMap</code>'s default concurrency is <strong>256</strong>
+        (<code>Queues.SMALL_BUFFER_SIZE</code>). A <code>flatMap</code> over a 10,000-element
+        stream will therefore have 256 calls in flight, not 10,000 — and if each one hits a
+        downstream with a rate limit, <strong>256 concurrent is the number that trips it</strong>.
+        Choosing between <code>flatMap</code>, <code>concatMap</code> and
+        <code>flatMapSequential</code> is often the whole performance story of a pipeline.</p>
+        <p>The related shape worth catching: <code>Mono.zip(a, b).then(c)</code> is
+        <strong>not</strong> a short circuit. <code>a</code> and <code>b</code> are subscribed
+        concurrently, both must complete, their values are discarded, and then <code>c</code> runs
+        — all three execute. Reading <code>.then()</code> as "skip the earlier work" produces
+        load, not savings.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Cold and hot, and what a late subscriber gets</caption>
+          <thead><tr><th></th><th>Cold</th><th>Hot</th></tr></thead>
+          <tbody>
+            <tr><td>Data produced</td><td>Per subscriber, on demand</td><td>Once, regardless of subscribers</td></tr>
+            <tr><td>Late subscriber</td><td>Gets all data from the start</td><td>Gets only what arrives after it subscribed</td></tr>
+            <tr><td>Examples</td><td><code>Flux.range</code>, <code>Flux.fromIterable</code>, a DB query, <code>Mono.just</code></td><td><code>Flux.interval</code>, <code>Sinks.Many</code>, a Kafka stream</td></tr>
+            <tr><td>Buffers for late subscribers</td><td>No — data is generated per subscriber</td><td>Yes, or dropped</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — which Sinks sink you pick</span>
+        <p><code>Sinks.many().multicast().onBackpressureBuffer()</code> buffers for slow
+        subscribers, and with no bound specified that buffer grows until the heap dies.
+        <code>Sinks.many().multicast().directBestEffort()</code> drops for the slowest
+        subscriber instead. <strong>Flips on:</strong> whether the stream carries <em>facts</em>
+        or <em>state</em>. Use the buffered sink when every element is a fact and losing one is
+        unacceptable, and you are willing to spend memory to keep it. Use
+        <code>directBestEffort</code> for a live dashboard or a current-value stream where only
+        the latest value is meaningful. Using it for a data stream silently loses events; using
+        the unbounded buffer for a fast producer is an OOM. This is a data-modelling decision,
+        not an operator preference.</p>
+      </div>
+    </section>
+
+    <!-- ============ 3 ============ -->
+    <section id="ch3" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">03</span>
+        <h2>Errors, retries &amp; timeouts</h2>
+      </div>
+
+      <p>An error is a <strong>terminal signal travelling down the chain</strong>, not an
+      exception thrown across a thread boundary — the subscriber receives
+      <code>onError</code>. Because it is terminal, a stream that errors delivers nothing
+      further to the subscriber: every element that would have followed is lost, not queued.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>The fallback vocabulary, and what each one hides</caption>
+          <thead><tr><th>Operator</th><th>Behaviour</th><th>Read as</th></tr></thead>
+          <tbody>
+            <tr><td><code>onErrorReturn(v)</code></td><td>Emits a fixed value and completes</td><td>Cheapest; also the easiest way to make an outage invisible to alerting</td></tr>
+            <tr><td><code>onErrorResume(f)</code></td><td>Calls <code>f</code> with the exception, continues with whatever <code>Publisher</code> it returns</td><td>Use it when the fallback depends on error type or must be asynchronous</td></tr>
+            <tr><td><code>onErrorResume(Class, f)</code></td><td>Type-selective</td><td>One exception is expected, another is not — <code>OrderNotFound</code> &rarr; empty, everything else propagates</td></tr>
+            <tr><td><code>onErrorMap</code></td><td>Translates the exception, stays fatal</td><td>Domain errors at the edge; usually for tests and for error contracts</td></tr>
+            <tr><td><code>onErrorComplete()</code></td><td>Swallows the error and completes</td><td>Almost always a bug — the failure never reaches anyone</td></tr>
+            <tr><td><code>onErrorContinue</code></td><td>Drops the failed element, carries on</td><td>Documented as best avoided; see the trap below</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — onErrorContinue</span>
+        <p><code>onErrorContinue</code> lets an errored element be dropped and the stream carry
+        on. It is documented as best avoided, and the reason is worth knowing: the operator must
+        attempt to <strong>resubscribe to recover the next element</strong>, and recovering the
+        <em>position</em> of a failed element inside a source that is not restartable produces
+        duplicate or skipped data. If you need "skip the bad rows", do it in
+        <code>filter</code>/<code>flatMap</code> with an explicit per-element result type
+        rather than with <code>onErrorContinue</code>.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Retry variants, and the one you ship</caption>
+          <thead><tr><th>Form</th><th>Behaviour</th><th>How it bites</th></tr></thead>
+          <tbody>
+            <tr><td><code>retry()</code></td><td>Infinite</td><td>Do not ship — an outage becomes a permanent hot loop against the dependency</td></tr>
+            <tr><td><code>retry(3)</code></td><td>Three immediate retries</td><td>One user request becomes four, arriving in a burst exactly when the dependency can least serve them</td></tr>
+            <tr><td><code>retryWhen(Retry.max(n))</code></td><td>Max attempts</td><td>Still immediate unless backoff is added</td></tr>
+            <tr><td><code>retryWhen(Retry.backoff(..)</code></td><td>Full control: backoff, max backoff, jitter, filter, exhaustion handler</td><td>The only form with a retry <em>budget</em>; filter transient errors and exclude a 400 or a 401</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Retry with a budget" data-hl-line="7,8"><code>// retry(3) — no delay, no backoff, no jitter: the version that causes incidents
+Mono.just(callApi()).retry(3);
+
+Mono.just(callApi())
+    .retryWhen(Retry.backoff(3, Duration.ofMillis(100))
+                      .maxBackoff(Duration.ofSeconds(2))
+                      .jitter(0.5)                  // ±50% randomisation
+                      .filter(this::isTransient));  // a 400 is not worth retrying</code></pre>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — jitter is not a nicety</span>
+        <p>Un-jittered retry is worse than no retry in a fleet. If every instance retries at
+        100ms, 200ms, 400ms after a shared dependency fails, the retries are <strong>synchronised
+        across the fleet</strong> and produce periodic load spikes that keep the dependency from
+        recovering. Jitter is what breaks the synchronisation.</p>
+        <p>The multiplication is also multiplicative, not additive, and the two figures quoted
+        for it mean different things. Amplification is <strong>attempts per layer, raised to the
+        number of layers</strong>: three layers making one attempt plus one retry is
+        <strong>2³ = 8 requests per user request</strong>, while three layers making two retries
+        each is 3³ = <strong>27</strong>. Which of those you are looking at follows from the
+        retry policy you configured, not from the layer count alone — and either way it
+        compounds again with the number of concurrent callers. Observed in production: an upstream reporting a 4×
+        traffic spike that matched <em>our</em> request count while it returned 503s. Retrying a
+        non-idempotent operation is the sharper version of the same mistake — a 504 after the
+        work actually succeeded becomes a duplicate write. And a circuit breaker belongs
+        alongside retry, not instead of it: retry handles transient blips, the breaker fails
+        fast when the failure is sustained (see Volume 11).</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Timeout forms, and what each one actually measures</caption>
+          <thead><tr><th>Form</th><th>Scope</th><th>Watch out</th></tr></thead>
+          <tbody>
+            <tr><td><code>timeout(Duration)</code></td><td>The whole subscription</td><td>No fallback — errors with <code>TimeoutException</code></td></tr>
+            <tr><td><code>timeout(Duration, fallback)</code></td><td><strong>Source <em>and</em> fallback</strong></td><td>The fallback does not get its own budget; it consumes the running one</td></tr>
+            <tr><td><code>timeout(Duration)</code> on a <code>Flux</code></td><td>Per item — the timer resets on each element</td><td>It is an <em>idle</em> timeout, not a total one</td></tr>
+            <tr><td><code>timeout(d, Mono.empty()).onErrorResume(ex -&gt; fb)</code></td><td>Source only</td><td>The composition that gives the fallback an independent budget</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — the fallback shares the clock</span>
+        <p>Concretely: the composition that gives the fallback an independent budget is
+        <code>source.timeout(Duration.ofSeconds(2), Mono.empty()).onErrorResume(ex -&gt;
+        fallbackMono)</code>, and the two-argument form is what you should not reach for when
+        the fallback is itself an I/O call. Understanding the difference explains both "my
+        timeout fallback never fires" and "my timeout fires even though the fallback is
+        instant" bug reports, and is worth being able to describe precisely rather than
+        approximately.</p>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 250" role="img" aria-label="Timeout budgets allocated from the outside in across a four-hop call chain under a 500 millisecond end-to-end SLO. The frontend gets 400ms, the next hop 300, then 200, then the database call 100 — each layer strictly less than its caller.">
+          <defs>
+            <marker id="arw-s10-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <rect class="node node--good" x="12" y="14" width="196" height="36" rx="18"/>
+          <text class="label" x="110" y="37" text-anchor="middle">SLO 500ms, end to end</text>
+
+          <rect class="node" x="12" y="86" width="140" height="44" rx="6"/>
+          <text class="label" x="82" y="113" text-anchor="middle">frontend 400ms</text>
+
+          <rect class="node" x="182" y="86" width="140" height="44" rx="6"/>
+          <text class="label" x="252" y="113" text-anchor="middle">hop 2 — 300ms</text>
+
+          <rect class="node" x="352" y="86" width="140" height="44" rx="6"/>
+          <text class="label" x="422" y="113" text-anchor="middle">hop 3 — 200ms</text>
+
+          <rect class="node" x="522" y="86" width="126" height="44" rx="6"/>
+          <text class="label" x="585" y="113" text-anchor="middle">db — 100ms</text>
+
+          <path class="edge" d="M 154 108 L 180 108" marker-end="url(#arw-s10-c)"/>
+          <path class="edge" d="M 324 108 L 350 108" marker-end="url(#arw-s10-c)"/>
+          <path class="edge" d="M 494 108 L 520 108" marker-end="url(#arw-s10-c)"/>
+
+          <path class="edge" d="M 82 148 L 585 148"/>
+          <path class="edge" d="M 82 132 L 82 148"/>
+          <path class="edge" d="M 585 132 L 585 148"/>
+          <text class="edge-label edge-label--strong" x="333" y="168" text-anchor="middle">allocated from the outside in; every layer strictly less than its caller</text>
+
+          <rect class="node node--warn" x="12" y="186" width="636" height="50" rx="6"/>
+          <text class="label" x="330" y="206" text-anchor="middle">A layer with no timeout inherits its caller's —</text>
+          <text class="label label--sub" x="330" y="224" text-anchor="middle">and the caller's thread or event-loop capacity is held for the full budget</text>
+        </svg>
+        <figcaption>
+          <strong>Timeouts are a budget allocation problem, not a constant.</strong> The flip
+          condition is not "what is a good number" but <em>where in the budget chain this call
+          sits</em>: the deepest call gets the smallest timeout, and every layer has a timeout
+          strictly less than its caller's, so a stall is localised rather than compounding. Too
+          tight and you shed load you could have served; too loose and one slow dependency
+          consumes capacity until everything fails together. Verify the chain with fault
+          injection — the numbers are only right if the chain behaves as modelled.
+        </figcaption>
+      </figure>
+    </section>
+
+    <!-- ============ 4 ============ -->
+    <section id="ch4" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">04</span>
+        <h2>WebFlux vs MVC: the threading model</h2>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Not "which is better" — which constraint is binding</caption>
+          <thead><tr><th>Question</th><th>Answer</th><th>When it bites</th></tr></thead>
+          <tbody>
+            <tr><td>Reactive or blocking?</td><td>Reactive wins when the bottleneck is <strong>waiting</strong>: I/O-bound, high concurrency, low CPU, many connections few of them active, fan-out to many services, streaming, gatewaying, WebSocket</td><td>Blocking wins when the bottleneck is <strong>CPU</strong> — image processing, encryption, compression — because reactive adds scheduling overhead and does not add cores. It is slower</td></tr>
+            <tr><td>What is the win, exactly?</td><td>A different <strong>resource profile</strong>, not speed: a few event loops hold thousands of mostly-idle connections</td><td>It disappears the moment a blocking call sneaks in. For CPU-bound work and for teams whose code is full of blocking calls, MVC is at least as fast and simpler</td></tr>
+            <tr><td>Is 100&times; the concurrency free?</td><td>No. It is traded for thread dumps that are near-unreadable, lost <code>ThreadLocal</code> state, and a persistence story that means leaving Hibernate</td><td>A CRUD service at 200-300 requests/second, where the thread model was never the constraint, buys complexity and nothing else</td></tr>
+            <tr><td>What is the deciding measurement?</td><td>Connections held open, or requests served</td><td>50,000 mostly-idle connections is a genuine reactive case. Request rate is usually not — Tomcat takes 200 threads at ~1MB of stack each and that is 200MB</td></tr>
+            <tr><td>Can I have both?</td><td>No. Boot selects <code>WebApplicationType.SERVLET</code> when MVC is on the classpath, even with webflux present</td><td>Reactive <em>types</em> with none of reactive execution: no event loop, no backpressure, and the <code>Mono</code> is bridged back and blocked on a servlet thread</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <figure class="figure">
+        <svg viewBox="0 0 660 320" role="img" aria-label="Two panels. On the left, one event loop thread interleaves three concurrent requests that never block, so the thread returns to the loop immediately. On the right, the same event loop thread makes one blocking JDBC call, and all three requests on that loop stall for the full two seconds.">
+          <defs>
+            <marker id="arw-s10-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+            </marker>
+          </defs>
+
+          <text class="label" x="160" y="24" text-anchor="middle">No blocking call</text>
+          <text class="label" x="500" y="24" text-anchor="middle">One blocking call</text>
+
+          <rect class="node" x="20" y="52" width="70" height="36" rx="6"/>
+          <text class="label" x="55" y="75" text-anchor="middle">R1</text>
+          <rect class="node" x="20" y="118" width="70" height="36" rx="6"/>
+          <text class="label" x="55" y="141" text-anchor="middle">R2</text>
+          <rect class="node" x="20" y="184" width="70" height="36" rx="6"/>
+          <text class="label" x="55" y="207" text-anchor="middle">R3</text>
+
+          <rect class="node node--accent" x="118" y="40" width="84" height="192" rx="6"/>
+          <text class="label" x="160" y="124" text-anchor="middle">event</text>
+          <text class="label" x="160" y="142" text-anchor="middle">loop</text>
+          <text class="label label--sub" x="160" y="160" text-anchor="middle">nio-3</text>
+
+          <path class="edge edge--good" d="M 92 70 L 116 70" marker-end="url(#arw-s10-d)"/>
+          <path class="edge edge--good" d="M 92 136 L 116 136" marker-end="url(#arw-s10-d)"/>
+          <path class="edge edge--good" d="M 92 202 L 116 202" marker-end="url(#arw-s10-d)"/>
+
+          <text class="edge-label" x="160" y="256" text-anchor="middle">the thread returns to the loop</text>
+          <text class="edge-label" x="160" y="272" text-anchor="middle">after every non-blocking step,</text>
+          <text class="edge-label" x="160" y="288" text-anchor="middle">so one thread serves thousands</text>
+
+          <rect class="node node--bad" x="380" y="52" width="70" height="36" rx="6"/>
+          <text class="label" x="415" y="75" text-anchor="middle">R1</text>
+          <rect class="node node--bad" x="380" y="118" width="70" height="36" rx="6"/>
+          <text class="label" x="415" y="141" text-anchor="middle">R2</text>
+          <rect class="node node--bad" x="380" y="184" width="70" height="36" rx="6"/>
+          <text class="label" x="415" y="207" text-anchor="middle">R3</text>
+
+          <rect class="node node--bad" x="478" y="40" width="84" height="192" rx="6"/>
+          <text class="label" x="520" y="100" text-anchor="middle">event</text>
+          <text class="label" x="520" y="118" text-anchor="middle">loop</text>
+          <text class="label label--sub" x="520" y="136" text-anchor="middle">nio-3</text>
+          <rect class="node node--bad" x="484" y="160" width="72" height="60" rx="6"/>
+          <text class="label" x="520" y="184" text-anchor="middle">2s</text>
+          <text class="label label--sub" x="520" y="200" text-anchor="middle">JDBC</text>
+
+          <path class="edge edge--bad" d="M 452 70 L 476 70" marker-end="url(#arw-s10-d)"/>
+          <path class="edge edge--bad" d="M 452 136 L 476 136" marker-end="url(#arw-s10-d)"/>
+          <path class="edge edge--bad" d="M 452 202 L 476 202" marker-end="url(#arw-s10-d)"/>
+
+          <text class="edge-label" x="520" y="256" text-anchor="middle">all three requests stall</text>
+          <text class="edge-label" x="520" y="272" text-anchor="middle">for the full duration, including</text>
+          <text class="edge-label" x="520" y="288" text-anchor="middle">the two that never touched the DB</text>
+        </svg>
+        <figcaption>
+          <strong>A blocking call on an event loop is not "this request is slow" — it is "every
+          request on this loop is slow".</strong> In the MVC model a blocked thread costs one
+          request. In WebFlux the event loop is a shared, single-threaded resource, so a two-second
+          JDBC call stops the loop from picking up anything else for two seconds, including
+          requests that had not yet started. This is the mechanism behind the whole reactive
+          threading rule, and it is why an undeclared blocking library — one that does not announce
+          itself — produces a global throughput plateau rather than a slow endpoint, which is far
+          harder to localise.
+        </figcaption>
+      </figure>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — the exact block() failure</span>
+        <p>Reactor deliberately detects the obvious case and throws:</p>
+        <p><code>java.lang.IllegalStateException: block()/blockFirst()/blockLast() are blocking,
+        which is not supported in thread reactor-http-nio-3</code></p>
+        <p>Recognising that message — the thread name <code>reactor-http-nio-N</code> is the
+        giveaway that you are on an event loop — is how you tell the declared failure from the
+        dangerous one. The <strong>more insidious variant is <code>block()</code> on a
+        <code>boundedElastic</code> thread</strong>, because an earlier operator scheduled there:
+        it succeeds, works in testing, and consumes a thread per call under load.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>Schedulers: what each is sized for</caption>
+          <thead><tr><th>Scheduler</th><th>Sized for</th><th>Use it for</th></tr></thead>
+          <tbody>
+            <tr><td>Reactor Netty event loops</td><td>~2 &times; CPU cores by default</td><td>The request path. Non-blocking work only</td></tr>
+            <tr><td><code>Schedulers.parallel()</code></td><td>The CPU count</td><td>CPU-bound work — <code>map</code>, <code>filter</code>, computation. <strong>Blocking it starves the computations it exists to run</strong></td></tr>
+            <tr><td><code>Schedulers.boundedElastic()</code></td><td>Bounded, grows on demand up to a cap</td><td>Absorbing blocking calls. A bounded pool, so a burst of them turns a global plateau into a bounded queue of blocked threads</td></tr>
+            <tr><td><code>Schedulers.single()</code></td><td>One thread</td><td>Serialising work that must not overlap</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Escaping to boundedElastic" data-hl-line="6"><code>// WRONG — runs on the event loop and stalls every other request on it
+Mono.fromCallable(() -&gt; jdbcTemplate.query(sql, mapper))
+    .subscribeOn(Schedulers.parallel());
+
+// RIGHT — boundedElastic exists to absorb blocking calls
+Mono.fromCallable(() -&gt; jdbcTemplate.query(sql, mapper))
+    .subscribeOn(Schedulers.boundedElastic());
+
+// CPU work belongs on parallel, which is sized to the CPU count
+Mono.fromCallable(() -&gt; encrypt(bytes))
+    .subscribeOn(Schedulers.parallel());</code></pre>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>Two operators that mean different things</caption>
+          <thead><tr><th>Aspect</th><th><code>subscribeOn</code></th><th><code>publishOn</code></th></tr></thead>
+          <tbody>
+            <tr><td>Which side it moves</td><td>The <strong>source</strong> subscription</td><td>The <strong>downstream</strong> operators</td></tr>
+            <tr><td>What it affects</td><td>Where the source and everything above it runs</td><td>Where the operators after it run, and everything after that</td></tr>
+            <tr><td>How many times it can usefully appear</td><td>Effectively once, near the source — later ones do not move the source</td><td>Many times; each one is a <em>shift</em>, so upstream work stays where it was</td></tr>
+            <tr><td>Use when</td><td>Choosing where a blocking call or an I/O source subscribes</td><td>Moving a stretch of CPU-bound operators off the event loop</td></tr>
+            <tr><td>Failure mode</td><td>Placed on the wrong operator, nothing moves</td><td>Placed expecting it to move the source, the source stays on the event loop and blocks it</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — the real cost of a reactive migration</span>
+        <p>The cost is not the library, it is the people. <code>block()</code>, a
+        <code>ThreadLocal</code> MDC lookup, a blocking JDBC driver, and a debugger showing an
+        event-loop thread with a 40-frame stack all quietly stop working. Before recommending
+        reactive the question is: <strong>do we have a measured concurrency requirement that
+        threads cannot meet, and is the team prepared for the operational consequences?</strong>
+        "It's more scalable" is not an answer. "We need 50,000 concurrent connections and Tomcat
+        needs 50,000 threads at 1MB of stack each, which is 50GB" is an answer.</p>
+        <p>Symmetrically, <code>boundedElastic</code> is a legitimate bridge and a poor
+        destination. <strong>Flips on:</strong> use it as the right interim measure during a
+        migration — put a date and an owner on replacing the blocking dependency — and treat it
+        as the wrong steady state, because the thread is still consumed and you have added a hop
+        and a context switch.</p>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — finding the undeclared block</span>
+        <p><code>BlockHound</code> instruments <code>Thread.sleep</code>,
+        <code>synchronized</code> blocks and <code>Thread.join</code> to throw when the calling
+        thread is a non-blocking thread. It is the tool for the blocking call Reactor
+        <em>cannot</em> detect — the one that shows up as a mysterious throughput plateau far
+        below the hardware's capability. Run it in a load test, because a unit test never
+        exercises the concurrency that causes the stall.</p>
+      </div>
+
+      <p>The general executor and thread-pool failure modes — bounded queues, rejection
+      policies, sizing by Little's Law — are owned by the
+      <a href="../java/06-multithreading-concurrency.html">Java concurrency track</a>. The
+      servlet <code>DispatcherServlet</code> path this contrasts with is
+      <a href="05-spring-mvc-web-layer.html">Volume 5</a>.</p>
+    </section>
+
+    <!-- ============ 5 ============ -->
+    <section id="ch5" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">05</span>
+        <h2>Writing WebFlux endpoints</h2>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table--decision">
+          <caption>The return type is the contract — clients, metrics and generated docs read it</caption>
+          <thead><tr><th>Return type</th><th>Means</th><th>Use it when / how it bites</th></tr></thead>
+          <tbody>
+            <tr><td><code>Mono&lt;T&gt;</code></td><td>0 or 1</td><td>One row, one response body. A single result with a <code>200</code></td></tr>
+            <tr><td><code>Flux&lt;T&gt;</code></td><td>0 to N</td><td>Serialises as a JSON <strong>array</strong> with a stream content type. One element still means an array, so a client expecting an object breaks — and the type is wrong, not the client</td></tr>
+            <tr><td><code>Mono&lt;Void&gt;</code></td><td>None</td><td>Fire-and-forget shaped work: <code>service.delete(id).then()</code> to discard the result, usually with <code>@ResponseStatus(NO_CONTENT)</code></td></tr>
+            <tr><td><code>Mono&lt;ResponseEntity&lt;T&gt;&gt;</code></td><td>0 or 1, full control</td><td>Status, headers and body all decided by you — <code>CREATED</code> with a body, for instance</td></tr>
+            <tr><td><code>subscribe()</code> inside a controller</td><td>Nothing</td><td>The request returns before the work completes and errors vanish. Return the <code>Mono</code>; let WebFlux subscribe exactly once</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Controller return types" data-hl-line="4"><code>@GetMapping("/{id}")
+public Mono&lt;Order&gt; get(@PathVariable UUID id) { return service.findById(id); }
+
+@GetMapping
+public Flux&lt;Order&gt; list() { return service.findAll(); }   // 0 to N — serialises as an array
+
+@DeleteMapping("/{id}")
+@ResponseStatus(HttpStatus.NO_CONTENT)
+public Mono&lt;Void&gt; delete(@PathVariable UUID id) { return service.delete(id).then(); }
+
+@PostMapping
+public Mono&lt;ResponseEntity&lt;Order&gt;&gt; create(@RequestBody Mono&lt;CreateOrderRequest&gt; req) {
+    return req.flatMap(service::create)
+               .map(o -&gt; ResponseEntity.status(HttpStatus.CREATED).body(o));
+}</code></pre>
+
+      <p>Request bodies bind reactively too: <code>@RequestBody Mono&lt;T&gt;</code> exposes the
+      body as a publisher, plain <code>@RequestBody T</code> still works through Jackson, and
+      reactive types nest inside ordinary objects. The filter-test and slice-test families are
+      <a href="09-testing-production-troubleshooting.html">Volume 9</a> material.</p>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — 256KB, and the limit that is not protecting you</span>
+        <p>WebFlux's <code>spring.codec.max-in-memory-size</code> defaults to <strong>256KB</strong>
+        and applies to <em>aggregated</em> bodies — anything not handled as a stream. Exceed it
+        and you get a <code>DataBufferLimitException</code> surfaced as a 500. The production
+        surprise is that people configure
+        <code>spring.servlet.multipart.max-file-size</code>, a completely separate property on a
+        separate stack that <strong>does not apply to WebFlux</strong>, and conclude they are
+        covered. A team that configured multipart limits and then moved to WebFlux is
+        unprotected and finds out from production.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — limitRate is the cheap insurance</span>
+        <p><code>limitRate(n)</code> caps the demand a downstream operator requests upstream
+        instead of <code>Long.MAX_VALUE</code>. Without it, one greedy consumer downstream — a
+        <code>collectList()</code>, a <code>block()</code>, anything that asks for everything —
+        removes backpressure for the <strong>whole upstream chain</strong>, including a database
+        cursor, and the resulting memory growth shows up nowhere near the cause. It is a small
+        operator protecting a large system.</p>
+        <p>Its sibling <code>bufferTimeout(100, Duration.ofSeconds(1))</code> emits a list when
+        either a hundred elements have arrived or a second has elapsed — the batching primitive
+        for write throughput, one bulk insert instead of a hundred. The dual trigger matters: a
+        count-only buffer stalls on a low-volume stream, a time-only buffer emits enormous
+        batches under load.</p>
+      </div>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — SSE holds a socket per client</span>
+        <p>A service pushing to 20,000 idle clients is holding 20,000 sockets, and every hop in
+        the path — load balancer, ingress, proxy — needs a raised idle timeout. Without it,
+        connections are reaped and every client reconnects in a synchronised wave, which is a
+        self-inflicted thundering herd. The fix is a heart-beat on a shorter period than the
+        proxy's idle timeout (an SSE comment, or a <code>Flux.interval</code> of 20 seconds
+        merged into the event stream), a matching idle-timeout configuration on every hop, and
+        jittered client-side reconnect.</p>
+      </div>
+    </section>
+
+    <!-- ============ 6 ============ -->
+    <section id="ch6" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">06</span>
+        <h2>Reactive persistence &amp; remote calls</h2>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>JDBC and R2DBC, and what leaving JDBC actually costs</caption>
+          <thead><tr><th></th><th>JDBC / JPA</th><th>R2DBC</th></tr></thead>
+          <tbody>
+            <tr><td>Blocking</td><td>Yes</td><td>No</td></tr>
+            <tr><td>Driver support</td><td>Universal</td><td>Subset — PostgreSQL, MySQL, MSSQL, H2, Oracle, DB2</td></tr>
+            <tr><td>ORM</td><td>JPA / Hibernate</td><td>None — <strong>JPA has no reactive equivalent</strong></td></tr>
+            <tr><td>Transactions</td><td><code>@Transactional</code></td><td>Yes, via <code>TransactionalOperator</code></td></tr>
+            <tr><td>Pagination</td><td>Offset-based</td><td>Offset-based, or keyset (better)</td></tr>
+            <tr><td>Maturity</td><td>Decades</td><td>Young — fewer edge cases, more gaps</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The client counterpart is <code>WebClient</code>, the non-blocking HTTP client, paired
+      with <code>DatabaseClient</code> for R2DBC in place of <code>JdbcTemplate</code>.
+      <code>retrieve()</code> is the default and the right first choice: 4xx and 5xx arrive as
+      <code>onError</code> via <code>WebClientResponseException</code>, 2xx gives you the body.
+      <code>exchangeToMono()</code> is what you reach for when the <em>status</em> has to drive
+      logic rather than fail the chain; <code>exchangeToFlux()</code> is for a streaming or
+      chunked response body. Service-to-service resilience — breakers, rate limiters, bulkheads —
+      is <a href="11-spring-cloud-distributed-systems.html">Volume 11</a>.</p>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — is leaving JPA worth it?</span>
+        <p>R2DBC's real cost is not the driver; it is that <strong>JPA and Hibernate have no
+        reactive equivalent</strong>, so choosing R2DBC means leaving the ORM. That is a large
+        decision: no entity mapping, no dirty checking, no persistence context, no derived
+        queries, no <code>Specification</code>, no <code>@EntityGraph</code> — and years of
+        accumulated tuning knowledge. Those ORM concepts are covered in
+        <a href="06-spring-data-jpa-persistence.html">Volume 6</a>. The migration cost is
+        re-implementing the object model by hand, which is a data-modelling project wearing a
+        persistence change's clothes, and it needs a stated rollback.</p>
+        <p><strong>Flips on:</strong> a measured concurrency requirement that threads cannot
+        meet, a query surface simple enough not to need an ORM, and a team prepared to own the
+        persistence layer. Absent those, MVC + JPA + a correctly sized pool is the better trade,
+        and saying so is a stronger answer than listing R2DBC's advantages.</p>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — no @Transactional in reactive code</span>
+        <p><code>@Transactional</code> works by intercepting a method call, binding a connection
+        to the calling thread, and committing when the method returns. A reactive pipeline returns
+        immediately and does work later, on a different thread, so <strong>there is no thread to
+        bind a connection to and no "return" to commit on</strong>.
+        <code>TransactionalOperator.transactional(manager, callback)</code> replaces it.</p>
+        <p>The subtlety worth being able to explain: the callback runs <em>on subscription</em>,
+        and the connection is acquired at that moment, not when <code>transactional()</code> is
+        called. So a <code>Mono</code> assembled <strong>outside</strong> the callback and
+        returned from inside it does <em>not</em> join the transaction — any eager operator ran
+        at assembly time. <code>Mono.defer</code>, or a chain built inside the callback, is the
+        fix. The symptom is a write that commits outside the boundary while the code reads as
+        though it does not.</p>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Reactive transaction" data-hl-line="8,9"><code>@Service
+class OrderService {
+    private final TransactionalOperator tx;   // not @Transactional
+    private final R2dbcTransactionManager tm;
+    private final OrderRepository orders;
+
+    Mono&lt;Order&gt; create(CreateOrderCommand cmd) {
+        return tx.transactional(tm, s -&gt; orders.insert(toOrder(cmd))
+                .then(Mono.defer(() -&gt; orders.findById(idOf(cmd)))));
+    }
+}</code></pre>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — WebClient is a connection pool</span>
+        <p><code>WebClient</code> must be <strong>injected as a bean, never built per
+        request</strong>. It carries a connection pool, so constructing one inside a controller
+        creates a pool per request — a connection storm against both services, and file
+        descriptor exhaustion on the <em>client</em> side, which is the wrong place to look.</p>
+        <p>The pool size is also shared across every user of the bean, so under 1,000 concurrent
+        requests a default pool of roughly 100 (Netty's <code>HttpResources</code> defaults)
+        becomes a queue that manifests as <strong>latency rather than as an obvious error</strong>.
+        Build the bean once with connect timeout, response timeout and
+        <code>maxInMemorySize</code> configured at construction — an HTTP client with no connect
+        timeout and no response timeout is a latency bug waiting for a slow dependency.</p>
+      </div>
+    </section>
+
+    <!-- ============ 7 ============ -->
+    <section id="ch7" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">07</span>
+        <h2>Context propagation</h2>
+      </div>
+
+      <p>Reactor's whole point is that work moves between threads — the HTTP event loop schedules
+      onto <code>parallel</code> for a <code>map</code>, onto <code>boundedElastic</code> for a
+      blocking call, back to the event loop for the response. Every per-thread mechanism loses
+      that journey, and the symptom is almost never an error: it is log lines without trace IDs.</p>
+
+      <div class="table-wrap">
+        <table>
+          <caption>What breaks, and what replaces it</caption>
+          <thead><tr><th>Mechanism</th><th>In WebFlux</th><th>Replacement</th></tr></thead>
+          <tbody>
+            <tr><td><code>MDC</code> trace correlation</td><td>Silently absent on any line emitted after a scheduler hop</td><td>Reactor <code>Context</code> via <code>contextWrite</code>, bridged to <code>MDC</code> by Micrometer</td></tr>
+            <tr><td><code>SecurityContextHolder</code></td><td>Reliable only with Context Propagation enabled — see <a href="08-spring-security.html">Volume 8</a> for the reactive security chain</td><td>The same Micrometer bridge, registered for the security key</td></tr>
+            <tr><td><code>RequestContextHolder</code></td><td><code>ThreadLocal</code>-based and therefore unreliable</td><td>Pass the context explicitly as a parameter</td></tr>
+            <tr><td><code>InheritableThreadLocal</code></td><td>Does not help at all</td><td>Nothing — it copies at thread <em>creation</em>, and scheduler pools are pre-warmed</td></tr>
+            <tr><td>Request-scoped beans</td><td>Not bound to a thread</td><td>Reactor <code>Context</code> for anything new</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — ThreadLocal is wrong by default here</span>
+        <p>The correct store is Reactor's <code>Context</code>: a per-subscription immutable map
+        that flows <strong>downward with the signal</strong>, so it follows the work across
+        scheduler hops automatically and concurrent subscriptions cannot see each other's values.
+        A <code>ThreadLocal</code> is scoped to a thread, which is the wrong axis in a reactive
+        pipeline.</p>
+        <p>Reading it from ordinary code is awkward, which is what Micrometer's Context
+        Propagation is for. Once enabled, Reactor copies the <code>Context</code> into the
+        relevant <code>ThreadLocal</code> around each operator invocation, and existing
+        <code>MDC.get(...)</code> keeps working. State the bridge's purpose precisely: it exists
+        to preserve existing <code>ThreadLocal</code>-based code, <strong>not to license new
+        <code>ThreadLocal</code> usage</strong> — new code should take the context as a
+        parameter.</p>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="Context propagation setup" data-hl-line="3,13"><code>// Read and write the Reactor Context, not a ThreadLocal
+Mono.just(1)
+    .contextWrite(ctx -&gt; ctx.put("traceId", traceId));
+
+// Bridge it back to ThreadLocals so existing MDC code keeps working
+ContextRegistry.getInstance()
+    .registerThreadLocalAccessor(
+        MDC.class.getName(),
+        () -&gt; MDC.get("traceId"),
+        value -&gt; MDC.put("traceId", (String) value),
+        () -&gt; MDC.remove("traceId"));
+
+Hooks.enableAutomaticContextPropagation();</code></pre>
+
+      <div class="callout callout--scale">
+        <span class="callout__label">Scaling reality check — Context is not free</span>
+        <p>Reactor's <code>Context</code> stores values in an <strong>immutable linked structure,
+        one node per <code>contextWrite</code></strong>, and every signal walks that chain. A
+        pipeline with dozens of <code>contextWrite</code> calls pays that cost per element — and
+        the usual culprit is a <code>contextWrite</code> inside a <code>flatMap</code>, which
+        then multiplies across thousands of concurrent inner subscriptions. The mitigation is to
+        write context <strong>once at the entry point</strong>, never per element.</p>
+      </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — the global registration</span>
+        <p>Automatic Context Propagation is global mutable state keyed by class name, so two
+        teams each registering an accessor for the same key is a <strong>silent conflict</strong>
+        where one quietly wins. Own the registration in one bootstrap configuration the whole
+        application imports, rather than letting each library or starter register its own.</p>
+        <p>And <code>InheritableThreadLocal</code> is the wrong answer to a question people ask
+        constantly: it copies at <em>thread creation</em>, not at task submission. Every Reactor
+        scheduler is a pre-created pool, so the child thread was created long before the value
+        was set and the inherited copy is whatever was there at pool warm-up. The half-and-half
+        log pattern is the diagnostic tell: lines emitted from the event-loop thread carry the
+        trace ID, lines emitted after a hop do not.</p>
+      </div>
+    </section>
+
+    <!-- ============ 8 ============ -->
+    <section id="ch8" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">08</span>
+        <h2>Testing &amp; the production reality</h2>
+      </div>
+
+      <pre class="snippet" data-lang="java" data-title="StepVerifier, virtual time" data-hl-line="6"><code>@Test
+void retriesThenSucceeds() {
+    StepVerifier.create(callingApiTwiceThenOk())
+        .expectNext("first-failure", "second-ok")
+        .expectComplete()
+        .verify(Duration.ofSeconds(5));   // ALWAYS a duration, or a hung pipeline hangs CI
+}
+
+@Test
+void emitsEverySecond() {
+    StepVerifier.withVirtualTime(() -&gt; Flux.interval(Duration.ofSeconds(1)).take(5))
+        .expectSubscription()
+        .thenAwait(Duration.ofMinutes(10))   // instant, and deterministic
+        .expectNext(0L, 1L, 2L, 3L, 4L)
+        .verifyComplete();
+}</code></pre>
+
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — verify() always takes a duration</span>
+        <p><code>verify()</code> blocks until the sequence terminates. If the pipeline never
+        completes — which is exactly what a missing <code>onErrorResume</code> or a
+        <code>flatMap</code> that swallows the terminal signal produces — the test thread hangs
+        until the build's <em>global</em> timeout fires, and the report says nothing useful.
+        Passing a duration makes it a fast, legible failure with the expected-versus-actual
+        difference instead.</p>
+        <p><strong>A hang is worse than a false failure</strong>, because it consumes the whole
+        pipeline budget and reports nothing: the team learns to ignore it and the real signal is
+        lost. A test that can hang is a test whose failure mode has not been designed, and
+        reactive pipelines make that easy to overlook because nothing blocks visibly. Virtual
+        time buys more than speed — it buys <em>determinism</em>, which matters more: a
+        <code>Thread.sleep</code> test of a retry schedule is both slow and flaky under CI load.
+        And reach for <code>block()</code> in tests with care: it occupies a thread, so it tests
+        a different code path from production.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <caption>What operating the two stacks actually costs</caption>
+          <thead><tr><th></th><th>MVC</th><th>WebFlux</th></tr></thead>
+          <tbody>
+            <tr><td>Thread dump interpretation</td><td>Straightforward — roughly one frame per request</td><td>Very hard — a single event-loop frame interleaves thousands of requests</td></tr>
+            <tr><td>Blocking a thread</td><td>Slows one request</td><td><strong>Stalls every request on that event loop</strong></td></tr>
+            <tr><td>CPU profiling</td><td>Attaches to request threads cleanly</td><td>Samples across event loops; attribution is harder</td></tr>
+            <tr><td>Debugger step-through</td><td>Works</td><td>Frequently needs an async-aware debugger</td></tr>
+            <tr><td>Load generator for realistic tests</td><td>No</td><td>Usually yes — reactive behaviour <em>is</em> concurrency behaviour</td></tr>
+            <tr><td>Latency tail visibility</td><td>Per-request correlation</td><td>Needs Context Propagation to attribute correctly at all</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Test the error, retry and timeout-fallback paths, not just the happy path — that is
+      where the value is. When a reactive endpoint is fast in tests and plateaus in production,
+      the three most likely causes are a blocking call on an event loop, an unbounded
+      <code>onBackpressureBuffer</code> or <code>Sinks</code> buffer, and unsized
+      <code>WebClient</code> connection pools. The first two are found with
+      <code>BlockHound</code> in a load test and a heap dump; the third shows up as latency with
+      no error anywhere.</p>
+
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — instrument first, decide second</span>
+        <p>Adopting reactive means adopting a different operational toolset, and that has a real
+        staffing cost, so it should be argued for explicitly before adoption rather than
+        discovered during the first incident. <strong>Flips on:</strong> whether the binding
+        constraint is <em>connections held open</em> — which reactive genuinely solves — or
+        <em>requests per second</em>, which it usually does not. For a service that has measured
+        neither, the answer is very often MVC with a properly sized Tomcat pool and a tuned
+        connection pool: boring, debuggable, and it ships. If a service is already in production
+        and nobody can find a slow endpoint from a thread dump, the answer is JFR (event-loop
+        threads are sampled rather than blocked, so a parking or CPU profile finds what a thread
+        dump cannot) plus <code>BlockHound</code> in a load test.</p>
+      </div>
+    </section>
+
+    <!-- ============ numbers ============ -->
+    <section id="numbers" data-filter-target>
+      <div class="section__head">
+        <span class="section__num">&nbsp;</span>
+        <h2>Numbers worth memorising</h2>
+      </div>
+      <div class="numbers">
+        <div class="number"><span class="number__value">~2 &times; CPU</span><span class="number__label">default Reactor Netty event loops</span></div>
+        <div class="number"><span class="number__value">200</span><span class="number__label">default Tomcat threads — the MVC comparison</span></div>
+        <div class="number"><span class="number__value">200MB / 16MB</span><span class="number__label">1MB stacks &times; 200 threads vs &times; 16</span></div>
+        <div class="number"><span class="number__value">50GB</span><span class="number__label">50,000 threads at 1MB of stack each — the staff answer</span></div>
+        <div class="number"><span class="number__value">256</span><span class="number__label"><code>flatMap</code> default concurrency, <code>Queues.SMALL_BUFFER_SIZE</code></span></div>
+        <div class="number"><span class="number__value">256KB</span><span class="number__label"><code>spring.codec.max-in-memory-size</code> on aggregated bodies</span></div>
+        <div class="number"><span class="number__value">2&sup3; = 8</span><span class="number__label">requests per user request, three layers each retrying twice</span></div>
+        <div class="number"><span class="number__value">4&times;</span><span class="number__label">upstream traffic from a single <code>retry(3)</code></span></div>
+        <div class="number"><span class="number__value">400/300/200/100</span><span class="number__label">timeout budget chain under a 500ms SLO</span></div>
+        <div class="number"><span class="number__value">~100</span><span class="number__label">default <code>WebClient</code> pool (Netty <code>HttpResources</code>)</span></div>
+        <div class="number"><span class="number__value">20,000</span><span class="number__label">sockets an SSE service holds open, one per client</span></div>
+        <div class="number"><span class="number__value">1</span><span class="number__label"><code>onSubscribe</code> per subscription — the only route to a <code>Subscription</code></span></div>
+        <div class="number"><span class="number__value">100 / 1s</span><span class="number__label"><code>bufferTimeout</code> dual trigger — count or elapsed, whichever first</span></div>
+      </div>
+    </section>
+
+    <footer class="pagefoot">
+      <span>Volume 10 of 11 &mdash; Spring Complete Deep-Dive</span>
+      <div class="pager">
+        <a href="09-testing-production-troubleshooting.html">&larr; Testing &amp; Ops</a>
+        <a href="11-spring-cloud-distributed-systems.html">Spring Cloud &rarr;</a>
+      </div>
+    </footer>
+
+  </main>
+</div>
+
+<script src="../../search.js"></script>
+<script src="../../highlight.js"></script>
+</body>
+</html>

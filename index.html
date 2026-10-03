@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Interview Prep Guide</title>
 <meta name="description" content="Deep-dive study volumes and condensed cheatsheets for Java, Spring, Database and Microservices interview preparation.">
-<link rel="stylesheet" href="cheatsheets/cheatsheet.css">
+<link rel="stylesheet" href="interview-prep/site.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -19,11 +19,6 @@
       <li><a href="#spring">Spring</a></li>
       <li><a href="#database">Database</a></li>
       <li><a href="#microservices">Microservices</a></li>
-    </ul>
-    <h2>By form</h2>
-    <ul>
-      <li><a href="guides/index.html">Deep-dive volumes</a></li>
-      <li><a href="cheatsheets/index.html">Cheatsheets</a></li>
     </ul>
     <h2>Repository</h2>
     <ul>
@@ -49,263 +44,272 @@
       </ul>
     </header>
 
+    <div class="toolbar">
+      <div class="search">
+        <input type="search" data-filter-input placeholder="Filter the catalogue — press /" aria-label="Filter the catalogue">
+        <span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span>
+      </div>
+    </div>
+
     <div class="wall">
 
-      <section class="wall__track" id="java">
+      <section class="wall__track" id="java" data-filter-group>
         <h2 class="wall__label">Java</h2>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">01</span>
-          <a class="wall__title" href="guides/java/java-01-java-basics.html">Java Basics</a>
+          <a class="wall__title" href="interview-prep/java/java-01-java-basics.html">Java Basics</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">15 ch · 439 q</span>
-          <a class="wall__cheat" href="cheatsheets/java/01-java-basics.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/java/01-java-basics.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">02</span>
-          <a class="wall__title" href="guides/java/java-02-object-oriented-programming.html">Object-Oriented Programming</a>
+          <a class="wall__title" href="interview-prep/java/java-02-object-oriented-programming.html">Object-Oriented Programming</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">12 ch · 429 q</span>
-          <a class="wall__cheat" href="cheatsheets/java/02-object-oriented-programming.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/java/02-object-oriented-programming.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">03</span>
-          <a class="wall__title" href="guides/java/java-03-core-java.html">Core Java</a>
+          <a class="wall__title" href="interview-prep/java/java-03-core-java.html">Core Java</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">11 ch · 412 q</span>
-          <a class="wall__cheat" href="cheatsheets/java/03-core-java.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/java/03-core-java.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">04</span>
-          <a class="wall__title" href="guides/java/java-04-collections-framework.html">The Collections Framework</a>
+          <a class="wall__title" href="interview-prep/java/java-04-collections-framework.html">The Collections Framework</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 431 q</span>
-          <a class="wall__cheat" href="cheatsheets/java/04-collections-framework.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/java/04-collections-framework.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">05</span>
-          <a class="wall__title" href="guides/java/java-05-java-8.html">Java 8+</a>
+          <a class="wall__title" href="interview-prep/java/java-05-java-8.html">Java 8+</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">11 ch · 426 q</span>
-          <a class="wall__cheat" href="cheatsheets/java/05-java-8-plus.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/java/05-java-8-plus.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">06</span>
-          <a class="wall__title" href="guides/java/java-06-multithreading-concurrency.html">Multithreading &amp; Concurrency</a>
+          <a class="wall__title" href="interview-prep/java/java-06-multithreading-concurrency.html">Multithreading &amp; Concurrency</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 401 q</span>
-          <a class="wall__cheat" href="cheatsheets/java/06-multithreading-concurrency.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/java/06-multithreading-concurrency.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">07</span>
-          <a class="wall__title" href="guides/java/java-07-jvm-internals-memory.html">JVM Internals &amp; Memory Management</a>
+          <a class="wall__title" href="interview-prep/java/java-07-jvm-internals-memory.html">JVM Internals &amp; Memory Management</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 401 q</span>
-          <a class="wall__cheat" href="cheatsheets/java/07-jvm-internals-memory.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/java/07-jvm-internals-memory.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">08</span>
-          <a class="wall__title" href="guides/java/java-08-advanced-java.html">Advanced Java</a>
+          <a class="wall__title" href="interview-prep/java/java-08-advanced-java.html">Advanced Java</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 391 q</span>
-          <a class="wall__cheat" href="cheatsheets/java/08-advanced-java.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/java/08-advanced-java.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">09</span>
-          <a class="wall__title" href="guides/java/java-09-final-volume.html">Modern Java &amp; Production Mastery</a>
+          <a class="wall__title" href="interview-prep/java/java-09-final-volume.html">Modern Java &amp; Production Mastery</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 400 q</span>
-          <a class="wall__cheat" href="cheatsheets/java/09-modern-java-production.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/java/09-modern-java-production.html">cheatsheet</a>
         </div>
       </section>
 
-      <section class="wall__track" id="spring">
+      <section class="wall__track" id="spring" data-filter-group>
         <h2 class="wall__label">Spring</h2>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">01</span>
-          <a class="wall__title" href="guides/spring/spring-01-spring-core-ioc.html">Spring Core &amp; the IoC Container</a>
+          <a class="wall__title" href="interview-prep/spring/spring-01-spring-core-ioc.html">Spring Core &amp; the IoC Container</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 78 q</span>
-          <a class="wall__cheat" href="cheatsheets/spring/01-spring-core-ioc.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/spring/01-spring-core-ioc.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">02</span>
-          <a class="wall__title" href="guides/spring/spring-02-bean-lifecycle-scopes-di.html">Bean Lifecycle, Scopes &amp; Advanced DI</a>
+          <a class="wall__title" href="interview-prep/spring/spring-02-bean-lifecycle-scopes-di.html">Bean Lifecycle, Scopes &amp; Advanced DI</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 105 q</span>
-          <a class="wall__cheat" href="cheatsheets/spring/02-bean-lifecycle-scopes-di.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/spring/02-bean-lifecycle-scopes-di.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">03</span>
-          <a class="wall__title" href="guides/spring/spring-03-aop-proxying.html">AOP &amp; Proxying</a>
+          <a class="wall__title" href="interview-prep/spring/spring-03-aop-proxying.html">AOP &amp; Proxying</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 89 q</span>
-          <a class="wall__cheat" href="cheatsheets/spring/03-aop-proxying.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/spring/03-aop-proxying.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">04</span>
-          <a class="wall__title" href="guides/spring/spring-04-transaction-management.html">Transaction Management</a>
+          <a class="wall__title" href="interview-prep/spring/spring-04-transaction-management.html">Transaction Management</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 113 q</span>
-          <a class="wall__cheat" href="cheatsheets/spring/04-transaction-management.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/spring/04-transaction-management.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">05</span>
-          <a class="wall__title" href="guides/spring/spring-05-spring-mvc-web-layer.html">Spring MVC &amp; the Web Layer</a>
+          <a class="wall__title" href="interview-prep/spring/spring-05-spring-mvc-web-layer.html">Spring MVC &amp; the Web Layer</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 91 q</span>
-          <a class="wall__cheat" href="cheatsheets/spring/05-spring-mvc-web-layer.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/spring/05-spring-mvc-web-layer.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">06</span>
-          <a class="wall__title" href="guides/spring/spring-06-spring-data-jpa-persistence.html">Spring Data JPA &amp; Persistence</a>
+          <a class="wall__title" href="interview-prep/spring/spring-06-spring-data-jpa-persistence.html">Spring Data JPA &amp; Persistence</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 122 q</span>
-          <a class="wall__cheat" href="cheatsheets/spring/06-spring-data-jpa-persistence.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/spring/06-spring-data-jpa-persistence.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">07</span>
-          <a class="wall__title" href="guides/spring/spring-07-spring-boot-auto-configuration.html">Spring Boot &amp; Auto-Configuration</a>
+          <a class="wall__title" href="interview-prep/spring/spring-07-spring-boot-auto-configuration.html">Spring Boot &amp; Auto-Configuration</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 108 q</span>
-          <a class="wall__cheat" href="cheatsheets/spring/07-spring-boot-auto-configuration.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/spring/07-spring-boot-auto-configuration.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">08</span>
-          <a class="wall__title" href="guides/spring/spring-08-spring-security.html">Spring Security</a>
+          <a class="wall__title" href="interview-prep/spring/spring-08-spring-security.html">Spring Security</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 97 q</span>
-          <a class="wall__cheat" href="cheatsheets/spring/08-spring-security.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/spring/08-spring-security.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">09</span>
-          <a class="wall__title" href="guides/spring/spring-09-testing-production-troubleshooting.html">Testing &amp; Production Troubleshooting</a>
+          <a class="wall__title" href="interview-prep/spring/spring-09-testing-production-troubleshooting.html">Testing &amp; Production Troubleshooting</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 102 q</span>
-          <a class="wall__cheat" href="cheatsheets/spring/09-testing-production-troubleshooting.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/spring/09-testing-production-troubleshooting.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">10</span>
-          <a class="wall__title" href="guides/spring/spring-10-webflux-project-reactor.html">WebFlux &amp; Project Reactor</a>
+          <a class="wall__title" href="interview-prep/spring/spring-10-webflux-project-reactor.html">WebFlux &amp; Project Reactor</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 65 q</span>
-          <a class="wall__cheat" href="cheatsheets/spring/10-webflux-project-reactor.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/spring/10-webflux-project-reactor.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">11</span>
-          <a class="wall__title" href="guides/spring/spring-11-spring-cloud-distributed-systems.html">Spring Cloud &amp; Distributed Systems</a>
+          <a class="wall__title" href="interview-prep/spring/spring-11-spring-cloud-distributed-systems.html">Spring Cloud &amp; Distributed Systems</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 114 q</span>
-          <a class="wall__cheat" href="cheatsheets/spring/11-spring-cloud-distributed-systems.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/spring/11-spring-cloud-distributed-systems.html">cheatsheet</a>
         </div>
       </section>
 
-      <section class="wall__track" id="database">
+      <section class="wall__track" id="database" data-filter-group>
         <h2 class="wall__label">Database</h2>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">01</span>
-          <a class="wall__title" href="guides/database/database-01-fundamentals-relational-model.html">Database Fundamentals &amp; the Relational Model</a>
+          <a class="wall__title" href="interview-prep/database/database-01-fundamentals-relational-model.html">Database Fundamentals &amp; the Relational Model</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 45 q</span>
-          <a class="wall__cheat" href="cheatsheets/database/01-fundamentals-relational-model.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/database/01-fundamentals-relational-model.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">02</span>
-          <a class="wall__title" href="guides/database/database-02-sql-ddl-dml-constraints.html">SQL — DDL, DML &amp; Constraints</a>
+          <a class="wall__title" href="interview-prep/database/database-02-sql-ddl-dml-constraints.html">SQL — DDL, DML &amp; Constraints</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 92 q</span>
-          <a class="wall__cheat" href="cheatsheets/database/02-sql-ddl-dml-constraints.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/database/02-sql-ddl-dml-constraints.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">03</span>
-          <a class="wall__title" href="guides/database/database-03-sql-queries-joins-window-functions.html">SQL — Queries, Joins, CTEs &amp; Window Functions</a>
+          <a class="wall__title" href="interview-prep/database/database-03-sql-queries-joins-window-functions.html">SQL — Queries, Joins, CTEs &amp; Window Functions</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 32 q</span>
-          <a class="wall__cheat" href="cheatsheets/database/03-sql-queries-joins-window-functions.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/database/03-sql-queries-joins-window-functions.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">04</span>
-          <a class="wall__title" href="guides/database/database-04-indexes-query-planning-execution.html">Indexes, Query Planning &amp; Execution</a>
+          <a class="wall__title" href="interview-prep/database/database-04-indexes-query-planning-execution.html">Indexes, Query Planning &amp; Execution</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 84 q</span>
-          <a class="wall__cheat" href="cheatsheets/database/04-indexes-query-planning-execution.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/database/04-indexes-query-planning-execution.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">05</span>
-          <a class="wall__title" href="guides/database/database-05-transactions-isolation-concurrency.html">Transactions, Isolation Levels &amp; Concurrency</a>
+          <a class="wall__title" href="interview-prep/database/database-05-transactions-isolation-concurrency.html">Transactions, Isolation Levels &amp; Concurrency</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 88 q</span>
-          <a class="wall__cheat" href="cheatsheets/database/05-transactions-isolation-concurrency.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/database/05-transactions-isolation-concurrency.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">06</span>
-          <a class="wall__title" href="guides/database/database-06-schema-design-partitioning-scaling.html">Schema Design, Partitioning &amp; Scaling</a>
+          <a class="wall__title" href="interview-prep/database/database-06-schema-design-partitioning-scaling.html">Schema Design, Partitioning &amp; Scaling</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 86 q</span>
-          <a class="wall__cheat" href="cheatsheets/database/06-schema-design-partitioning-scaling.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/database/06-schema-design-partitioning-scaling.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">07</span>
-          <a class="wall__title" href="guides/database/database-07-postgresql.html">PostgreSQL</a>
+          <a class="wall__title" href="interview-prep/database/database-07-postgresql.html">PostgreSQL</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">11 ch · 99 q</span>
-          <a class="wall__cheat" href="cheatsheets/database/07-postgresql.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/database/07-postgresql.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">08</span>
-          <a class="wall__title" href="guides/database/database-08-mysql.html">MySQL</a>
+          <a class="wall__title" href="interview-prep/database/database-08-mysql.html">MySQL</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 82 q</span>
-          <a class="wall__cheat" href="cheatsheets/database/08-mysql.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/database/08-mysql.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">09</span>
-          <a class="wall__title" href="guides/database/database-09-redis-caching.html">Redis &amp; Caching Strategies</a>
+          <a class="wall__title" href="interview-prep/database/database-09-redis-caching.html">Redis &amp; Caching Strategies</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 95 q</span>
-          <a class="wall__cheat" href="cheatsheets/database/09-redis-caching.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/database/09-redis-caching.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">10</span>
-          <a class="wall__title" href="guides/database/database-10-nosql-cassandra-dynamodb-mongodb.html">NoSQL &amp; Distributed Stores</a>
+          <a class="wall__title" href="interview-prep/database/database-10-nosql-cassandra-dynamodb-mongodb.html">NoSQL &amp; Distributed Stores</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">12 ch · 89 q</span>
-          <a class="wall__cheat" href="cheatsheets/database/10-nosql-distributed-stores.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/database/10-nosql-distributed-stores.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">11</span>
-          <a class="wall__title" href="guides/database/database-11-s3-elasticsearch-interview-bank.html">S3, Elasticsearch &amp; the Interview Bank</a>
+          <a class="wall__title" href="interview-prep/database/database-11-s3-elasticsearch-interview-bank.html">S3, Elasticsearch &amp; the Interview Bank</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">12 ch · 207 q</span>
-          <a class="wall__cheat" href="cheatsheets/database/11-s3-elasticsearch-interview-bank.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/database/11-s3-elasticsearch-interview-bank.html">cheatsheet</a>
         </div>
       </section>
 
-      <section class="wall__track" id="microservices">
+      <section class="wall__track" id="microservices" data-filter-group>
         <h2 class="wall__label">Microservices</h2>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">01</span>
-          <a class="wall__title" href="guides/microservices/microservices-01-boundaries-decomposition.html">Boundaries, Decomposition &amp; Team Topology</a>
+          <a class="wall__title" href="interview-prep/microservices/microservices-01-boundaries-decomposition.html">Boundaries, Decomposition &amp; Team Topology</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 118 q</span>
-          <a class="wall__cheat" href="cheatsheets/microservices/01-boundaries-decomposition.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/microservices/01-boundaries-decomposition.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">02</span>
-          <a class="wall__title" href="guides/microservices/microservices-02-communication-data-consistency.html">Communication, Data &amp; Consistency</a>
+          <a class="wall__title" href="interview-prep/microservices/microservices-02-communication-data-consistency.html">Communication, Data &amp; Consistency</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">10 ch · 117 q</span>
-          <a class="wall__cheat" href="cheatsheets/microservices/02-communication-data-consistency.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/microservices/02-communication-data-consistency.html">cheatsheet</a>
         </div>
-        <div class="wall__row">
+        <div class="wall__row" data-filter-target>
           <span class="wall__num">03</span>
-          <a class="wall__title" href="guides/microservices/microservices-03-operations-platforms-evolution.html">Operations, Platforms &amp; Evolution</a>
+          <a class="wall__title" href="interview-prep/microservices/microservices-03-operations-platforms-evolution.html">Operations, Platforms &amp; Evolution</a>
           <span class="wall__leader" aria-hidden="true"></span>
           <span class="wall__stats">9 ch · 110 q</span>
-          <a class="wall__cheat" href="cheatsheets/microservices/03-operations-platforms-evolution.html">cheatsheet</a>
+          <a class="wall__cheat" href="interview-prep/cheatsheets/microservices/03-operations-platforms-evolution.html">cheatsheet</a>
         </div>
       </section>
 
     </div>
+
+    <p class="empty" data-filter-empty hidden>Nothing in the catalogue matches that.</p>
 
     <footer class="pagefoot">
       <span>
@@ -316,5 +320,6 @@
 
   </main>
 </div>
+<script src="interview-prep/search.js"></script>
 </body>
 </html>

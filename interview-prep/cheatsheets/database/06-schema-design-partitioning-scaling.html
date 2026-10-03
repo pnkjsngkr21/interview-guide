@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schema Design, Partitioning &amp; Scaling &mdash; Cheatsheet</title>
+<meta name="description" content="Cheatsheet for Database Volume 6: key choice, relationship placement, SCD types, index and partition co-design, RANGE/LIST/HASH partitioning, shard-key selection, replica staleness, and Little's Law connection sizing.">
+<link rel="stylesheet" href="../../site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="page">
+<nav class="sidebar">
+  <p class="sidebar__title">Database</p>
+  <p class="sidebar__sub">The Database Complete Deep-Dive</p>
+  <ul class="sidebar__list">
+    <li><a href="01-fundamentals-relational-model.html">01 &mdash; Fundamentals &amp; the Relational Model</a></li>
+    <li><a href="02-sql-ddl-dml-constraints.html">02 &mdash; SQL DDL, DML &amp; Constraints</a></li>
+    <li><a href="03-sql-queries-joins-window-functions.html">03 &mdash; Queries, Joins &amp; Window Functions</a></li>
+    <li><a href="04-indexes-query-planning-execution.html">04 &mdash; Indexes, Query Planning &amp; Execution</a></li>
+    <li><a href="05-transactions-isolation-concurrency.html">05 &mdash; Transactions, Isolation &amp; Concurrency</a></li>
+    <li><a href="06-schema-design-partitioning-scaling.html" aria-current="page">06 &mdash; Schema Design, Partitioning &amp; Scaling</a></li>
+    <li><a href="07-postgresql.html">07 &mdash; PostgreSQL</a></li>
+    <li><a href="08-mysql.html">08 &mdash; MySQL &amp; InnoDB</a></li>
+    <li><a href="09-redis-caching.html">09 &mdash; Redis &amp; Caching</a></li>
+    <li><a href="10-nosql-distributed-stores.html">10 &mdash; NoSQL &amp; Distributed Stores</a></li>
+    <li><a href="11-s3-elasticsearch-interview-bank.html">11 &mdash; S3, Elasticsearch &amp; the Interview Bank</a></li>
+  </ul>
+  <p class="sidebar__title">On this page</p>
+  <ol class="sidebar__toc">
+    <li><a href="#ch1">Keys, types &amp; relationships</a></li>
+    <li><a href="#ch2">Temporal &amp; historical data</a></li>
+    <li><a href="#ch3">Index &amp; partition co-design</a></li>
+    <li><a href="#ch4">Partitioning</a></li>
+    <li><a href="#ch5">Sharding</a></li>
+    <li><a href="#ch6">Replication &amp; read scaling</a></li>
+    <li><a href="#ch7">Pooling &amp; client-side limits</a></li>
+    <li><a href="#ops">Making the call</a></li>
+    <li><a href="#numbers">Numbers</a></li>
+  </ol>
+  <p class="sidebar__title">Repository</p>
+  <ul class="sidebar__list">
+    <li><a href="../../../index.html">All cheatsheets</a></li>
+  </ul>
+</nav>
+<main class="main" id="main">
+<header class="masthead">
+  <p class="masthead__eyebrow">Database &mdash; The Database Complete Deep-Dive</p>
+  <h1>Volume 6 &mdash; Schema Design, Partitioning &amp; Scaling</h1>
+  <p class="masthead__sub">The choices you only get to make once: which key, which side the foreign key goes on, and which door you cannot walk back through.</p>
+  <ul class="masthead__meta">
+    <li>9 sections</li>
+    
+  </ul>
+</header>
+<div class="toolbar">
+  <label class="search" for="q">
+    <span class="search__label">Filter this page</span>
+    <input class="search__input" id="q" type="search" data-filter-input placeholder="partition, shard key, SCD2, Little's Law&hellip;" autocomplete="off">
+    <span class="search__count" data-filter-count></span>
+  </label>
+  <nav class="pager">
+    <a class="pager__link" href="05-transactions-isolation-concurrency.html"><span>Prev</span>05 &mdash; Transactions, Isolation &amp; Concurrency</a>
+    <a class="pager__link" href="07-postgresql.html"><span>Next</span>07 &mdash; PostgreSQL</a>
+  </nav>
+</div>
+<div class="keyfacts">
+  <h2>If you only remember five things</h2>
+  <ol class="keyfacts__list">
+    <li><strong>The key is a promise.</strong> A <code>BIGINT</code> sequence inserts at the right-hand edge of the index, where a B+ tree splits cheaply; a random <code>UUID</code> lands in the middle of the page, and a split rewrites about 40 rows to make room &mdash; which is why a random-key table tops out around 2,000 inserts/second per node while a sequential one keeps going. If you need unguessable identifiers, use <code>UUIDv7</code>, not <code>v4</code>: the 48-bit millisecond prefix buys back insert locality, and the timestamp leak is usually a smaller problem than a table that will not scale.</li>
+    <li><strong>The partition key and the leading index column should agree.</strong> When they do, a 24-hour query prunes 10 partitions to 2 and the index is usable. When they disagree, you get Case B &mdash; pruning to 1 and an index that cannot be used. When you get it badly wrong (Case C) you prune 12 to 12: every query is slower, and the only thing you bought is the ability to <code>DROP</code> a region.</li>
+    <li><strong>Retention is <code>DROP</code>, not <code>DELETE</code>.</strong> A 90-day sweep on a 1.4-billion-row, 900&nbsp;GB table means 300 million row deletes, ~42&nbsp;GB of heap churn, at least 27&nbsp;GB of WAL, and 100 minutes of table locks in one transaction. The same 90 days costs one metadata operation and a file unlink &mdash; 10 to 500 milliseconds, 180&nbsp;ms measured.</li>
+    <li><strong>Stability is the one shard-key property you cannot fix later.</strong> Cardinality, evenness, and query alignment you can all adjust by adding nodes or adding a second index. Change the value the shard key is derived from and you have a reshard &mdash; every row, in a fleet-wide coordinated migration. So a shard key is never a status, a region, a category, a plan, or a timestamp.</li>
+    <li><strong>Concurrency is Little's Law, and you must size from the tail.</strong> Required connections = arrival rate &times; time in the system: 2,000&nbsp;qps at 20&nbsp;ms is 40; the same 2,000&nbsp;qps at 200&nbsp;ms is 400. A pool set to the wrong side of that number amplifies load instead of bounding it, and the failure looks like a healthy green server &mdash; idle, and refusing to serve.</li>
+  </ol>
+</div>
+<p class="empty" data-filter-empty hidden>Nothing on this page matches that filter.</p>
+
+<section id="ch1" data-filter-target>
+  <div class="section__head"><span class="section__num">01</span><h2>Keys, types &amp; relationships</h2></div>
+
+  <p>A key is not a label on a column. It is a promise about where new rows land in the index, whether two nodes can generate the same value, and what happens to the rows that point at it.</p>
+
+  <div class="table-wrap">
+    <table class="table--decision">
+      <caption>Surrogate key candidates, and what each costs you</caption>
+      <thead>
+        <tr><th>Key</th><th>Insert locality</th><th>Index size</th><th>Safe to merge</th><th>Unguessable</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>BIGINT</code> sequence</td><td>Best &mdash; rightmost edge, cheapest split</td><td>8 B</td><td>No &mdash; collides across shards</td><td>No</td></tr>
+        <tr><td><code>UUID</code> v4</td><td>Worst &mdash; random page writes</td><td>16 B</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td><code>UUID</code> v7</td><td>Good &mdash; 48-bit ms prefix sorts by time</td><td>16 B</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>Natural key</td><td>Varies; usually the business string</td><td>Whatever the string is</td><td>Only if truly unique</td><td>Usually</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The mechanism is a page split. An 8&nbsp;kB page holds about 40 rows; appending at the right edge of a B+ tree splits it and leaves the halves 60&ndash;70% full, so the next split is cheap. A random insert splits with nothing to give away, fills the page 100%, and splits again immediately. At 2,000 rows/second with a third of writes landing on a split, that is roughly 27,000 row-writes per second of pure overhead.</p>
+
+  <div class="callout callout--trap">
+    <span class="callout__label">Interview trap</span>
+    <p>"Use <code>UUID</code> so we never need a coordination service." True &mdash; and the cost is that <code>nextval</code>-free inserts land randomly in the index. The second trap on the same topic is <code>MAX(id)+1</code> as a hand-rolled sequence: it is a full scan to the rightmost leaf, and under concurrency two readers see the same maximum and insert the same value. The <code>UUID</code> you were avoiding is cheaper than either.</p>
+  </div>
+
+  <p><code>UUIDv7</code> is the compromise: the leading 48 bits are the Unix milliseconds, so values sort by creation time and write to the same page. Three properties to know. It is still 16 bytes, so your index does not shrink. It leaks creation time. And it is only monotonic <em>within one millisecond on one node</em> &mdash; two nodes generating in the same millisecond interleave, and under load some inserts still land mid-page.</p>
+
+  <pre class="snippet" data-lang="sql" data-title="Sequence and cache trap" data-hl-line="6">
+<code>CREATE SEQUENCE order_id_seq CACHE 50;
+
+-- 200 concurrent sessions can each hold up to 50 sequence values
+-- assigned but not yet committed: up to 10,000 values burned by
+-- a single burst of rolled-back transactions. This is why
+-- nextval is NOT gapless -- there is no way to make it so.</code></pre>
+
+  <div class="callout callout--scale">
+    <span class="callout__label">Scaling reality check</span>
+    <p>A single node tops out around <strong>20,000&ndash;50,000 small writes per second</strong> on a sequential key, and around 2,000 on a random one. That difference is the whole reason to choose keys deliberately, and it is also the difference between needing to shard and not needing to shard. Note the direction of the argument: the number that forces a sharding decision is the write rate of the key you picked, not the row count.</p>
+  </div>
+
+  <p>Naming is a decision about what a future migration has to parse. The rules: <code>snake_case</code>; singular table names, plural for join tables; name a foreign key after the table it points at, so a constraint violation names the relationship rather than an opaque index; <strong>never rename a primary key</strong>, because it is already embedded in every foreign key and replication stream; encode the unit in the name; prefix booleans <code>is_</code>, <code>has_</code>, or <code>can_</code>.</p>
+
+  <h3>Where the relationship lives</h3>
+
+  <div class="table-wrap">
+    <table class="table--decision">
+      <caption>Relationship shapes and where the constraint belongs</caption>
+      <thead>
+        <tr><th>Shape</th><th>Rule</th><th>When it bites</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1:1</td><td>Foreign key on the side created second; the other side nullable</td><td>Two non-null FKs both ways is the trap &mdash; the row can never be inserted</td></tr>
+        <tr><td>1:N</td><td>Foreign key on the many side</td><td>FK on the one side funnels every child write through one row</td></tr>
+        <tr><td>N:M</td><td>A join table with a surrogate key, or a composite PK of the two FKs</td><td>The reverse index is missing, and a price on the product instead of on the line</td></tr>
+        <tr><td>Self-reference</td><td><code>manager_id</code> nullable; <code>CHECK (manager_id IS DISTINCT FROM id)</code></td><td>The check catches self-cycles only; the real cycle is 3 levels up and validates fine</td></tr>
+        <tr><td>Polymorphic</td><td>Nullable triple (<code>activity_type</code>, <code>activity_id</code>, <code>subject_id</code>) + <code>CHECK</code> exactly-one + partial indexes</td><td>At 50M rows with 40% invoices, a partial index means a non-order row takes no index space at all</td></tr>
+        <tr><td>Value object</td><td>No surrogate key; the FK cascades; partial unique for "one current" row</td><td>Needs its own identity &mdash; then it is an entity, not a value object</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout--must">
+    <span class="callout__label">Must remember</span>
+    <p>A foreign key in PostgreSQL <strong>does not create an index</strong> on the referencing column. Without one, a <code>DELETE</code> on the parent scans the child table, and a cascade does that scan for every deleted row. The index on the many-side FK is yours to write.</p>
+  </div>
+
+  <div class="callout callout--trap">
+    <span class="callout__label">Interview trap</span>
+    <p>"<code>target_type</code> and <code>target_id</code>" &mdash; the polymorphic pair that looks like it removes the join table until you need a foreign key. There is no such table, so nothing stops <code>target_id = 999</code> pointing at a deleted row, and no <code>ON DELETE</code> rule can ever run. A nullable triple with a <code>CHECK</code> exactly-one constraint and partial indexes per type keeps the integrity that the pair throws away. The loose pair is legitimate only when the set is genuinely open-ended <em>and</em> dangling references are harmless.</p>
+  </div>
+
+  <pre class="snippet" data-lang="sql" data-title="Polymorphic with integrity" data-hl-line="10">
+<code>CREATE TABLE activity (
+  id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  kind          text NOT NULL,        -- 'order' or 'invoice'
+  kind_id       bigint,
+  customer_id   bigint REFERENCES customer (id),
+  -- Exactly one of the two, enforced by the database
+  CHECK ((kind = 'order'   AND kind_id IS NOT NULL)
+      OR (kind = 'invoice' AND kind_id IS NOT NULL))
+);
+
+-- Two partial indexes, each covering only its own kind.
+-- A non-order row occupies no space in the invoice index.
+CREATE INDEX activity_order_idx   ON activity (customer_id, created_at)
+  WHERE kind = 'order';
+CREATE INDEX activity_invoice_idx ON activity (customer_id, created_at)
+  WHERE kind = 'invoice';</code></pre>
+
+  <p>Hierarchies are where shape costs more than it looks. An adjacency list (<code>parent_id</code>) is one index lookup per level: twelve levels is twelve round trips, and on a 1.2-million-row table at 0.4&nbsp;ms per lookup, a 0.4&nbsp;ms query becomes 4.8&nbsp;ms. The practical limit is about <strong>four levels</strong> on a latency-sensitive path; deeper trees want a closure table, a materialised path, or a nested set, each trading write cost for read depth.</p>
+</section>
+
+<section id="ch2" data-filter-target>
+  <div class="section__head"><span class="section__num">02</span><h2>Temporal &amp; historical data</h2></div>
+
+  <p>"Keep the old value" is a schema decision, and the four answers cost wildly different amounts. Before any of them: intervals are <strong>half-open, <code>[from, to)</code></strong>, so consecutive rows never both claim a boundary instant, and <code>valid_to IS NULL</code> means <em>infinity</em> rather than <code>now()</code>. Use <code>TIMESTAMPTZ</code> and nothing else &mdash; a timestamp without a zone is a bug that survives until the first DST boundary or the first server move.</p>
+
+  <div class="table-wrap">
+    <table class="table--decision">
+      <caption>Slowly changing dimensions: what each type can answer</caption>
+      <thead>
+        <tr><th>Type</th><th>What it stores</th><th>Can answer</th><th>Cost</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Type 1 &mdash; overwrite</td><td>Current value only</td><td>"What is it now?"</td><td>Free &mdash; and cannot answer a single question about the past</td></tr>
+        <tr><td>Type 2 &mdash; version row</td><td>A new row per change, old row closed</td><td>"What was it on date D?"</td><td>Growth is the <em>change</em> rate; the natural key is no longer unique</td></tr>
+        <tr><td>Type 3 &mdash; shadow columns</td><td><code>postcode_current</code>, <code>postcode_previous</code>, <code>postcode_previous_2</code></td><td>"What was it before last change?"</td><td>Almost never right alone &mdash; it answers exactly one question, and the column count is fixed at design time</td></tr>
+        <tr><td>Bitemporal</td><td>Four timestamps: valid-from/to, recorded-from/to</td><td>"What did we believe on date D, as of date E?"</td><td>A closed knowledge interval on every correction &mdash; a report already generated becomes wrong and cannot be repaired</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <figure class="figure">
+    <svg viewBox="0 0 660 250" role="img" aria-label="One timeline records when a fact was true; two timelines record both when it was true and when we learned it, so a correction closes a knowledge interval without touching the fact.">
+      <defs>
+        <marker id="arw-d6-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker>
+      </defs>
+      <text class="label" x="10" y="18">One timeline &mdash; valid time</text>
+      <line class="edge" x1="20" y1="46" x2="620" y2="46" marker-end="url(#arw-d6-a)"/>
+      <rect class="node node--good" x="20" y="30" width="290" height="32" rx="4"/>
+      <text class="label label--sub" x="165" y="51">oldaddress</text>
+      <rect class="node" x="310" y="30" width="310" height="32" rx="4"/>
+      <text class="label label--sub" x="465" y="51">newaddress</text>
+      <text class="label label--sub" x="640" y="51" text-anchor="end">time &rarr;</text>
+
+      <text class="label" x="10" y="106">Two timelines &mdash; valid and recorded</text>
+      <line class="edge" x1="20" y1="134" x2="620" y2="134" marker-end="url(#arw-d6-a)"/>
+      <rect class="node node--bad" x="20" y="118" width="190" height="32" rx="4"/>
+      <text class="label label--sub" x="115" y="139">wrong, known wrong</text>
+      <rect class="node node--good" x="210" y="118" width="240" height="32" rx="4"/>
+      <text class="label label--sub" x="330" y="139">right, always was</text>
+      <text class="label label--sub" x="640" y="139" text-anchor="end">valid time &rarr;</text>
+
+      <line class="edge" x1="20" y1="196" x2="620" y2="196" marker-end="url(#arw-d6-a)"/>
+      <rect class="node" x="20" y="180" width="430" height="32" rx="4"/>
+      <text class="label label--sub" x="235" y="201">believed the wrong value</text>
+      <rect class="node node--warn" x="450" y="180" width="170" height="32" rx="4"/>
+      <text class="label label--sub" x="535" y="201">believed the right one</text>
+      <text class="label label--sub" x="640" y="201" text-anchor="end">recorded time &rarr;</text>
+      <line class="edge edge--bad" x1="210" y1="112" x2="210" y2="212" marker-start="url(#arw-d6-a)" marker-end="url(#arw-d6-a)"/>
+      <text class="edge-label edge-label--strong" x="218" y="232">the correction: a closed knowledge interval</text>
+    </svg>
+    <figcaption>One timeline says when a fact was true. Two timelines say when it was true <em>and</em> when we learned it &mdash; so a correction closes an interval of knowledge without ever falsifying the fact it corrects.</figcaption>
+  </figure>
+
+  <p>Type 2 is the workhorse, and the operation is the thing to be able to write from memory: close the open row and open the new one <strong>in a single statement</strong>. Two statements leaves a window &mdash; milliseconds wide, guaranteed to be hit &mdash; where the customer has zero current rows or two.</p>
+
+  <pre class="snippet" data-lang="sql" data-title="SCD2 close and open" data-hl-line="4">
+<code>WITH closed AS (
+  UPDATE customer_address
+     SET valid_to = now()
+   WHERE customer_id = 42
+     AND valid_to IS NULL
+  RETURNING customer_id, valid_from
+)
+INSERT INTO customer_address (customer_id, address, valid_from, valid_to)
+SELECT 42, 'new address', now(), NULL FROM closed;</code></pre>
+
+  <div class="callout callout--trap">
+    <span class="callout__label">Interview trap</span>
+    <p>"We log all the updates, so we have history." You have history only if the log is written <em>whole-row-before-write</em>, is durable and queryable, and is immutable. An application log written after the <code>UPDATE</code> commits, or written on a different connection, has a window in which it is missing the row entirely &mdash; and a dual write outside the transaction means the log and the table can disagree permanently. The trap is not that logging is wrong; it is that logging is a different mechanism with different durability.</p>
+  </div>
+
+  <div class="callout callout--must">
+    <span class="callout__label">Must remember</span>
+    <p>If your database has no <code>EXCLUDE</code> constraint, a Type 2 table has <strong>no database-level guarantee</strong> that two versions do not overlap. You are relying on application code. PostgreSQL can do it properly: a <code>tstzrange</code> column with a gist exclusion constraint enforces it, and it needs <code>btree_gist</code> installed for the equality part.</p>
+  </div>
+
+  <pre class="snippet" data-lang="sql" data-title="Range and exclusion" data-hl-line="4">
+<code>ALTER TABLE customer_address ADD COLUMN span tstzrange;
+
+ALTER TABLE customer_address ADD CONSTRAINT no_overlap
+  EXCLUDE USING gist (
+    customer_id WITH =,
+    span WITH &amp;&amp;
+  );
+
+CREATE INDEX ON customer_address
+  USING gist (customer_id, tstzrange(valid_from,
+                                     COALESCE(valid_to, 'infinity'), '[)'));</code></pre>
+
+  <p>Bitemporal buys one thing Type 2 cannot: answering "what did we <em>believe</em> on 1 March, about a fact valid in January?" That is four timestamps and a primary key of <code>(customer_id, valid_from, recorded_from)</code>.</p>
+
+  <pre class="snippet" data-lang="sql" data-title="Double as-of query" data-hl-line="5,7">
+<code>-- "As we knew it on 1 March, about a fact valid in January"
+SELECT address
+  FROM customer_address_history
+ WHERE customer_id = 42
+   AND valid_from &lt; '2026-01-31'
+   AND (valid_to IS NULL OR valid_to &gt; '2026-01-31')
+   -- recorded_* is the knowledge axis: what we believed in March
+   AND recorded_from &lt; '2026-03-01'
+   AND (recorded_to IS NULL OR recorded_to &gt;= '2026-03-01');</code></pre>
+
+  <div class="callout callout--tradeoff">
+    <span class="callout__label">Trade-off</span>
+    <p>Bitemporal over Type 2 flips on <strong>whether you will ever be asked to restate a historical report</strong>. If a regulator, an auditor, or a customer dispute can ask "what did you show us in February?", the knowledge interval is the only thing that answers it. If the answer can only ever be "the correct value, whenever you ask", you are paying for a dimension of history no query will read &mdash; and adding it later is a one-way door, because backfilling <code>recorded_from</code> for rows written before the migration is a guess.</p>
+  </div>
+
+  <p>Engine support is uneven, which is the practical constraint on the whole section: SQL Server has <code>SYSTEM_TIME</code> and temporal tables; Oracle has Flashback; PostgreSQL gives you <code>tstzrange</code> and <code>btree_gist</code> and expects you to assemble the rest; MySQL has nothing, and you build it yourself. On MySQL the Type 2 pattern is the answer, and the exclusion constraint has to become an application transaction.</p>
+</section>
+
+<section id="ch3" data-filter-target>
+  <div class="section__head"><span class="section__num">03</span><h2>Index &amp; partition co-design</h2></div>
+
+  <p>One rule governs the whole section: <strong>the partition key and the leading column of the index should be the same column.</strong> Partitioning prunes; an index locates. When the two agree you get both. When they disagree you have traded one for the other, and which one you lost is the thing to check.</p>
+
+  <div class="table-wrap">
+    <table class="table--decision">
+      <caption>Pruning and index usability, by agreement</caption>
+      <thead>
+        <tr><th>Case</th><th>Setup</th><th>24-hour query does</th><th>Verdict</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>A</strong></td><td>Partition key <code>created_at</code>, index leads on <code>created_at</code></td><td>Prunes 10 partitions to 2, index is usable inside them</td><td>Both wins, no compromise</td></tr>
+        <tr><td><strong>B</strong></td><td>Partition key <code>created_at</code>, index leads on <code>customer_id</code></td><td>Prunes to 1, then scans the whole partition &mdash; index unusable across it</td><td>Pruning bought, locality lost</td></tr>
+        <tr><td><strong>C</strong></td><td>Partition key on a column no query constrains; index unrelated</td><td>Prunes 12 to 12</td><td>Disaster &mdash; every query slower, and the only thing bought is the ability to <code>DROP</code> a region</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <figure class="figure">
+    <svg viewBox="0 0 660 300" role="img" aria-label="When the partition key equals the leading index column, one query prunes ten partitions to two and reads an index; when they disagree, the same query reads every partition and gains nothing.">
+      <defs>
+        <marker id="arw-d6-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker>
+      </defs>
+      <rect class="node" x="10" y="20" width="180" height="46" rx="5"/>
+      <text class="label label--sub" x="100" y="48">last 24 hours</text>
+      <text class="label label--sub" x="100" y="122" text-anchor="middle">12 monthly</text>
+      <text class="label label--sub" x="100" y="248" text-anchor="middle">12 monthly</text>
+      <text class="label" x="100" y="146" text-anchor="middle">partitions</text>
+      <text class="label" x="100" y="272" text-anchor="middle">partitions</text>
+
+      <text class="label" x="330" y="34" text-anchor="middle">Case A &mdash; keys agree</text>
+      <g class="node">
+        <rect class="node--good" x="250" y="48" width="160" height="20" rx="3"/>
+        <rect class="node--good" x="250" y="72" width="160" height="20" rx="3"/>
+        <rect class="fill-bad" x="250" y="96" width="160" height="20" rx="3"/>
+        <rect class="fill-bad" x="250" y="120" width="160" height="20" rx="3"/>
+        <rect class="fill-bad" x="250" y="144" width="160" height="20" rx="3"/>
+      </g>
+      <line class="edge edge--good" x1="195" y1="43" x2="245" y2="70" marker-end="url(#arw-d6-b)"/>
+      <line class="edge edge--good" x1="195" y1="43" x2="245" y2="94" marker-end="url(#arw-d6-b)"/>
+      <text class="edge-label edge-label--strong" x="470" y="82">prunes 12 &rarr; 2, index usable</text>
+      <text class="edge-label" x="470" y="102">heap touched: ~1,200 pages</text>
+
+      <text class="label" x="330" y="196" text-anchor="middle">Case C &mdash; keys disagree</text>
+      <g>
+        <rect class="fill-bad" x="250" y="208" width="160" height="20" rx="3"/>
+        <rect class="fill-bad" x="250" y="232" width="160" height="20" rx="3"/>
+        <rect class="fill-bad" x="250" y="256" width="160" height="20" rx="3"/>
+        <rect class="fill-bad" x="250" y="280" width="160" height="20" rx="3"/>
+      </g>
+      <line class="edge edge--bad" x1="195" y1="43" x2="245" y2="244" marker-end="url(#arw-d6-b)"/>
+      <text class="edge-label edge-label--strong" x="470" y="240">prunes 12 &rarr; 12</text>
+      <text class="edge-label" x="470" y="260">every query slower, no gain</text>
+      <text class="edge-label" x="470" y="280">bought: DROP a region</text>
+    </svg>
+    <figcaption>The same query, two schemas. When the partition key is the leading index column, pruning and the index both apply; when they disagree you have paid write-amplification and planning cost to arrive at the same rows by a slower route.</figcaption>
+  </figure>
+
+  <p>Case A is worth doing the arithmetic for, because "pruning" sounds free and is not. On a 1.4-billion-row table at ~140&nbsp;B/row, a last-24-hours query is about 40,000 rows &mdash; roughly 10&nbsp;MB, ~15&nbsp;ms. A per-customer 24-hour slice is 60 rows, ~1&nbsp;ms. The same per-customer query over all time is 8,900 rows, ~1.1&nbsp;GB, ~4&nbsp;s. <strong>Partitioning only fixes that third query if the partition key is <code>customer_id</code></strong> &mdash; a time partition gives you nothing there.</p>
+
+  <div class="callout callout--tradeoff">
+    <span class="callout__label">Trade-off</span>
+    <p>Partitioning converts unbounded maintenance into bounded maintenance, but it does not make maintenance free, and it adds a per-partition planning cost. The condition that flips the answer is <strong>how many partitions the planner has to consider</strong>: a few hundred per table is where planning time becomes visible, and beyond that the partition count is your new row count.</p>
+  </div>
+
+  <div class="callout callout--trap">
+    <span class="callout__label">Interview trap</span>
+    <p>Generic plans. After five executions PostgreSQL may stop re-planning and reuse a generic plan, and <code>plan_cache_mode</code> controls that. <strong>Equality on a partition key prunes under a generic plan; a range does not.</strong> So <code>WHERE created_at = $1</code> keeps working after the switch and <code>WHERE created_at BETWEEN $1 AND $2</code> silently loses its pruning &mdash; which is exactly the shape of a time-window query, and exactly the shape nobody notices until the table is busy. The fix is not to disable generic plans globally; it is to know which of your predicates are the load-bearing ones.</p>
+  </div>
+
+  <div class="callout callout--must">
+    <span class="callout__label">Must remember</span>
+    <p>In PostgreSQL the primary key <strong>must contain the partition key</strong> &mdash; <code>PRIMARY KEY (created_at, id)</code>, not <code>PRIMARY KEY (id)</code>. And a <code>UNIQUE</code> constraint is only global if it contains the partition key too; a <code>UNIQUE</code> that omits it is unique <em>per partition</em>, which is a uniqueness constraint that stops being one at exactly the scale you added partitioning for.</p>
+  </div>
+
+  <p>The decision order follows reversibility, not importance: query patterns first, because they are given and do not bend; the partition key next, because it is the one-way door; then clustering and index order, which are cheap to revisit. See <a href="#ops">Making the call</a>.</p>
+
+  <div class="callout callout--scale">
+    <span class="callout__label">Scaling reality check</span>
+    <p>When NOT to partition: <strong>under about 100 million rows</strong> (unless the goal is retention or a maintenance bound), when your hot queries do not constrain the partition key, or when the migration cost exceeds about two years of benefit. A B+ tree lookup by primary key is already O(log&nbsp;n) &mdash; at 10 million rows you have 4 levels, and a partition buys you nothing on a lookup that touches 4 pages. The volume's separate thresholds: partitioning is worth it around <strong>10 million rows for maintenance</strong> and in the <strong>low hundreds of millions for query latency</strong>.</p>
+  </div>
+
+  <p>There are exactly two legitimate cases where the partition key and the index deliberately disagree, and both are maintenance rather than query: a partition whose only purpose is retention and that is never queried directly, and a hot partition concentrated enough that the index wants a different leading column. Both are exceptions you should be able to name out loud; if you cannot, you are in Case C.</p>
+
+  <pre class="snippet" data-lang="sql" data-title="Partitioned events" data-hl-line="7">
+<code>CREATE TABLE events (
+  created_at  timestamptz NOT NULL,
+  id          bigint      GENERATED ALWAYS AS IDENTITY,
+  customer_id bigint      NOT NULL REFERENCES customer (id),
+  kind        text        NOT NULL,
+  payload     jsonb,
+  PRIMARY KEY (created_at, id)   -- partition key must be in the PK
+) PARTITION BY RANGE (created_at);
+
+CREATE TABLE events_2026_08 PARTITION OF events
+  FOR VALUES FROM ('2026-08-01') TO ('2026-09-01');
+
+CREATE INDEX ON events (customer_id, created_at DESC);</code></pre>
+</section>
+
+<section id="ch4" data-filter-target>
+  <div class="section__head"><span class="section__num">04</span><h2>Partitioning</h2></div>
+
+  <p>Before choosing a strategy, name the thing you are choosing between, because "partitioning" and "sharding" are different decisions with different costs and people routinely use the words interchangeably in interviews.</p>
+
+  <div class="table-wrap">
+    <table class="table--decision">
+      <caption>Partitioning and sharding are not the same decision</caption>
+      <thead>
+        <tr><th>Dimension</th><th>Partitioning</th><th>Sharding</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Servers</td><td>One server, one buffer pool, one <code>max_connections</code>, one WAL</td><td>Many servers, many WALs, each node fails alone</td></tr>
+        <tr><td>Pruning a query</td><td>Free &mdash; no cross-partition cost, the engine does it</td><td>A network round trip, and routing is your code</td></tr>
+        <tr><td>Unit of scaling</td><td>The partition: cheap, reversible</td><td>The shard: expensive, near-irreversible</td></tr>
+        <tr><td>Failure blast radius</td><td>All of it &mdash; the server holds every partition</td><td>1/N of requests when a node dies</td></tr>
+        <tr><td>Typical trigger</td><td>Retention, or bounded maintenance</td><td>One node physically cannot hold the rows or the connections</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Within partitioning, three strategies and they are not interchangeable. <code>RANGE</code> is the default because it pairs with time and therefore with retention. <code>LIST</code> is for a small closed set of business values. <code>HASH</code> is the one that gives up both things partitioning is for.</p>
+
+  <div class="table-wrap">
+    <table class="table--decision">
+      <caption>Partition strategies against the four questions that decide them</caption>
+      <thead>
+        <tr><th>Strategy</th><th>Locality</th><th>Rebalancing cost</th><th>Skew behaviour</th><th>Query routing</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>RANGE (created_at)</code></td><td>Excellent &mdash; pruning is exact and local</td><td>Cheap: attach/detach a partition; splitting a range copies only that range</td><td>Follows the data: a quiet month is a small partition, a launch month is a large one &mdash; which is correct, not a fault</td><td>Engine-local, no application involvement</td></tr>
+        <tr><td><code>LIST (region)</code></td><td>Good for the listed values only</td><td>Cheap, same mechanism as range</td><td>One very popular value is one very hot partition; a value not in the list has no partition and the <code>INSERT</code> fails loudly</td><td>Engine-local; a <code>DEFAULT</code> partition catches everything else but is unprunable and unbounded</td></tr>
+        <tr><td><code>HASH (customer_id)</code></td><td>Poor &mdash; a range predicate touches every partition</td><td>The whole table must be rewritten to add a partition</td><td>Even by construction, and that is the argument for it</td><td>Engine-local, but you cannot answer "all of last month" cheaply</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout--tradeoff">
+    <span class="callout__label">Trade-off</span>
+    <p><code>HASH</code> buys evenness and pays for it twice: no range pruning, and no retention by dropping a partition. The condition that flips the answer is <strong>whether you have a retention policy</strong>. Retention is the reason to partition in most systems, and hash partitioning makes it a full-table operation, so hash is right when your distribution is genuinely uneven by time (each key's rows are spread across all of history) and wrong the moment "delete everything older than 90 days" becomes a requirement.</p>
+  </div>
+
+  <p>Sub-partitioning multiplies what you already have, and <strong>every pruning factor multiplies</strong>: four is fine, forty is painful. The pain arrives as planning time and as an <code>INSERT</code> path that walks a two-level tree. The volume's worked example is <code>events_2026_08_eu</code> at ~35 million rows and ~4.9&nbsp;GB against <code>events_2026_08_us</code> at ~62 million and ~8.6&nbsp;GB &mdash; the spread between sub-partitions is itself the argument for a third level, and the third level multiplies again.</p>
+
+  <p>What you get beyond pruning is that every unbounded maintenance operation becomes a bounded one &mdash; per-partition <code>VACUUM</code> and <code>ANALYZE</code>, and partition-wise append and aggregate.</p>
+
+  <div class="callout callout--scale">
+    <span class="callout__label">Scaling reality check</span>
+    <p>The number that ends the "is partitioning worth it" argument: on a 1.4-billion-row, ~900&nbsp;GB table with ~100&nbsp;million rows per monthly partition, a 90-day sweep is <strong>3 partitions, 300 million rows</strong>. As <code>DELETE</code> that is ~42&nbsp;GB of heap rewritten, 300 million dead tuples, at least 27&nbsp;GB of WAL, and ~6,000&nbsp;s at 50,000 rows/second &mdash; <strong>100 minutes</strong> in one transaction, holding every dead tuple's <code>xmax</code> so <code>VACUUM</code> can reclaim none of them and the table physically doubles. Crash at minute 90 and you roll back 90 minutes of work and replay 27&nbsp;GB of WAL. As <code>DROP TABLE</code> the same three partitions are a metadata operation and some file unlinks: <strong>10 to 500&nbsp;ms, 180&nbsp;ms measured, ~0 WAL, nothing to replay</strong>.</p>
+  </div>
+
+  <div class="table-wrap">
+    <table class="table--decision">
+      <caption>Retention: three ways to remove 300 million rows, and what each really costs</caption>
+      <thead>
+        <tr><th>Approach</th><th>Wall clock</th><th>WAL</th><th>Failure mode</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>One <code>DELETE</code> transaction</td><td>~6,000&nbsp;s (100 min) at 50k rows/s</td><td>~27&nbsp;GB minimum, ~42&nbsp;GB of heap churn</td><td>No dead-tuple reclaim for the whole run; a crash discards 100 minutes and replays the WAL</td></tr>
+        <tr><td>Batched <code>DELETE</code> in 10,000-row chunks</td><td>Comparable, but each batch commits and frees</td><td>Still ~300M row operations and ~27&nbsp;GB</td><td>Long-running &mdash; and a <code>DELETE</code> that is interrupted halfway leaves the table exactly as it was, not smaller</td></tr>
+        <tr><td><code>DROP TABLE</code> the partitions</td><td>10&ndash;500&nbsp;ms, ~180&nbsp;ms measured</td><td>~0</td><td>None worth naming &mdash; but the data is gone, so this is only a retention tool, never a migration tool</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout--must">
+    <span class="callout__label">Must remember</span>
+    <p>Dropping a partition is a data-destroying operation with no undo. Before you <code>DROP</code>, <strong>detach the partition first</strong> (<code>ALTER TABLE ... DETACH PARTITION ...</code>), which turns the drop into a reversible file-level event you can re-attach while you still have the disk. Dropping straight through is how a retention job becomes an incident.</p>
+  </div>
+
+  <p>Converting an existing table to a partitioned one is its own project, and the ordering is where these go wrong: create the 12 target partitions ahead of time, copy a slice at a time, take a short write freeze for the final delta, rename, <code>ANALYZE</code> each new partition, then delete the old job rather than disabling it. Have two numbers ready: the parallel copy needs about <strong>1.1&nbsp;TB of free disk</strong> for a 900&nbsp;GB table, and 12 partitions with 6 indexes each is <strong>72 index builds</strong>.</p>
+</section>
+
+<section id="ch5" data-filter-target>
+  <div class="section__head"><span class="section__num">05</span><h2>Sharding</h2></div>
+
+  <p>Work through the triage in order, because most "we need to shard" conclusions are wrong at step one. Is it an index problem? A working-set problem &mdash; data that does not fit in RAM, so every query is a disk seek? Write throughput? Only when a single node is physically unable to hold the data or the connections do you get to "now shard".</p>
+
+  <p>Two shapes. A <em>vertical</em> split moves columns out &mdash; the volume separates a 3.7&nbsp;kB blob from a 4.1&nbsp;kB <code>orders</code> row into its own table, taking rows per page from 18 to 24, for blobs that are 3% of queries and 88% of the bytes. But that is a schema change and a denormalisation decision, not a scaling technique. A <em>horizontal</em> split cuts rows, and that is sharding.</p>
+
+  <div class="callout callout--tradeoff">
+    <span class="callout__label">Trade-off</span>
+    <p>Shard by tenant or by customer flips on <strong>whether multi-tenancy is a product feature or a storage detail</strong>. If a tenant is a thing you sell, onboard, bill, and support &mdash; it has a dashboard, a plan, a contract, and a name in a support ticket &mdash; then tenant_id is the right key: it concentrates every query a tenant makes onto one node, and per-tenant isolation becomes a permission check. If "tenant" is just a column you added for row-level security, customer_id spreads the load more evenly and gives you a smaller blast radius when one customer is unusually heavy. Choosing the feature-flavoured key when the product does not have features is how you end up with one tenant owning a shard.</p>
+  </div>
+
+  <p>The shard key is the whole decision: four properties, and only one of them is unrepairable.</p>
+
+  <div class="table-wrap">
+    <table class="table--decision">
+      <caption>Shard-key candidates against the four properties a key must have</caption>
+      <thead>
+        <tr><th>Candidate</th><th>Cardinality</th><th>Evenness</th><th>Stability</th><th>Query alignment</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>is_active</code></td><td>2 values &rarr; 2 shards</td><td>Terrible</td><td><strong>Never</strong> &mdash; a status change is a reshard</td><td>Two buckets, so "active users" is a full fan-out</td></tr>
+        <tr><td><code>country_code</code></td><td>250 values</td><td>30% of users in one country</td><td>Never &mdash; a user moves</td><td>Regional reports are one shard</td></tr>
+        <tr><td><code>category</code></td><td>Dozens</td><td>Zipf by definition</td><td>Never &mdash; a product recategorises</td><td>Category pages fan out</td></tr>
+        <tr><td><code>tenant_id</code></td><td>400,000 merchants</td><td>One merchant is 8% of writes</td><td>Good &mdash; tenancy rarely moves</td><td>Excellent if the product thinks in tenants</td></tr>
+        <tr><td><code>customer_id</code></td><td>4.2M &rarr; 65,000 per shard at 64 shards</td><td>Even, unless your customers are B2B</td><td><strong>Best available</strong> &mdash; immutable for the life of the account</td><td>"Orders for customer 42" is one shard; merchant and global queries fan out</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout--trap">
+    <span class="callout__label">Interview trap</span>
+    <p>"We hash on <code>customer_id</code>, so it is perfectly balanced." Only if your customers are. In a B2B product, <strong>12 customers generate 40% of queries</strong> &mdash; and a uniform hash does not help if those 12 customers land on 4 shards. Hashing removes systematic bias; it does not remove the bias your data already has. The mitigation is a routing table you can override, not a better hash function.</p>
+  </div>
+
+  <figure class="figure">
+    <svg viewBox="0 0 660 240" role="img" aria-label="A uniform hash spreads keys evenly across shards; a skewed workload concentrates most keys on a few shards no matter how good the hash is, because the skew is in the data.">
+      <defs>
+        <marker id="arw-d6-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker>
+      </defs>
+      <text class="label" x="20" y="22">Uniform hash of customer_id</text>
+      <g>
+        <rect class="node node--good" x="20" y="34" width="52" height="88" rx="4"/>
+        <rect class="node node--good" x="80" y="34" width="52" height="88" rx="4"/>
+        <rect class="node node--good" x="140" y="34" width="52" height="88" rx="4"/>
+        <rect class="node node--good" x="200" y="34" width="52" height="88" rx="4"/>
+        <rect class="node node--good" x="260" y="34" width="52" height="88" rx="4"/>
+        <rect class="node node--good" x="320" y="34" width="52" height="88" rx="4"/>
+        <rect class="node node--good" x="380" y="34" width="52" height="88" rx="4"/>
+        <rect class="node node--good" x="440" y="34" width="52" height="88" rx="4"/>
+      </g>
+      <text class="label label--sub" x="256" y="142" text-anchor="middle">8 shards, 65,000 customers each</text>
+
+      <text class="label" x="20" y="182">Skewed workload, same hash</text>
+      <g>
+        <rect class="node node--warn" x="20" y="192" width="52" height="34" rx="4"/>
+        <rect class="node node--bad" x="80" y="192" width="52" height="34" rx="4"/>
+        <rect class="node node--bad" x="140" y="192" width="52" height="34" rx="4"/>
+        <rect class="node" x="200" y="192" width="52" height="34" rx="4"/>
+        <rect class="node node--bad" x="260" y="192" width="52" height="34" rx="4"/>
+        <rect class="node" x="320" y="192" width="52" height="34" rx="4"/>
+        <rect class="node" x="380" y="192" width="52" height="34" rx="4"/>
+        <rect class="node" x="440" y="192" width="52" height="34" rx="4"/>
+      </g>
+      <line class="edge edge--warn" x1="66" y1="186" x2="260" y2="188" marker-end="url(#arw-d6-d)"/>
+      <text class="edge-label edge-label--strong" x="530" y="206">40% of queries</text>
+      <text class="edge-label" x="530" y="222">on 3 of 8 shards</text>
+    </svg>
+    <figcaption>Hashing removes systematic bias, not bias in the data. When a few keys generate most of the traffic, the fix is a routing table you can override &mdash; not a different hash.</figcaption>
+  </figure>
+
+  <div class="callout callout--must">
+    <span class="callout__label">Must remember</span>
+    <p>Imbalance is a <strong>normal steady-state condition, not an incident</strong>. The design requirement is therefore not "distribute evenly" &mdash; you cannot, given the data &mdash; it is <em>"choose a key whose imbalance you can remediate without resharding."</em> That is a property of the routing layer, and it is why routing has to be a datum.</p>
+  </div>
+
+  <h3>What fan-out costs</h3>
+
+  <p>One query, one shard: ~8&nbsp;ms. All shards: you pay for the slowest, not the average &mdash; 512&nbsp;ms serial, or the max of 64 draws in parallel, roughly 150&ndash;250&nbsp;ms of end-to-end p99. A dashboard is 64 queries; 50 open dashboards is 3,200.</p>
+
+  <figure class="figure">
+    <svg viewBox="0 0 660 400" role="img" aria-label="A scatter-gather query is sent to all five shards in parallel, but the merged result waits for the slowest shard, so one 30 millisecond shard sets the latency for every one of them.">
+      <defs>
+        <marker id="arw-d6-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker>
+      </defs>
+      <rect class="node" x="185" y="14" width="270" height="38" rx="5"/>
+      <text class="label label--sub" x="320" y="38" text-anchor="middle">query: all orders, last 7 days</text>
+
+      <line class="edge" x1="162" y1="52" x2="162" y2="290" marker-end="url(#arw-d6-c)"/>
+      <text class="edge-label" x="152" y="160" text-anchor="end">fan-out</text>
+
+      <g>
+        <line class="edge" x1="162" y1="170" x2="250" y2="170" marker-end="url(#arw-d6-c)"/>
+        <line class="edge" x1="162" y1="188" x2="250" y2="188" marker-end="url(#arw-d6-c)"/>
+        <line class="edge" x1="162" y1="206" x2="250" y2="206" marker-end="url(#arw-d6-c)"/>
+        <line class="edge" x1="162" y1="224" x2="250" y2="224" marker-end="url(#arw-d6-c)"/>
+        <line class="edge edge--bad" x1="162" y1="242" x2="250" y2="242" marker-end="url(#arw-d6-c)"/>
+      </g>
+
+      <rect class="node node--good" x="255" y="158" width="220" height="24" rx="4"/>
+      <text class="label label--sub" x="365" y="175" text-anchor="middle">shard 1 &mdash; 8 ms</text>
+      <rect class="node node--good" x="255" y="176" width="220" height="24" rx="4"/>
+      <text class="label label--sub" x="365" y="193" text-anchor="middle">shard 2 &mdash; 9 ms</text>
+      <rect class="node node--good" x="255" y="194" width="220" height="24" rx="4"/>
+      <text class="label label--sub" x="365" y="211" text-anchor="middle">shard 3 &mdash; 8 ms</text>
+      <rect class="node node--good" x="255" y="212" width="220" height="24" rx="4"/>
+      <text class="label label--sub" x="365" y="229" text-anchor="middle">shard 4 &mdash; 8 ms</text>
+      <rect class="node node--bad" x="255" y="230" width="220" height="24" rx="4"/>
+      <text class="label label--sub" x="365" y="247" text-anchor="middle">shard 5 &mdash; 30 ms</text>
+
+      <g>
+        <line class="edge edge--good" x1="475" y1="170" x2="560" y2="300" marker-end="url(#arw-d6-c)"/>
+        <line class="edge edge--good" x1="475" y1="188" x2="560" y2="300" marker-end="url(#arw-d6-c)"/>
+        <line class="edge edge--good" x1="475" y1="206" x2="560" y2="300" marker-end="url(#arw-d6-c)"/>
+        <line class="edge edge--good" x1="475" y1="224" x2="560" y2="300" marker-end="url(#arw-d6-c)"/>
+        <line class="edge edge--bad" x1="475" y1="242" x2="560" y2="300" marker-end="url(#arw-d6-c)"/>
+      </g>
+      <line class="edge" x1="162" y1="295" x2="560" y2="295" marker-end="url(#arw-d6-c)"/>
+      <text class="edge-label edge-label--strong" x="500" y="290" text-anchor="end">gather &mdash; waits for all five</text>
+
+      <rect class="node node--bad" x="185" y="316" width="270" height="38" rx="5"/>
+      <text class="label label--sub" x="320" y="340" text-anchor="middle">result at ~30 ms, not ~8 ms</text>
+      <text class="edge-label" x="185" y="374">p50 hides this. p99 is where a fan-out query lives.</text>
+    </svg>
+    <figcaption>Scatter-gather: the answer takes as long as the slowest shard, not the average. Four 8&nbsp;ms shards and one 30&nbsp;ms shard produce a 30&nbsp;ms query &mdash; which is why the p99, not the p50, is the number a fan-out design has to be measured on.</figcaption>
+  </figure>
+
+  <p>Five mitigations, in the order worth trying: cache the aggregate; pre-compute it; push the filter down hard enough that each shard returns little; partition the fan-out (route by region, so a regional query touches 4 shards, not 64); accept it and paginate. Making the shards faster does not work &mdash; that moves the slowest draw, and the slowest draw is the whole latency.</p>
+
+  <div class="callout callout--must">
+    <span class="callout__label">Must remember</span>
+    <p>Start with <strong>twice the shards you need</strong>, so growth is a split of a known range rather than a rehash of every row. And routing must be an explicit stored map, not a modulus buried in application code &mdash; a hard-coded <code>Math.abs(customerId) % 16</code> makes a reshard impossible without a fleet-wide deploy, and it has no rollback. Also note the Java signature bug that shape invites: <code>Math.abs((int) customerId) % 16</code> returns a <em>negative</em> shard number for a negative id, and <code>shard--8</code> is a routing bug that only appears in production traffic.</p>
+  </div>
+
+  <pre class="snippet" data-lang="sql" data-title="Routing as data" data-hl-line="11">
+<code>-- Routing is a row, not an expression.
+-- A reshard is then an UPDATE, with a rollback, and an audit trail.
+CREATE TABLE shard_routing (
+  key_hash   bigint  NOT NULL,
+  shard_id   int     NOT NULL,
+  assigned_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (key_hash)
+);
+
+-- Growth: split shard 7 into 7a and 7b by re-pointing a range.
+-- No deploy, no code change, reversible by updating the row back.
+UPDATE shard_routing SET shard_id = 73
+ WHERE key_hash BETWEEN 4200000 AND 8399999;</code></pre>
+
+  <p>Resharding is five phases, and the order is the safety argument: dual write, verify the two agree, flip reads, stop writing the old copy, decommission. Skipping the verification phase is how you ship a reshard that loses a day of writes to a bug nobody catches until a customer reports missing orders.</p>
+
+  <p>Topology follows from one fact: <strong>a row lives in exactly one place</strong>, which is why no relational store gives you write-any-row-any-node. One-writer-N-replicas means writes are single-shard, so transactions and referential integrity are too. Split a key's value space into sub-ranges and you get multiple writers per key, at the cost of every transaction spanning both halves becoming a distributed one. More shards with the same key is more capacity at the same write rate; splitting a key's value space is more writers. Different purchases, routinely conflated.</p>
+</section>
+
+<section id="ch6" data-filter-target>
+  <div class="section__head"><span class="section__num">06</span><h2>Replication &amp; read scaling</h2></div>
+
+  <p>Replication is the cheapest read scale-out there is, and it is also the easiest way to introduce a correctness bug you will not find in testing. Every read-routing decision is a decision about <em>staleness</em>, and the default that is safest is also the one people change first: primary by default, staleness as an explicit, per-call-site opt-in.</p>
+
+  <p>Start with the right classification, because a query is not "safe on a replica" &mdash; it is safe under one of five conditions, and only the last two are really the same choice.</p>
+
+  <div class="table-wrap">
+    <table class="table--decision">
+      <caption>Read routing by staleness tolerance</caption>
+      <thead>
+        <tr><th>The request</th><th>Route to</th><th>Because</th><th>Failure if you get it wrong</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>The user just wrote this row and is reading it back</td><td>Primary</td><td>Nothing else can see it yet</td><td>Blank screen, or a "not found" on a record that exists</td></tr>
+        <tr><td>Read-after-write within the lag window</td><td>Primary, or a replica known to be past the write's LSN</td><td>Lag is real but bounded and measurable</td><td>The ghost record: the update vanishes from the UI and reappears on refresh</td></tr>
+        <tr><td>Explicitly stale-tolerant (cache, dashboard, report)</td><td>Replica</td><td>The product does not promise freshness</td><td>Usually nothing &mdash; which is why this is the one to state out loud</td></tr>
+        <tr><td>Everything else</td><td>Primary by default</td><td>Unknown is not the same as tolerant</td><td>An in-page monotonicity violation: older data on a later page than newer data</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The four routing mechanisms, in order. Session or sticky routing &mdash; the same user keeps hitting the same node for a window. Sticky-by-LSN &mdash; route to a replica known to be past the write's position, so read-your-writes is a guarantee rather than a hope. Monotonic reads &mdash; once you have read from the primary, never regress; this needs session state. And explicit read-your-writes in the client. "Eventually consistent" is a product statement to a customer, not a fix to a query.</p>
+
+  <div class="callout callout--scale">
+    <span class="callout__label">Scaling reality check</span>
+    <p>Lag figures to quote: <strong>10&ndash;200&nbsp;ms</strong> when the system is quiet; <strong>seconds</strong> during a checkpoint, a bulk load, a <code>VACUUM</code>, a network interruption, or when the replica is CPU-starved; and <strong>unbounded</strong> during a replica restart. The volume's production case is the one to remember: average lag sat at a healthy 40&nbsp;ms for a month while the p99 was 3&ndash;8&nbsp;s, and the cause was a retention job re-activating a deleted account &mdash; a write pattern, not a capacity problem.</p>
+  </div>
+
+  <div class="callout callout--must">
+    <span class="callout__label">Must remember</span>
+    <p><strong>The average is the one statistic that cannot detect a tail.</strong> A five-minute average of 35&nbsp;ms is perfectly compatible with a p99 of 30 seconds. If your lag dashboard shows one number, it is measuring the thing that cannot be wrong. Alert on the percentile, and have a panel per percentile.</p>
+  </div>
+
+  <p>Synchronous replication costs availability, not latency. With <code>synchronous_commit = on</code> and <code>synchronous_standby_names</code> set, a write waits for acknowledgements &mdash; and <strong>a dead synchronous replica is a write outage</strong>, not a degraded mode. The quorum arithmetic: N replicas requiring M acknowledgements survives the loss of N &minus; M + 1. <code>ANY 1</code> (2 of 3) tolerates one failure and is fast; <code>FIRST 2</code> tolerates the same one and is slower. Pair it with <code>synchronous_commit_timeout</code> (3&nbsp;s) so a lost replica degrades to asynchronous instead of blocking every write.</p>
+
+  <div class="callout callout--tradeoff">
+    <span class="callout__label">Trade-off</span>
+    <p>Synchronous replication flips on <strong>whether a lost acknowledged write is worse than an unavailable write</strong>. For a ledger, a payment, or a booking, it is: you would rather refuse the write than tell a customer it succeeded. For a read-mostly catalogue, it is not: you would rather be up and occasionally stale. "It is safer" is not an answer &mdash; both options lose data or availability under some failure, and the choice is which one your business can survive.</p>
+  </div>
+
+  <p>One more shape to name: cascading replicas. A replica of a replica removes load from the primary at the cost of adding a hop to replication lag, and it means a lag spike on tier 1 is twice as visible on tier 2. It is a reasonable topology and a common source of "why is the dashboard slow" &mdash; the dashboard is not slow, it is reading from a replica of a replica.</p>
+</section>
+
+<section id="ch7" data-filter-target>
+  <div class="section__head"><span class="section__num">07</span><h2>Pooling &amp; client-side limits</h2></div>
+
+  <p>Connection pooling is arithmetic, and the arithmetic is Little's Law: <strong>L = &lambda; &times; W</strong> &mdash; the number of connections you need is the arrival rate times how long each request holds a connection. It is not a capacity number and it is not a preference.</p>
+
+  <div class="table-wrap">
+    <table class="table--decision">
+      <caption>Little's Law applied to one service</caption>
+      <thead>
+        <tr><th>Arrival rate</th><th>Time in system</th><th>Connections required</th><th>What this tells you</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>2,000 qps</td><td>20&nbsp;ms</td><td>2,000 &times; 0.020 = <strong>40</strong></td><td>The healthy design. A pool of 40 is correct and comfortable.</td></tr>
+        <tr><td>2,000 qps</td><td>200&nbsp;ms</td><td>2,000 &times; 0.200 = <strong>400</strong></td><td>A ten-fold latency regression &mdash; from cache misses, a slow downstream, or a lock &mdash; needs ten times the pool</td></tr>
+        <tr><td>2,000 qps</td><td>200&nbsp;ms, with a pool fixed at 500</td><td>400 required, 500 supplied</td><td>Just enough. The failure mode is not too-small a pool; it is too-large a one.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout--must">
+    <span class="callout__label">Must remember</span>
+    <p>A pool that is larger than the requirement <strong>converges</strong>; a pool that is smaller <strong>amplifies</strong>. Too many connections means more concurrent work inside the database, which makes every query slower, which makes the queue longer &mdash; and you arrive at 500 connections all waiting, on a server that shows 0% CPU because nothing is computing. Size from p95/p99, never the average, and carry a 1.5&ndash;2&times; safety factor.</p>
+  </div>
+
+  <p>Why oversizing is expensive, concretely. Every connection is a backend process holding its own <code>work_mem</code> (4&nbsp;MB by default) whether or not it is working, so 500 connections can sit on 8&nbsp;GB of shared pool while idle. Past a few hundred backends you are contending on the lock manager's 256 partitions, and raising <code>max_connections</code> past what memory supports converts a queueing problem into an OOM kill.</p>
+
+  <p>Across a fleet the multiplication is the number people forget &mdash; 20,000 backends would need roughly 2&nbsp;TB of RAM. So the budget rules: the sum of all pools &le; <code>max_connections</code> &times; 0.8, PgBouncer's own pool 2&ndash;4&times; <code>max_connections</code>, and re-check whenever the query mix changes.</p>
+
+  <div class="callout callout--scale">
+    <span class="callout__label">Scaling reality check</span>
+    <p>The hard ceiling, and the one to quote: <strong>a 64&nbsp;GB instance with a 32&nbsp;GB shared pool supports about 1,200 backends, and no more</strong> &mdash; roughly 20&nbsp;MB per backend plus the shared pool. Any pool sizing conversation that does not end at that number is not finished.</p>
+  </div>
+
+  <p>A connection pooler in front (PgBouncer) is what makes a large logical connection count safe, and the mode matters more than the product. Transaction pooling &mdash; 100 client sessions over 60 real server connections is a normal, healthy configuration. Session pooling is barely better than no pooler at all, because it still holds one server connection per client for the whole session, which is the thing you were trying to fix.</p>
+
+  <div class="callout callout--trap">
+    <span class="callout__label">Interview trap</span>
+    <p>Transaction pooling is not compatible with session state, and the incompatibility is silent. A bare <code>SET</code> instead of <code>SET LOCAL</code> returns to a different backend next time. <code>LISTEN</code>/<code>NOTIFY</code>, advisory locks, <code>WITH HOLD</code> cursors, and temp tables all assume the session is yours. Each of these returns a wrong answer or an error far from its cause, and under a pooler only under load.</p>
+  </div>
+
+  <pre class="snippet" data-lang="sql" data-title="Client-side limits" data-hl-line="4">
+<code>-- Timeouts belong on the role, not in application config that
+-- can be forgotten, and not only in the connection string.
+ALTER ROLE app_rw SET statement_timeout = '5s';
+ALTER ROLE app_rw SET idle_in_transaction_session_timeout = '60s';
+ALTER ROLE app_rw SET lock_timeout = '2s';
+
+-- These three are the ones that bound damage. The pooling
+-- incompatibility is a different problem entirely.</code></pre>
+
+  <p>Pool exhaustion has a signature worth recognising instantly: the database is <strong>idle and green</strong> at 40 of 500 connections while the application times out. The connections exist, they are not working, and something holds them &mdash; an uncommitted transaction, a lock wait, a client that is not returning them. The alert that finds this is not "connection count high" but <strong>"zero <code>idle in transaction</code> sessions older than 60 seconds"</strong>.</p>
+</section>
+
+<section id="ops" data-filter-target>
+  <div class="section__head"><span class="section__num">08</span><h2>Making the call</h2></div>
+
+  <p>Every decision above is reversible or it is not, and that classification is the most useful thing to carry out of this volume &mdash; more useful than any individual rule, because it tells you where to spend your remaining caution.</p>
+
+  <div class="table-wrap">
+    <table class="table--decision">
+      <caption>Reversibility: what a change costs to undo</caption>
+      <thead>
+        <tr><th>Change</th><th>Cost to make</th><th>Cost to undo</th><th>Verdict</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Add or drop an index</td><td>Minutes</td><td>Minutes, and no data loss</td><td>Free &mdash; do it in the same release as the code that needs it</td></tr>
+        <tr><td>Add a partition</td><td>Minutes</td><td><code>ATTACH</code>/<code>DETACH</code> &mdash; minutes</td><td>Free &mdash; this is why partitioning is cheaper than sharding</td></tr>
+        <tr><td>Widen a column, add a nullable column</td><td>Metadata on most modern engines</td><td>Metadata</td><td>Free</td></tr>
+        <tr><td>Add <code>NOT NULL</code> to a live column</td><td>Five ordered steps, not one <code>ALTER</code></td><td>Drop the constraint</td><td>Cheap if you sequence it, a rewrite if you do not</td></tr>
+        <tr><td><strong>Change the partition key</strong></td><td><strong>Rewrites the entire table</strong></td><td>Rewrites it again</td><td><strong>One-way door</strong> &mdash; decide it once</td></tr>
+        <tr><td><strong>Change the shard key</strong></td><td>Reshard: dual write, verify, flip, decommission</td><td>There is no undo during the migration</td><td><strong>One-way door</strong> &mdash; the whole design turns on it</td></tr>
+        <tr><td>Freeze the shard count</td><td>One constant, in code, forever</td><td>Fleet-wide deploy</td><td>One-way door, and the code review one</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout--must">
+    <span class="callout__label">Must remember</span>
+    <p><code>NOT NULL</code> is a conclusion, not a constraint you can simply declare. The sequence: add the column as nullable, backfill, <strong>validate the constraint</strong>, <code>NOT VALID</code> first so the check does not take a long lock, then <code>VALIDATE CONSTRAINT</code>, and only then set the column <code>NOT NULL</code>. One <code>ALTER TABLE ... SET NOT NULL</code> on a large table scans the whole table under a lock, which is the outage.</p>
+  </div>
+
+  <div class="callout callout--trap">
+    <span class="callout__label">Interview trap</span>
+    <p>The runbook check that does not check: <code>SELECT count(*) FROM pg_indexes WHERE indexname = '...'</code> <strong>passes on an invalid index</strong>. <code>CREATE INDEX CONCURRENTLY</code> that failed leaves a row in the catalog, so your verification passes and you have no index. Verify <code>pg_index.indisvalid</code>, not the catalog's existence &mdash; and remember <code>CONCURRENTLY</code> cannot run inside a transaction block, which is a real constraint on the migration tooling you pick.</p>
+  </div>
+
+  <p>The 1.2-billion-row migration has a shape that generalises, and the shape is worth more than the instance. Dual write to both schemas. Verify with row counts, then checksums, then a byte-identical spot check on ~1,000 keys. Flip reads with an atomic rename, so there is no window where both are live. Only then stop writing the old copy.</p>
+
+  <div class="callout callout--trap">
+    <span class="callout__label">Interview trap</span>
+    <p>Two partitioning reviews that are both wrong for the same reason &mdash; the key was chosen without reference to the queries. <code>PARTITION BY RANGE (id)</code> on a sequence: <code>id</code> is monotonic but not time-proportional, so a range predicate on a real timestamp prunes nothing, and the partitions are arbitrary slices of the id space you can never drop. And a shard count frozen as a constant: the moment you want to add a node, the modulus changes and every row moves. Neither is a tuning mistake &mdash; both are a key chosen before the query patterns were known.</p>
+  </div>
+
+  <p>The discipline underneath all of it: spend your one irreversible decision <em>last</em>. Teams routinely do this in reverse &mdash; pick the key, then find queries that fit it &mdash; and discover at the migration that the key was wrong.</p>
+</section>
+
+<section id="numbers" data-filter-target>
+  <div class="section__head"><span class="section__num">&nbsp;</span><h2>Numbers worth memorising</h2></div>
+
+  <div class="numbers">
+    <div class="number"><span class="number__value">~40</span><span class="number__label">rows rewritten per page split on an 8 kB page</span></div>
+    <div class="number"><span class="number__value">60&ndash;70%</span><span class="number__label">fill after a split, vs 100% on append</span></div>
+    <div class="number"><span class="number__value">~27,000/s</span><span class="number__label">row-writes of pure split overhead at 2,000 rows/s with 1/3 splitting</span></div>
+    <div class="number"><span class="number__value">16 B</span><span class="number__label">a UUID, v4 or v7 &mdash; the 48-bit ms prefix does not shrink it</span></div>
+    <div class="number"><span class="number__value">10,000</span><span class="number__label">sequence values skippable: <code>CACHE 50</code> &times; 200 sessions</span></div>
+    <div class="number"><span class="number__value">~100M</span><span class="number__label">rows per monthly partition on a 1.4B-row table (~14 GB)</span></div>
+    <div class="number"><span class="number__value">~100M</span><span class="number__label">rows &mdash; below this, partitioning rarely pays unless the goal is retention</span></div>
+    <div class="number"><span class="number__value">a few hundred</span><span class="number__label">partitions per table, where planning time starts to bite</span></div>
+    <div class="number"><span class="number__value">5</span><span class="number__label">executions before PostgreSQL may switch to a generic plan</span></div>
+    <div class="number"><span class="number__value">180 ms</span><span class="number__label"><code>DROP</code> of 3 partitions (10&ndash;500 ms), ~0 WAL</span></div>
+    <div class="number"><span class="number__value">100 min</span><span class="number__label"><code>DELETE</code> of the same 300M rows at 50,000 rows/s</span></div>
+    <div class="number"><span class="number__value">27 GB</span><span class="number__label">WAL minimum for that delete; ~42 GB of heap churn</span></div>
+    <div class="number"><span class="number__value">20k&ndash;50k</span><span class="number__label">small writes/second on one node &mdash; the real sharding trigger</span></div>
+    <div class="number"><span class="number__value">4</span><span class="number__label">shard-key properties: cardinality, evenness, stability, query alignment</span></div>
+    <div class="number"><span class="number__value">512 ms</span><span class="number__label">serial fan-out across 64 shards at 8 ms each</span></div>
+    <div class="number"><span class="number__value">p99</span><span class="number__label">of a 64-shard fan-out is the max of 64 draws: 150&ndash;250 ms</span></div>
+    <div class="number"><span class="number__value">2&times;</span><span class="number__label">the shards you need, on day one, so growth is a split not a rehash</span></div>
+    <div class="number"><span class="number__value">~4 levels</span><span class="number__label">maximum hierarchy depth on a latency-sensitive path (12 levels = 12 round trips)</span></div>
+    <div class="number"><span class="number__value">10&ndash;200 ms</span><span class="number__label">quiet replica lag; seconds under checkpoint, and unbounded across a restart</span></div>
+    <div class="number"><span class="number__value">N &minus; M + 1</span><span class="number__label">replica failures survivable with N replicas needing M acks</span></div>
+    <div class="number"><span class="number__value">40 &times; 25 &times; 20</span><span class="number__label">services &times; instances &times; pool = 20,000 backends against a few hundred slots</span></div>
+    <div class="number"><span class="number__value">0.8</span><span class="number__label">&Sigma; of all pools as a fraction of <code>max_connections</code></span></div>
+    <div class="number"><span class="number__value">~1,200</span><span class="number__label">backends on a 64 GB instance with a 32 GB shared pool, at ~20 MB each</span></div>
+    <div class="number"><span class="number__value">72</span><span class="number__label">index builds to convert 12 partitions &times; 6 indexes; ~1.1 TB free disk for the parallel copy</span></div>
+  </div>
+</section>
+
+<footer class="pagefoot">
+  <nav class="pager">
+    <a class="pager__link" href="05-transactions-isolation-concurrency.html"><span>Prev</span>05 &mdash; Transactions, Isolation &amp; Concurrency</a>
+    <a class="pager__link" href="07-postgresql.html"><span>Next</span>07 &mdash; PostgreSQL</a>
+  </nav>
+  <span>Volume 6 of 11 &mdash; Database Complete Deep-Dive</span>
+</footer>
+</main>
+</div>
+<script src="../../search.js"></script>
+<script src="../../highlight.js"></script>
+</body>
+</html>
+
