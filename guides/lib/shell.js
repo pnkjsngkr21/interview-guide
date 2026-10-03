@@ -43,8 +43,12 @@ function sidebar(opts) {
 function masthead(opts) {
   var fm = opts.frontMatter || {};
   var html = '<header class="masthead">';
-  html += '<p class="masthead__eyebrow">' + esc(opts.trackLabel) + " &middot; " +
-          esc(fm.series || "Deep-Dive") + "</p>";
+  // `trackLabel` already carries the series when the volume declares one, so
+  // the second half is appended only when it is missing. Volumes without front
+  // matter would otherwise render a doubled placeholder.
+  var eyebrow = opts.trackLabel +
+    (fm.series && opts.trackLabel.indexOf(fm.series) === -1 ? " · " + fm.series : "");
+  html += '<p class="masthead__eyebrow">' + esc(eyebrow) + "</p>";
   html += "<h1>" + esc(opts.title) + "</h1>";
 
   if (fm.subtitle) {

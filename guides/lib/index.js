@@ -18,27 +18,25 @@ var esc = function (s) {
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 };
 
-// The two volumes whose front matter cannot supply a title.
+// A `# Part N — Topic` heading names the volume, so it can stand in for a
+// missing `series`. The nine Java volumes open on exactly that shape.
 //
-//   java-01 has no front matter at all — it opens straight on a `# Part 1`
-//   heading, having been authored before the convention existed.
+// The `<h1>` is deliberately NOT used as a general fallback. In the other three
+// tracks it is the series title — all 11 Spring volumes open on "The Spring
+// Complete Deep-Dive" — so falling back to it would list eleven near-identical
+// rows. The rule keys on the `Part N` prefix, which those volumes never carry:
+// measured across the corpus, 9 headings match it and 0 of the other 26 do.
 //
-//   java-09 declares `series: "FINAL VOLUME"`, which describes its position in
-//   the series rather than its subject. Its filename says "modern-java-
-//   production", so that is used instead.
-//
-// Both fall back to the filename, which for every other volume agrees with
-// `series` anyway. Spelling these two out is the honest alternative to a
-// general "looks wrong, drop it" heuristic.
-var UNTITLED = {
-  "java/1": "Java Basics",
-  "java/9": "Modern Java & Production"
-};
+// This replaces a two-entry `UNTITLED` map that spelled out java-01 and java-09
+// by hand, and covers the volumes that have since lost their front matter.
+var PART_HEADING = /^Part\s+\d+[^\s]*\s*[—–-]\s*/;
 
-function titleFor(volume, frontMatter) {
-  var key = volume.track + "/" + volume.order;
-  if (UNTITLED[key]) return UNTITLED[key];
+function titleFor(volume, frontMatter, h1) {
   if (frontMatter.series) return frontMatter.series;
+  if (h1) {
+    var stripped = h1.replace(PART_HEADING, "").trim();
+    if (stripped) return stripped;
+  }
   return volume.label;
 }
 

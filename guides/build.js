@@ -89,9 +89,8 @@ function description(volume, doc) {
   return first ? first.text : volume.label;
 }
 
-function buildOne(volume, track, siblings) {
-  var raw = fs.readFileSync(path.join(ROOT, volume.sourcePath), "utf8");
-  var doc = md.parse(raw);
+function buildOne(volume, track, siblings, parsed) {
+  var doc = parsed || md.parse(fs.readFileSync(path.join(ROOT, volume.sourcePath), "utf8"));
   var out = page.renderDocument({ blocks: doc.blocks, frontMatter: doc.frontMatter });
 
   var qaCount = 0, diagramCount = 0;
@@ -112,14 +111,22 @@ function buildOne(volume, track, siblings) {
     qa: qaCount,
     diagrams: diagramCount
   };
-  volume.title = index.titleFor(volume, doc.frontMatter);
+  // `out.title` is the resolved heading: front-matter `title` when the volume
+  // declares one, otherwise the first `# ` heading. It is what the page renders
+  // as its `<h1>`, so the index names a volume exactly as its own page does.
+  volume.title = index.titleFor(volume, doc.frontMatter, out.title);
   volume.num = volume.order < 10 ? "0" + volume.order : String(volume.order);
   volume.cheatsheet = cheatsheetHref(volume);
 
   return {
     html: shell.document({
       title: out.title || volume.label,
-      trackLabel: track.label + " — " + (doc.frontMatter.series || "Deep-Dive"),
+      // The eyebrow is `track — series`, and both halves are optional. The nine Java
+      // volumes declare no `series`, so a literal "Deep-Dive" placeholder here
+      // would render `Java — Deep-Dive · Deep-Dive` once the masthead appended
+      // its own fallback — a duplicated word that reads like a mistake.
+      trackLabel: doc.frontMatter.series ? track.label + " — " + doc.frontMatter.series
+                                         : track.label,
       frontMatter: doc.frontMatter,
       description: description(volume, doc),
       sourcePath: volume.sourcePath,
@@ -131,8 +138,8 @@ function buildOne(volume, track, siblings) {
       diagramCount: diagramCount,
       siblings: siblings,
       ownHref: volume.ownHref,
-      prev: volume.prev ? { href: volume.prev.outFile, label: volume.prev.label } : null,
-      next: volume.next ? { href: volume.next.outFile, label: volume.next.label } : null
+      prev: volume.prev ? { href: volume.prev.outFile, label: volume.prev.title } : null,
+      next: volume.next ? { href: volume.next.outFile, label: volume.next.title } : null
     }),
     // Handed to the assertions so conservation compares against the same
     // parsed tree the page was rendered from.
@@ -165,6 +172,28 @@ function cheatsheetHref(volume) {
   return idx[volume.track + "/" + volume.order] || null;
 }
 
+// Resolves each volume's display title before any page is rendered.
+//
+// The prev/next pager labels a volume by name, so a volume's title must be
+// known before its *neighbours* render — otherwise java-02's next link reads
+// "java 03 core java" instead of "Core Java". Resolving here and reusing the
+// parse keeps that to one read per file rather than two.
+//
+// The fallback is the filename slug, which is what a volume gets when it has
+// neither a `series` line nor a `Part N` heading. Measured across the corpus
+// that is now zero volumes, but it is the honest last resort rather than an
+// empty cell.
+function resolveTitles(volume) {
+  var parsed = md.parse(fs.readFileSync(path.join(ROOT, volume.sourcePath), "utf8"));
+  var heading = null;
+  parsed.blocks.forEach(function (b) {
+    if (!heading && b.type === "heading" && b.level === 1) heading = b.text;
+  });
+  volume.title = index.titleFor(volume, parsed.frontMatter, heading);
+  volume.parsed = parsed;
+  return volume;
+}
+
 function main() {
   var checkOnly = process.argv.indexOf("--check") !== -1;
   var catalogue = collect();
@@ -172,12 +201,14 @@ function main() {
   var failures = [];
 
   catalogue.tracks.forEach(function (track) {
+    track.volumes.forEach(resolveTitles);
+
     var siblings = track.volumes.map(function (v) {
-      return { href: v.outFile, label: v.label };
+      return { href: v.outFile, label: v.title };
     });
 
     track.volumes.forEach(function (volume) {
-      var built = buildOne(volume, track, siblings);
+      var built = buildOne(volume, track, siblings, volume.parsed);
       var target = path.join(OUT, volume.outPath);
 
       if (!checkOnly) {
