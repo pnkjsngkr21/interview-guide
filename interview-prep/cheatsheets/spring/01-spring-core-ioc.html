@@ -864,7 +864,8 @@ class OrderAuditListener {
         <code>@Transactional</code> call from it starts a <em>new</em> transaction. It is the
         right default for "notify the world" and the wrong choice for "make sure two writes
         agree".</p>
-        <p><strong>Async failures vanish.</strong> The default
+        <p><strong>Async failures vanish.</strong> The multicaster has no executor configured, so it is
+        synchronous and listener latency is the publisher's latency. The trap is the fix: a
         <code>SimpleAsyncTaskExecutor</code> creates a <strong>new thread per task</strong>, so
         adding asynchrony without configuring an executor converts a latency problem into
         unbounded thread creation. And an exception in an <code>@Async</code> listener goes to
@@ -988,7 +989,7 @@ class ProdPayments { }</code></pre>
         <div class="number"><span class="number__value">3 / 8 / 12</span><span class="number__label">command line, OS env vars, in-jar <code>application.yml</code> &mdash; in that order</span></div>
         <div class="number"><span class="number__value">7</span><span class="number__label">enterprise service interfaces separating <code>ApplicationContext</code> from <code>BeanFactory</code></span></div>
         <div class="number"><span class="number__value">3,900 / 4,000</span><span class="number__label">framework beans a <code>ROLE_APPLICATION</code> filter removes</span></div>
-        <div class="number"><span class="number__value">1</span><span class="number__label">thread created per task by the default <code>SimpleAsyncTaskExecutor</code></span></div>
+        <div class="number"><span class="number__value">1</span><span class="number__label">thread created per task by a <code>SimpleAsyncTaskExecutor</code> &mdash; not the multicaster default, which is synchronous</span></div>
         <div class="number"><span class="number__value">120ms &rarr; 2.4s</span><span class="number__label">p99 after a synchronous listener made a blocking call</span></div>
         <div class="number"><span class="number__value">5s</span><span class="number__label">the form that binds to a <code>Duration</code> &mdash; or ISO <code>PT5S</code>, never a bare 5</span></div>
         <div class="number"><span class="number__value">5s vs 60s</span><span class="number__label">startup before and after narrowing a <code>basePackages</code> scan</span></div>

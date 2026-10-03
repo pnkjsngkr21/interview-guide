@@ -415,7 +415,7 @@
           <path class="edge edge--warn" d="M 600 104 L 600 170 Q 600 196 578 196 L 400 196 L 398 218"
                 marker-end="url(#arw-s11-c)"/>
           <text class="edge-label" x="608" y="160" text-anchor="middle">after waitDurationInOpenState</text>
-          <text class="edge-label label--sub" x="608" y="176" text-anchor="middle">10s &mdash; a trial request</text>
+          <text class="edge-label label--sub" x="608" y="176" text-anchor="middle">60s by default &mdash; a trial request</text>
 
           <path class="edge edge--good" d="M 262 240 Q 120 240 100 178 L 100 106"
                 marker-end="url(#arw-s11-c)"/>
@@ -1042,7 +1042,7 @@ public void on(OrderPlacedEvent event) {
         <div class="number"><span class="number__value">256</span><span class="number__label">spring-cloud-loadbalancer cache capacity, per entry &mdash; the silent latency spike</span></div>
         <div class="number"><span class="number__value">100 / 20</span><span class="number__label">sliding window vs minimum calls &mdash; window below the minimum means the breaker never opens</span></div>
         <div class="number"><span class="number__value">75&ndash;90%</span><span class="number__label">where failureRateThreshold belongs, not 50%</span></div>
-        <div class="number"><span class="number__value">10s / 10</span><span class="number__label">waitDurationInOpenState and the half-open probe budget</span></div>
+        <div class="number"><span class="number__value">60s / 10</span><span class="number__label">waitDurationInOpenState default and the half-open probe budget</span></div>
         <div class="number"><span class="number__value">27&times;</span><span class="number__label">downstream calls from one request: 3 retries at 3 layers</span></div>
         <div class="number"><span class="number__value">10&ndash;20%</span><span class="number__label">retry budget as a share of total traffic, shed under load</span></div>
         <div class="number"><span class="number__value">&infin;</span><span class="number__label">what a per-instance @RateLimiter does &mdash; 10 rps &times; 50 instances is 500 rps</span></div>

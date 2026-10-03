@@ -243,7 +243,7 @@ public JpaTransactionManager transactionManager(
         interviewers ask about: a task handed to an executor does <strong>not</strong> inherit
         the transaction — the new thread has an empty holder, borrows its own connection, and
         commits independently, so the async write is neither committed with nor rolled back with
-        the request that scheduled it. `ThreadLocal` context propagation is the reactive answer
+        the request that scheduled it. <code>ThreadLocal</code> context propagation is the reactive answer
         (<a href="10-webflux-project-reactor.html">Volume 10</a>); for MVC the honest answer is a
         separate unit of work with its own <code>@Transactional</code> method.</p>
       </div>

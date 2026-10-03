@@ -1204,7 +1204,7 @@ class RuleEngine {
       <div class="numbers">
         <div class="number"><span class="number__value">7</span><span class="number__label">steps in the singleton creation sequence</span></div>
         <div class="number"><span class="number__value">3</span><span class="number__label">levels in the singleton cache — and the third holds a factory</span></div>
-        <div class="number"><span class="number__value">4</span><span class="number__label">Aware calls made when only ApplicationContextAware is implemented</span></div>
+        <div class="number"><span class="number__value">1</span><span class="number__label">Aware calls made when only <code>ApplicationContextAware</code> is implemented &mdash; it extends only the <code>Aware</code> marker, and each callback is tested independently</span></div>
         <div class="number"><span class="number__value">1,000&times;</span><span class="number__label">scope lookups per request for a 20-method bean called 50 times</span></div>
         <div class="number"><span class="number__value">0</span><span class="number__label">destruction callbacks a prototype ever gets — there is no flag to enable one</span></div>
         <div class="number"><span class="number__value">2.6</span><span class="number__label">Boot version where circular references default to false</span></div>
