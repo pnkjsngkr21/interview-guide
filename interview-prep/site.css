@@ -83,7 +83,6 @@
 
   /* Monochrome remap. --accent is ink, not a hue. See the file header. */
   --accent: #141716;
-  --accent-soft: #e9edeb;
   --focus: #141716;
 
   /* The only saturated colour in the system, and it is all meaning. */
@@ -107,6 +106,13 @@
   --tok-fn: #2f5fbf;
   --tok-ann: #b03325;
 
+  /* The diagram tokens below repeat values that already exist above —
+     --diagram-bad == --trap, --diagram-warn == --tradeoff, --diagram-good ==
+     --must, --diagram-box-line == --line-strong. That is deliberate and it is
+     NOT duplication to be cleaned up: a diagram's "bad" edge and a trap
+     callout are different concepts that happen to agree today. Collapsing
+     them into one token would make a future "make traps redder" silently
+     recolour every diagram on the site. Keep them as separate names. */
   --diagram-line: #8f9795;
   --diagram-box: #eaeeec;
   --diagram-box-line: #b3bcba;
@@ -168,7 +174,6 @@
     --line-strong: #414947;
 
     --accent: #e8ebe9;
-    --accent-soft: #1b1f1e;
     --focus: #e8ebe9;
 
     --trap: #f08b82;
@@ -277,6 +282,15 @@ a:hover {
   text-decoration-color: currentColor;
 }
 
+/* Inline code breaks rather than overruns its column. A long identifier —
+   `ConcurrentHashMap#computeIfAbsent`, a resource path, a stack-trace line — is
+   a single unbreakable token, and `nowrap` pushes the whole document sideways
+   instead of wrapping. This used to be `nowrap` with a `white-space: normal`
+   escape scoped to `.main--guide`; the cheatsheets carry `<main class="main">`
+   with no `--guide`, so they inherited the bare `nowrap` and 369 spans at 30+
+   characters could not wrap. The escape belongs to both page shapes, so it
+   lives here on the base rule. Block code (`pre.snippet`, `pre.diagram`) sets
+   `white-space: pre` independently and is unaffected. */
 code {
   font-family: var(--font-mono);
   font-size: 0.88em;
@@ -284,7 +298,8 @@ code {
   border: 1px solid var(--line);
   border-radius: 3px;
   padding: 0.08em 0.32em;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 strong {
@@ -299,13 +314,29 @@ strong {
 
 /* ---------- Layout ---------- */
 
-/* The fold: one continuous hairline down the full page height. */
+/* The fold: one continuous hairline down the full page height.
+
+   1120px, down from 1440px. At 1440 the content column was ~1074px while a
+   prose paragraph is only ~532px wide (`--measure-guide` is 64ch, and `ch` is
+   the width of a digit, so 64ch renders about 85 real characters — already at
+   the top of the comfortable range). Prose therefore filled barely half the
+   column and left ~540px of dead space to the right of every paragraph while
+   tables ran the full width — the lopsided page the measure comments describe.
+
+   Widening the measure instead would close the gap but push lines past ~130
+   characters, so the page is narrowed instead and the prose measure is left
+   alone. At 1120 the content column is ~760px and prose fills ~70% of it.
+   Tables lose width but still fit four columns, and `.table-wrap` already
+   scrolls horizontally for the five-column ones.
+
+   Re-measure before widening this back: the constraint is the widest table
+   plus the prose measure, not taste. See also the --sidebar-w comment. */
 .page {
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   gap: 0;
   align-items: start;
-  max-width: 1440px;
+  max-width: 1120px;
   margin: 0 auto;
 }
 
@@ -903,9 +934,8 @@ figcaption strong {
   color: var(--fg-muted);
 }
 
-.pagefoot .pager {
-  margin-left: auto;
-}
+/* `.pagefoot .pager { margin-left: auto }` used to restate what `.pager`
+   already sets; the single `.pager` rule is the only place it is needed. */
 
 /* ---------- Empty state ---------- */
 
@@ -1184,19 +1214,8 @@ figcaption strong {
   max-width: var(--measure-guide);
 }
 
-/* The base sets `white-space: nowrap` on inline `code`, which is right for
-   short identifiers on a wide page but pushes the whole document sideways in
-   a narrow column when a span is long — `ConcurrentHashMap#computeIfAbsent` is
-   a single unbreakable token. Wrapping is allowed only as a last resort. */
-.main--guide p code,
-.main--guide li code,
-.main--guide td code,
-.main--guide h2 code,
-.main--guide h3 code,
-.main--guide h4 code {
-  white-space: normal;
-  overflow-wrap: break-word;
-}
+/* Inline `code` wrapping is handled once on the base `code` rule above, so it
+   applies to the cheatsheets too. This section adds no wrap override. */
 
 /* ---------- Headings ---------- */
 
