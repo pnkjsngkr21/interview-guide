@@ -1,7 +1,9 @@
 # Spring interview-prep — Gap report
 
 **Date:** 2026-10-03
-**Scope:** `interview-prep/spring/*.html` (11 volumes) and `interview-prep/cheatsheets/spring/*.html` (11 cheatsheets). No other track was read or modified.
+**Scope:** `interview-prep/spring/*.html` (12 volumes) and `interview-prep/cheatsheets/spring/*.html` (12 cheatsheets). No other track was read or modified.
+**Last updated:** 2026-10-04 (seventh pass). The three remaining Medium gaps — structured logging,
+`@Scheduled`, and OpenTelemetry depth — are all closed; see §4.
 
 Baseline: all 22 pages PASS `check.js --volume` / `--cheatsheet` with exit 0, before and after this pass.
 
@@ -85,9 +87,10 @@ backticks and zero bold leaks outside `<pre>`, with only legitimate `/**` glob p
 | **Messaging — `KafkaTemplate`, `@KafkaListener`, `@RabbitListener`** | High | **Closed 2026-10-04 — added as `spring/spring-12-messaging-kafka-rabbitmq.html` + matching cheatsheet.** Version-tagged spring-kafka / spring-amqp **4.1.1** (the research agent corrected my 3.3.x/3.4.x premise — 4.1.1 is current GA). 4 chapters + scenario bank, 23 questions. Outbox and saga material **links** to vol11 §7 rather than restating it, per the dedup rule. |
 | Virtual threads | High | **Closed 2026-10-04 — added as vol09 §5.8**, plus cheat09 §5 and an extended `@ConditionalOnThreading` row in vol07/cheat07. Placed in vol09 because §5.4's Tomcat arithmetic and §5.5's pool arithmetic are the argument virtual threads qualify. The research falsified seven pieces of folklore before anything was written — most importantly that `synchronized` still pins (false from JDK 24, JEP 491) and that `-Djdk.tracePinnedThreads` is the way to find pinning (removed in JDK 24). See the fifth pass in `change-log.md`. |
 | Boot 4 / Framework 7 | Medium | Not covered. Justified: Boot 4 is recent enough that interview pools still centre on 3.x, and the corpus consistently tags its claims to 3.x. Adding it would require re-verifying every version tag in the set. |
-| Structured logging | Medium | Not covered. |
-| `@Scheduled` | Medium | Not covered. |
-| Cheat-sheet sync gaps (cheat07 missing 3.5/1.5/2.5; cheat08 missing attack-surface table, `AuthorizationManager`, session fixation; cheat11 missing ch. 1, 7, 8) | Medium | **cheat11 closed 2026-10-04** — sections 9–11 added for the trade-off, service-to-service security and antipatterns, each linking back to vol11 rather than restating. cheat07 and cheat08 still open. |
+| Structured logging | Medium | **Closed 2026-10-04 — added as vol07 §7.7**, plus a cheat07 block. The research falsified six claims before anything was written, most importantly that upgrading to 3.4 turns JSON on (it does not — there is **no default format**) and that the feature is Logback-only (Log4j2 is supported through `StructuredLogLayout`). Two properties that do not exist in any Boot version are now called out by name, because they are the ones candidates reach for. See the seventh pass in `change-log.md`. |
+| `@Scheduled` | Medium | **Closed 2026-10-04 — added as vol09 §5.9**, plus a cheat09 block, immediately after §5.8 because virtual threads are what qualify the advice. The research falsified the `timeUnit` default (it is **milliseconds**, not seconds — so `fixedRate = 5` is 5 ms) and the thread-name-prefix default (`scheduling-`, not `task-`). Where the documentation genuinely runs out — single-task `fixedRate` overrun — the section says so rather than filling the gap. See the seventh pass. |
+| Cheatsheet sync gaps (cheat07 missing 3.5/1.5/2.5; cheat08 missing attack-surface table, `AuthorizationManager`, session fixation; cheat11 missing ch. 1, 7, 8) | Medium | **All closed 2026-10-04** — cheat11 chapters 9–11 for the trade-off, service-to-service security and antipatterns; cheat07 §1.5/§2.5/§3.5; cheat08's attack-surface table, `AuthorizationManager`, authorization-server split and session fixation. |
+| OpenTelemetry — "thin, one diagram, one paragraph" | Medium | **Closed 2026-10-04 — deepened as vol11 §5.3 and §5.4**, plus a cheat11 block. The falsification worth recording: **`@Observed` does not exist in Spring Framework at all** — it is `io.micrometer.observation.annotation.Observed`, `@since 1.10.0` of Micrometer. Separately, the Boot metrics reference page claims the `ObservedAspect` is auto-configured by default and its own source says otherwise (unverified item 11). The corpus asserted neither `@Observed` nor `jdbc.queries` nor `management.tracing`, so this was purely additive. |
 | Boot 2 → 3 migration as a dedicated treatment | High | Partial. The individual Jakarta/deprecation facts are covered in place; a consolidated migration chapter does not exist. |
 
 ## 5. Agent findings checked and rejected

@@ -1036,7 +1036,76 @@ cfg.setLeakDetectionThreshold(0);  // DEFAULT off — set 5000 while debugging, 
           semaphore.</p>
         </div>
       </div>
-    </section>
+<h3>Scheduling</h3>
+        <p><strong>The default scheduler is
+        <code>spring.task.scheduling.pool.size=1</code> — one thread, for every
+        <code>@Scheduled</code> method in the application.</strong> Two jobs, one slow one, and
+        the fast one stops running: that is the co-tenancy failure, and it presents as "the cron
+        job became unreliable" with nothing in the logs. Full treatment in
+        <a href="../../spring/spring-09-testing-production-troubleshooting.html#59-scheduling-the-single-threaded-pool-nobody-sized">vol09
+        §5.9</a>.</p>
+        <table class="table--decision">
+          <caption><code>@Scheduled</code> attribute defaults — three are sentinels, and one is
+          milliseconds</caption>
+          <thead><tr><th>Attribute</th><th>Default</th><th>The trap</th></tr></thead>
+          <tbody>
+            <tr><td><code>cron</code></td><td><code>""</code></td>
+              <td>A cron trigger and a fixed rate can coexist on one method &mdash; both fire</td></tr>
+            <tr><td><code>fixedRate</code></td><td><code>-1L</code></td>
+              <td>Sentinel, not a duration</td></tr>
+            <tr><td><code>fixedDelay</code></td><td><code>-1L</code></td>
+              <td>Sentinel. Delay is measured from the <em>end</em> of the previous run</td></tr>
+            <tr><td><code>initialDelay</code></td><td><code>-1L</code></td>
+              <td>Sentinel</td></tr>
+            <tr><td><code>timeUnit</code></td><td><strong>MILLISECONDS</strong></td>
+              <td><code>fixedRate = 5</code> is <strong>every 5&nbsp;ms</strong>, not 5 seconds.
+              This is the most expensive mistake in the chapter</td></tr>
+            <tr><td><code>zone</code></td><td><code>""</code></td>
+              <td>Empty means the server default zone, so the job moves when DST does</td></tr>
+          </tbody>
+        </table>
+        <p>Methods <strong>must return <code>void</code> and must take no arguments</strong> &mdash;
+        a non-void return or a parameter is a startup failure, not a silent no-op.</p>
+        <pre class="snippet" data-lang="properties" data-title="Scheduler properties and prefixes"><code>spring.task.scheduling.pool.size=1                # ignored under virtual threads
+spring.task.scheduling.thread-name-prefix=scheduling-  # NOT "task-"
+spring.task.scheduling.shutdown.await-termination=false</code></pre>
+        <div class="callout callout--trap">
+          <span class="callout__label">Interview trap — what happens when a fixed-rate task
+          overruns?</span>
+          <p>For <code>@Scheduled</code> methods declared <strong>side by side</strong> in one
+          class, the Framework 6.2 javadoc is explicit that they <em>"may overlap and execute
+          multiple times in parallel or in immediate succession."</em> For a <strong>single</strong>
+          task's own <code>fixedRate</code> overrun behaviour, the 6.2 javadoc and the reference
+          page are <strong>silent</strong>. Say so rather than guessing: the folklore answer
+          ("it runs concurrently with itself") is asserted far more confidently than it is
+          documented. What <em>is</em> documented is the scheduling model's shape, and separating
+          that from the undocumented part is exactly what a careful answer should do.</p>
+        </div>
+        <div class="callout callout--scale">
+          <span class="callout__label">Scaling reality check — one thread, and virtual threads do
+          not make it twenty</span>
+          <p>Under virtual threads the scheduler switches to
+          <code>SimpleAsyncTaskScheduler</code>, which <strong>ignores every pooling property</strong>
+          &mdash; so <code>pool.size=1</code> stops being the bottleneck, and so does every attempt
+          to tune it. The Framework 6.2 javadoc is explicit about the trade: <em>"With virtual
+          threads, fixed rates and cron triggers are recommended over fixed delays. Fixed-delay
+          tasks operate on a single scheduler thread."</em> A fixed-delay job keeps its serial,
+          single-threaded execution under virtual threads; a fixed-rate or cron job does not.
+          Migrating a set of fixed-delay jobs to virtual threads therefore changes nothing except
+          the thread names.</p>
+        </div>
+        <div class="callout callout--must">
+          <span class="callout__label">Must remember — the framework fallback is also one
+          thread</span>
+          <p>With no <code>TaskScheduler</code> or <code>ScheduledExecutorService</code> bean,
+          Framework 6.2 falls back to
+          <code>Executors.newSingleThreadScheduledExecutor()</code>. So <strong>both</strong>
+          routes land in the same place: no Boot auto-configuration <em>and</em> no bean of your
+          own still means one thread. And the observation to opt into is
+          <code>tasks.scheduled.execution</code>, which is <em>not</em> on by default &mdash; the
+          <code>ScheduledTaskRegistrar</code> only receives an <code>ObservationRegistry</code> if
+          you supply one through a <code>SchedulingConfigurer</code>.</p>
+        </div>    </section>
 
     <!-- ============ 6 ============ -->
     <section id="ch6" data-filter-target>
@@ -1368,7 +1437,7 @@ CircuitBreaker paymentBreaker(CircuitBreakerRegistry registry) {
         <div class="number"><span class="number__value">137</span><span class="number__label">exit code of a kernel OOM-kill: no heap dump, no <code>OutOfMemoryError</code></span></div>
         <div class="number"><span class="number__value">3 &times; 10s</span><span class="number__label">thread dumps before you diagnose anything at all</span></div>
         <div class="number"><span class="number__value">1&ndash;2%</span><span class="number__label">JFR <code>default</code> overhead &mdash; leave it on; <code>profile</code> is 5&ndash;10%</span></div>
-        <div class="number"><span class="number__value">1024</span><span class="number__label">flag combinations at ten dynamic flags &mdash; none of them enumerable</span></div>
+        <div class="number"><span class="number__value">1</span><span class="number__label">default <code>spring.task.scheduling.pool.size</code> — one thread for every <code>@Scheduled</code> method</span></div><div class="number"><span class="number__value">1024</span><span class="number__label">flag combinations at ten dynamic flags &mdash; none of them enumerable</span></div>
       </div>
     </section>
 

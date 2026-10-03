@@ -559,6 +559,99 @@ warnings that *were* mine on first write — an uncaptioned table and a trap cal
 | Tomcat/Jetty virtual-thread support; no Undertow path | `TomcatVirtualThreadsWebServerFactoryCustomizer`, `JettyVirtualThreadsWebServerFactoryCustomizer` (Boot 3.5.x); full-tree file listing |
 | Do not pool virtual threads to limit concurrency — use semaphores | JEP 444 |
 
+## Seventh pass — logging, `@Scheduled`, OpenTelemetry (2026-10-04)
+
+Three Medium-rated gaps from the original checklist, closed together. Unlike the sixth pass this
+was **purely additive** — see "Nothing to purge" below for why.
+
+### What was added
+
+| File | Section added | Core of it |
+| --- | --- | --- |
+| `spring/spring-07-spring-boot-auto-configuration.html` | **§7.7 Structured Logs — and the Thing You Actually Ship** | The two `logging.structured.format.*` properties and their three format names; **no default**; Logback *and* Log4j2 both supported; the log groups (`web`, `sql`) and the `logging.group.*` property name; why correlation IDs come from Micrometer Tracing, not a logging property; MDC → JSON fields. 5 Common Mistakes bullets, 3 new Q&A (Q10–12), 1 Further Reading link. |
+| `spring/spring-09-testing-production-troubleshooting.html` | **§5.9 Scheduling — the Single-Threaded Pool Nobody Sized** | `pool.size=1` co-tenancy failure; the six `@Scheduled` attribute defaults; the milliseconds trap; the **documented `fixedRate` overrun gap**; the virtual-threads `fixedDelay` trap quoted from the javadoc; `scheduling-` vs `task-`; both routes to a single-threaded scheduler; the opt-in `tasks.scheduled.execution` observation. 7 Common Mistakes bullets, 3 new Q&A (Q13–15), 1 Further Reading link. |
+| `spring/spring-11-spring-cloud-distributed-systems.html` | **§5.3** (annotation subsection) + **§5.4** (dependency table) | `@Observed` is Micrometer, not Spring; its three attributes; the `ObservedAspect` and the property that gates it; the two OpenTelemetry dependency sets and the Boot 4.2 removal. 3 Common Mistakes bullets, 3 new Q&A (Q9, Q10, Q12 — renumbering Q8→Q11), 2 Further Reading links. |
+| `cheatsheets/spring/07-…` | `## Structured logging` inside the Actuator section | Format table, snippet, 2 callouts, 1 number card. |
+| `cheatsheets/spring/09-…` | `### Scheduling` inside Pools/memory/triage | Attribute-defaults table, properties snippet, 3 callouts, 1 number card. |
+| `cheatsheets/spring/11-…` | `### Instrumenting it` inside Tracing | Dependency-set table, 2 callouts, 1 number card. |
+
+Masthead counts updated in all three volumes to match the new question and diagram totals
+(vol07 108→111 questions / 21→22 diagrams; vol09 102→111 / 14→15; vol11 114→117).
+
+### The falsifications
+
+Every one of these was in my head before this pass and was **wrong**. The table is the reason the
+pass was worth doing.
+
+| What I would have written | Verified truth | Source |
+| --- | --- | --- |
+| `@Observed` is a Spring Framework annotation | It does **not exist in Spring Framework**. It is `io.micrometer.observation.annotation.Observed`, `@since 1.10.0` of Micrometer Observation. `org/springframework/stereotype/` contains exactly `Component`, `Controller`, `Indexed`, `Repository`, `Service`, `package-info` | jar inspection + `ObservationAutoConfigurationTests` |
+| Boot auto-configures the `ObservedAspect` by default, so `@Observed` just works | **The reference page is wrong.** `ObservationAutoConfiguration.ObservedAspectConfiguration` carries `@ConditionalOnBooleanProperty("management.observations.annotations.enabled")` with **no** `matchIfMissing`, and `matchIfMissing()` defaults to `false` — so the bean does not exist unless the property is explicitly `true`. Boot's own test sets it in the shared context runner | `ObservationAutoConfiguration.java` (3.5.x **and** `main`), `ConditionalOnBooleanProperty.java` |
+| Structured logging is Logback-only | Boot ships `StructuredLogEncoder` (Logback) **and** `StructuredLogLayout` (Log4j2), both driven by the same two properties | [Structured logging reference](https://docs.spring.io/spring-boot/reference/features/logging.html#features.logging.structured) |
+| Upgrading to Boot 3.4 makes logs JSON | **No default format.** Set neither `logging.structured.format.*` property and the output is the 3.3 plain-text pattern | same |
+| `logging.logback.group.*` is the property | The property is `logging.group.*`; there is no `logging.logback.group` property. Predefined groups are exactly `web` and `sql` | same |
+| `spring.mvc.log` / `spring.web.log` control request logging | **Neither property exists in any Boot version.** Correlation IDs come from Micrometer Tracing; `logging.pattern.correlation` only renders the result | grepped the reference; property-metadata sweep |
+| `logging.group.sql` gives you jOOQ SQL | It covers `org.springframework.jdbc.core`, `org.hibernate.SQL`, `org.jooq.tools.LoggerListener` — `LoggerListener` is a different logger, not jOOQ's SQL logger | same |
+| `spring.task.scheduling.thread-name-prefix` defaults to `task-` | It defaults to **`scheduling-`**; `task-` is `spring.task.execution.thread-name-prefix` | Boot reference |
+| `@Scheduled` has no `timeUnit`, or defaults to seconds | `timeUnit` defaults to **`MILLISECONDS`**. `fixedRate = 5` is every 5 ms | `@Scheduled` javadoc, Framework 6.2 |
+| Virtual threads make scheduled tasks parallel | `SimpleAsyncTaskScheduler` "will ignore any pooling related properties" — and the javadoc says fixed-delay tasks still "operate on a single scheduler thread" | `@Scheduled` javadoc, Framework 6.2 |
+| Default trace sampling is 100%, or tracing is off unless enabled | **`management.tracing.sampling.probability` defaults to `0.10`** in Boot 3.x and 4.x. `TracingProperties.Sampling.probability` is initialised to `0.10f` | `TracingProperties.java` |
+| `@KafkaListener`-style OTel bridge guidance is current | The Zipkin route (`spring-boot-micrometer-tracing-opentelemetry` + `micrometer-tracing-bridge-otel` + `spring-boot-zipkin` + `opentelemetry-exporter-zipkin`) is **deprecated, removal in Boot 4.2**. `spring-boot-starter-opentelemetry` is the forward path | [Tracing reference](https://docs.spring.io/spring-boot/reference/actuator/tracing.html) |
+
+### A documentation gap, documented rather than filled
+
+The Framework 6.2 `@Scheduled` javadoc explicitly says that co-located `@Scheduled` declarations
+"may overlap and execute multiple times in parallel or in immediate succession" — but it is
+**silent on single-task `fixedRate` overrun**. The folklore answer ("it runs concurrently with
+itself") is asserted far more confidently than it is documented.
+
+Both vol09 §5.9 and cheat09 state the documented part, then say plainly that the single-task case
+is undocumented. Filling a gap from memory is exactly what safety rule 4 forbids.
+
+### Nothing to purge
+
+Grepped the whole Spring corpus before writing any of it:
+
+```
+@Observed                = 0 occurrences
+jdbc.queries             = 0 occurrences
+management.tracing       = 0 occurrences
+logging.structured       = 0 occurrences
+```
+
+So all three topics are purely additive — there was no folklore to correct and no contradiction to
+leave behind. (I also confirmed there is **no** `jdbc.queries` observation in `spring-jdbc` — zero
+observation classes in the jar; Boot gives you `jdbc.connections.*` pool gauges instead. Since the
+corpus never claimed it, nothing needed removing.)
+
+### Verification
+
+- **24 checks**: `check.js --volume` on all 12 volumes, `--cheatsheet` on all 12 cheatsheets, plus
+  `--index`. All exit 0.
+- **Encoding invariants across all 24 Spring pages**: CR = 0, TAB = 0, trailing whitespace = 0,
+  emoji outside `<pre>` = 0, `pre.diagram` carrying `data-lang` = 0.
+- Three defects found and fixed during the pass:
+  1. The vol07 Further Reading `<li>` was inserted **before** the `<h4>`/`<ul>` instead of inside
+     the list. The checker does not catch this; caught by reading the emitted HTML back.
+  2. A scripted splice silently dropped one of the three new vol11 Q&A blocks. Caught by the
+     question count not moving by the expected amount; re-added as Q12.
+  3. Two trailing-whitespace lines from the number-card insertions in cheat07 and cheat11.
+- **`check.js` was NOT modified this pass.** Counts are unchanged because no file was created.
+
+### Unverified / needs human check (new)
+
+10. **Single-task `fixedRate` overrun behaviour under Spring's scheduler is undocumented** in the
+    Framework 6.2 javadoc and the reference page. The corpus says so explicitly rather than
+    guessing. A check against `FixedRateTask` / `ReschedulingRunnable` in the 6.2 or 7.0 source
+    would settle it — and it is the kind of question that separates a candidate who read the
+    source from one who repeated the folklore.
+11. **Boot's metrics reference page contradicts Boot's own source** on whether `ObservedAspect` is
+    auto-configured. I wrote the source behaviour (`management.observations.annotations.enabled`
+    must be `true`). If Spring's docs are corrected, or if the intended behaviour actually *is*
+    on-by-default, §5.3 and cheat11 need a one-line edit. Worth raising upstream either way — this
+    is the third time in this corpus that a Spring reference page's prose has been contradicted by
+    its own code.
+
 ## Unverified / needs human check
 
 1. ~~**Virtual threads are thin**~~ — **CLOSED 2026-10-04.** Added as vol09 §5.8 with a matching

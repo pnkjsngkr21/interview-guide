@@ -1031,7 +1031,60 @@ public void on(OrderPlacedEvent event) {
       a customer), or the typical case &mdash; your sample is biased towards errors and slow
       requests, so percentiles computed from kept traces will not match metric percentiles and
       should not be compared.</p>
-    </section>
+
+<h3>Instrumenting it: <code>@Observed</code> and the OTel dependency set</h3>
+      <p>An <code>Observation</code> is not automatically a span &mdash; a
+      <strong>tracer bridge has to be present</strong>
+      (<code>micrometer-tracing-bridge-otel</code> or <code>-bridge-brave</code>). Without one you
+      get excellent metrics and <strong>no traces, with no error and no warning</strong>; that is
+      the most common gap in an instrumented application. Full treatment in
+      <a href="../../spring/spring-11-spring-cloud-distributed-systems.html#53-micrometer-tracing-and-the-observation-gap">vol11
+      §5.3&ndash;5.4</a>.</p>
+      <table class="table--decision">
+        <caption>The OpenTelemetry dependency sets &mdash; one of them is deprecated with a removal
+        date</caption>
+        <thead><tr><th>Goal</th><th>Dependencies</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>OpenTelemetry &rarr; OTLP collector</td>
+            <td><code>spring-boot-starter-opentelemetry</code></td>
+            <td>The forward path on Boot 4</td></tr>
+          <tr><td>OpenTelemetry &rarr; Zipkin</td>
+            <td><code>spring-boot-micrometer-tracing-opentelemetry</code>,
+              <code>micrometer-tracing-bridge-otel</code>, <code>spring-boot-zipkin</code>,
+              <code>opentelemetry-exporter-zipkin</code></td>
+            <td><strong>Deprecated &mdash; removal in Boot 4.2</strong></td></tr>
+        </tbody>
+      </table>
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — <code>@Observed</code> is Micrometer, and its
+        aspect is opt-in</span>
+        <p>There is no <code>@Observed</code> in Spring Framework:
+        <code>org.springframework.stereotype</code> contains exactly <code>Component</code>,
+        <code>Controller</code>, <code>Indexed</code>, <code>Repository</code>,
+        <code>Service</code>. The real annotation is
+        <code>io.micrometer.observation.annotation.Observed</code>, <code>@since 1.10.0</code>, with
+        three attributes: <code>name</code>, <code>contextualName</code> and
+        <code>lowCardinalityKeyValues</code>, all defaulting to empty. The annotation is also inert
+        on its own &mdash; an <code>ObservedAspect</code> bean must intercept it. <strong>The Boot
+        reference page says that aspect is auto-configured by default. The source says
+        otherwise:</strong> the nested configuration carries
+        <code>@ConditionalOnBooleanProperty("management.observations.annotations.enabled")</code>
+        with no <code>matchIfMissing</code>, and that attribute defaults to <code>false</code> &mdash;
+        so unless you set the property to <code>true</code>, the bean does not exist and
+        <code>@Observed</code> methods are silently uninstrumented. Boot's own test for the happy
+        path sets the property explicitly, which is the giveaway.</p>
+      </div>
+      <div class="callout callout--must">
+        <span class="callout__label">Must remember — the sampling default is 0.10, not 0 or 1</span>
+        <p><code>management.tracing.sampling.probability</code> is <strong>0.10</strong> in Boot 3.x
+        and 4.x; <code>TracingProperties.Sampling.probability</code> is initialised to
+        <code>0.10f</code> and the reference page's stated reason is to prevent overwhelming the
+        trace backend. With the OTel bridge the sampler is
+        <code>parent-based-trace-id-ratio</code>, so a child inherits the parent's decision rather
+        than rolling its own &mdash; without that, traces would be assembled from independently
+        sampled spans and many would have holes. &quot;100%&quot; and &quot;off by default&quot; are
+        the two wrong answers.</p>
+      </div>    </section>
 
     <!-- ============ 9 ============ -->
     <section id="ch9" data-filter-target>
@@ -1210,6 +1263,7 @@ public void on(OrderPlacedEvent event) {
         <h2>Numbers worth memorising</h2>
       </div>
       <div class="numbers">
+        <div class="number"><span class="number__value">0.10</span><span class="number__label">default <code>management.tracing.sampling.probability</code> — Boot 3.x and 4.x</span></div>
         <div class="number"><span class="number__value">30s / 90s</span><span class="number__label">Eureka lease renewal vs expiration &mdash; renewal must be below expiration</span></div>
         <div class="number"><span class="number__value">5s</span><span class="number__label">client registry fetch interval; 30&ndash;60s bounded staleness when it fails</span></div>
         <div class="number"><span class="number__value">256</span><span class="number__label">spring-cloud-loadbalancer cache capacity, per entry &mdash; the silent latency spike</span></div>

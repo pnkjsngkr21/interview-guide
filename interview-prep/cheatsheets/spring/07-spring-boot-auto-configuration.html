@@ -1224,7 +1224,60 @@ class PaymentGatewayHealthIndicator implements HealthIndicator {
         large object graph is a genuine leak, because the registry holds it for the process
         lifetime.</p>
       </div>
-    </section>
+<h3>Structured logging</h3>
+      <p><strong>Boot 3.4+ can emit logs as JSON, and it is
+      <em>off unless you ask</em>.</strong> It is an encoder, not a new API &mdash; you keep
+      calling SLF4J, and the appender decides the wire format. Full treatment in
+      <a href="../../spring/spring-07-spring-boot-auto-configuration.html#77-structured-logs-and-the-thing-you-actually-ship">vol07
+      §7.7</a>.</p>
+      <table class="table--decision">
+        <caption>The two properties, and the value that turns them on &mdash; there is no default</caption>
+        <thead><tr><th>Property</th><th>Accepted values</th><th>Effect when unset</th></tr></thead>
+        <tbody>
+          <tr><td><code>logging.structured.format.console</code></td>
+            <td><code>ecs</code>, <code>gelf</code>, <code>logstash</code>, or a layout class FQCN</td>
+            <td><strong>Plain text</strong>, same pattern as 3.3</td></tr>
+          <tr><td><code>logging.structured.format.file</code></td>
+            <td>The same set</td><td>Plain text</td></tr>
+        </tbody>
+      </table>
+      <p>Works on <strong>both</strong> backends: a <code>StructuredLogEncoder</code> for Logback and
+      a <code>StructuredLogLayout</code> for Log4j2, driven by the same two properties. MDC pairs
+      become JSON fields automatically, and so do SLF4J fluent <code>addKeyValue</code> entries
+      &mdash; no schema, no per-call-site configuration.</p>
+      <pre class="snippet" data-lang="properties" data-title="Structured logging switched on"><code>logging.structured.format.console=ecs   # unset = plain text, NOT ECS
+# logging.structured.format.file=gelf      # same values, separate destination
+
+logging.group.sql=org.springframework.jdbc.core,org.hibernate.SQL
+logging.level.com.example.OrderService=DEBUG</code></pre>
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — four property names that do not
+        exist</span>
+        <p><code>spring.mvc.log</code> and <code>spring.web.log</code> <strong>exist in no Boot
+        version</strong> &mdash; there is no Spring-specific request-logging property; request
+        context comes from the actuator observations or from Micrometer Tracing. And there is no
+        <code>logging.logback.group</code> property either: the group property is
+        <code>logging.group.&lt;name&gt;</code>, while the <code>logging.logback</code> namespace
+        holds pattern, encoder and file settings, which is exactly why the wrong name sounds
+        plausible. The other two properties that <em>are</em> real and do something else are
+        <code>logging.pattern.correlation</code> (Micrometer Tracing's trace id rendered into a
+        <em>plain</em> pattern) and the two predefined groups <code>web</code> and <code>sql</code>
+        &mdash; where <code>sql</code> covers
+        <code>org.springframework.jdbc.core</code>, <code>org.hibernate.SQL</code> and
+        <code>org.jooq.tools.LoggerListener</code>, so turning it on does <em>not</em> give you
+        jOOQ's own SQL logger.</p>
+      </div>
+      <div class="callout callout--tradeoff">
+        <span class="callout__label">Trade-off — you pay per line for queryability</span>
+        <p>Structured output is larger, because field names repeat on every record where a
+        human-readable line amortised them. That cost lands on ingestion volume and index size, and
+        it is usually worth paying. It is also why console and file are configured separately: a
+        common and defensible arrangement is ECS on the <em>file</em> appender where a collector
+        ingests it, and readable text on the <em>console</em> for whoever is running
+        <code>kubectl logs</code>. One format quirk to know before a migration: Logstash renders
+        SLF4J markers as a <code>tags</code> array rather than flattening them, so a marker-based
+        idiom can silently vanish on that format.</p>
+      </div>    </section>
 
     <!-- ============ 8 ============ -->
     <section id="ops" data-filter-target>
@@ -1389,6 +1442,7 @@ readinessProbe:
         <h2>Numbers worth memorising</h2>
       </div>
       <div class="numbers">
+        <div class="number"><span class="number__value">3.4</span><span class="number__label">Boot version that added structured logging — <strong>opt-in, no default format</strong></span></div>
         <div class="number"><span class="number__value">10</span><span class="number__label">HikariCP <code>maximum-pool-size</code> &mdash; the starter default</span></div>
         <div class="number"><span class="number__value">200</span><span class="number__label">Tomcat <code>threads.max</code>; 200 &times; ~1MB stack &asymp; 200MB of heap before your data</span></div>
         <div class="number"><span class="number__value">true</span><span class="number__label"><code>open-in-view</code> &mdash; the default most services should override</span></div>

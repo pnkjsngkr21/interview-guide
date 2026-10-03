@@ -184,8 +184,9 @@ senior depth. A rating of High with `Partial` is a real gap and drives the work 
 | --- | --- | --- | --- |
 | Boot 2 → 3 migration, Jakarta rename | High | Partial | scattered; no dedicated treatment |
 | Boot 4 / Framework 7 | Medium | Not covered — see below for verified content | — |
-| Structured logging | Medium | Not covered | — |
-| `@Scheduled` | Medium | Not covered | — |
+| **Structured logging** | Medium | **Added 2026-10-04** — vol07 §7.7: the two `logging.structured.format.*` properties, three format names (`ecs`/`gelf`/`logstash`/custom FQCN), **no default format** (opt-in, not a 3.4 behaviour change), Logback **and** Log4j2 both supported, MDC → JSON fields, `logging.group.*` (predefined `web`, `sql`) and the fact that `logging.logback.group` is not a property, correlation IDs coming from Micrometer Tracing rather than `spring.mvc.log`/`spring.web.log` (neither exists) | v7 §7.7, cheat07 |
+| **`@Scheduled`** | Medium | **Added 2026-10-04** — vol09 §5.9: `spring.task.scheduling.pool.size=1` co-tenancy, the six attribute defaults (`fixedRate`/`fixedDelay`/`initialDelay` = `-1L`, `cron` = `""`, `zone` = `""`, and **`timeUnit` = MILLISECONDS**), the **documented gap** on single-task `fixedRate` overrun, the virtual-threads `fixedDelay` trap quoted from the javadoc, `scheduling-` vs `task-` thread-name-prefix, both routes to a single-threaded scheduler, and the opt-in `tasks.scheduled.execution` observation | v9 §5.9, cheat09 |
+| **OpenTelemetry / tracing depth** | Medium | **Added 2026-10-04** — vol11 §5.3/§5.4: **`@Observed` is Micrometer, not Spring Framework** (`io.micrometer.observation.annotation`, `@since 1.10.0`) with three attributes; the `ObservedAspect` is **opt-in** despite the reference page claiming otherwise; the two OTel dependency sets and the **Boot 4.2 removal** of the Zipkin route; `management.tracing.sampling.probability` = **0.10**. Also noted: there is **no `jdbc.queries` observation** — Boot gives `jdbc.connections.*` gauges instead | v11 §5.3–5.4, cheat11 |
 
 ### Addendum: Spring Boot 4 baseline (verified 2026-10-03, not yet in the corpus)
 
@@ -210,3 +211,29 @@ release notes. Recorded here so a future pass can write it without re-researchin
 the test. A typo'd field name or a missing bean definition is masked by a silently auto-created
 mock instead of surfacing a wiring error — a genuinely good senior-interview question, and the
 opposite of what `@MockBean` did. Set `enforceOverride = true` to get the old fail-fast behaviour.
+### Addendum: the Boot metrics reference page contradicts Boot's own source (verified 2026-10-04)
+
+The [Metrics reference page](https://docs.spring.io/spring-boot/reference/actuator/metrics.html) says:
+
+> "By default, Spring Boot will auto-configure an `ObservedAspect` to enable `@Observed` support."
+
+The source does not support that sentence. `ObservationAutoConfiguration.ObservedAspectConfiguration`
+carries `@ConditionalOnBooleanProperty("management.observations.annotations.enabled")` **without** a
+`matchIfMissing` argument, and `ConditionalOnBooleanProperty.matchIfMissing()` **defaults to
+`false`** — verified in both `3.5.x` and `main`. So the bean does not exist unless the property is
+set to `true`, which is exactly what Boot's own `ObservationAutoConfigurationTests` does in its
+shared context runner. The corpus states the source behaviour. Logged as unverified item 11.
+
+This is the third time in this corpus that a Spring reference page's prose has been contradicted by
+its own code (after the `HiddenHttpMethodFilter` default in `gap-report.md` item 6 and the
+`@MockBean` deprecation framing). Worth an upstream issue regardless of what we write.
+
+### Addendum: what Boot does **not** observe (verified, to prevent a future false claim)
+
+- **There is no `jdbc.queries` observation.** `spring-jdbc` contains zero observation classes
+  (jar inspection); what Boot actually publishes for JDBC is the HikariCP pool set,
+  `jdbc.connections.*` (usage, pending, max, min, idle, …).
+- The default observations that *do* exist are `http.server.requests`,
+  `http.client.requests`, `jms.message.publish`, `jms.message.process` and
+  `tasks.scheduled.execution` — and the last is **opt-in**, requiring an `ObservationRegistry` on
+  the `ScheduledTaskRegistrar` via a `SchedulingConfigurer`.
