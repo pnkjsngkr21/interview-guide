@@ -372,6 +372,20 @@ class OrderRepositoryTest {
         fields.</p>
       </div>
 
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap — <code>@MockitoBean</code> creates the mock
+        when no bean exists</span>
+        <p><code>enforceOverride</code> defaults to <code>false</code>
+        (<code>BeanOverrideStrategy.REPLACE_OR_CREATE</code>). Source wording: <em>"a mock will be
+        created if a corresponding bean does not exist"</em>. So a typo'd field name, a bean you
+        never registered, or a condition that did not fire all give you a <strong>passing</strong>
+        test asserting against a mock nobody wired — where <code>@MockBean</code> failed loudly. The
+        replacement is quieter, not stricter. Use <code>enforceOverride = true</code> for fail-fast.
+        Two more from the same javadoc: only <strong>singleton</strong> beans can be mocked, and under
+        <code>@ContextHierarchy</code> every <code>@MockitoBean</code> applies to
+        <strong>all</strong> levels unless <code>contextName</code> pins one.</p>
+      </div>
+
       <div class="table-wrap">
         <table class="table--decision">
           <caption><code>webEnvironment</code> — the attribute that decides whether a real server exists</caption>
