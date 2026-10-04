@@ -67,7 +67,7 @@ long-form volume styles are appended after it, because the second half only *add
 custom properties; reversing the order would let the additions stop winning.
 
 **Corollary you must preserve:** `highlight.js` selects `pre.snippet` only. ASCII diagrams are
-`pre.diagram` with **no** `data-lang`, so the highlighter structurally cannot tokenise the 715
+`pre.diagram` with **no** `data-lang`, so the highlighter structurally cannot tokenise the 725
 diagrams. `check.js --volume` asserts this rather than trusting that someone re-reads `highlight.js`.
 When adding a code-block case, keep that guarantee.
 
