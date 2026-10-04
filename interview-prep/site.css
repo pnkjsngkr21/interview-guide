@@ -336,7 +336,7 @@ strong {
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   gap: 0;
   align-items: start;
-  max-width: 1120px;
+  max-width: 1440px;
   margin: 0 auto;
 }
 
@@ -1413,9 +1413,10 @@ pre.diagram code {
   margin-bottom: 0;
 }
 
+/*
 .qa__a p {
   max-width: var(--measure-guide);
-}
+} */
 
 /* An opener with nothing between it and the next one. Rare, but the wrapper has
    to render something rather than collapse. */
