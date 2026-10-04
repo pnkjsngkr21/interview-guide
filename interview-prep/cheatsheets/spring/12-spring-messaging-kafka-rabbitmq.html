@@ -358,6 +358,22 @@ f.setCommonErrorHandler(errorHandler);   // otherwise: seek, 9 retries, no delay
         documented behaviour, not a misconfiguration. It also means your retry and DLT policy
         silently stops applying the moment you add a transaction manager.</p>
       </div>
+
+      <div class="callout callout--trap">
+        <span class="callout__label">Interview trap &mdash; two isolation levels, and the default reads aborted writes</span>
+        <p>Kafka's <code>isolation.level</code> decides which records a consumer <em>reads</em>.
+        It is <strong>not</strong> a spring-kafka API &mdash; no <code>ConsumerFactory</code>
+        setter, no <code>@KafkaListener</code> attribute, and only two mentions of it in 4.1.1
+        source: a javadoc comment and an exception. Under Boot it is the property
+        <code>spring.kafka.consumer.isolation-level</code>, mapped to
+        <code>ConsumerConfig.ISOLATION_LEVEL_CONFIG</code>, and it <strong>defaults to
+        <code>read_uncommitted</code></strong> &mdash; so enabling EOS on the producer and
+        forgetting the consumer still surfaces rolled-back writes. Spring's
+        <code>TransactionDefinition</code> isolation levels are the <em>other</em> concept;
+        <code>KafkaTransactionManager</code> throws
+        <code>InvalidIsolationLevelException</code> if you set one &mdash; &ldquo;Apache Kafka
+        does not support an isolation level concept&rdquo;, and it means it.</p>
+      </div>
     </section>
 
     <!-- ============ 5 ============ -->
@@ -562,6 +578,7 @@ spring.rabbitmq.listener.simple.acknowledge-mode=auto</code></pre>
         <div class="number"><span class="number__value">250</span><span class="number__label">RabbitMQ default <code>prefetch</code>, per consumer &mdash; all of it replayed on restart</span></div>
         <div class="number"><span class="number__value">true</span><span class="number__label"><code>defaultRequeueRejected</code> default &mdash; an unbounded redelivery loop, not a retry</span></div>
         <div class="number"><span class="number__value">3</span><span class="number__label">RabbitMQ <code>AcknowledgeMode</code> values: AUTO, MANUAL, NONE &mdash; and no MANUAL_IMMEDIATE</span></div>
+        <div class="number"><span class="number__value">read_uncommitted</span><span class="number__label"><code>spring.kafka.consumer.isolation-level</code> default &mdash; the consumer reads aborted transactional records</span></div>
         <div class="number"><span class="number__value">1</span><span class="number__label">partition is the unit of both parallelism and ordering &mdash; raising it trades the second for the first</span></div>
       </div>
 

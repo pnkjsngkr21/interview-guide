@@ -640,17 +640,58 @@ corpus never claimed it, nothing needed removing.)
 
 ### Unverified / needs human check (new)
 
-10. **Single-task `fixedRate` overrun behaviour under Spring's scheduler is undocumented** in the
-    Framework 6.2 javadoc and the reference page. The corpus says so explicitly rather than
-    guessing. A check against `FixedRateTask` / `ReschedulingRunnable` in the 6.2 or 7.0 source
-    would settle it — and it is the kind of question that separates a candidate who read the
-    source from one who repeated the folklore.
+10. ~~**Single-task `fixedRate` overrun behaviour under Spring's scheduler is undocumented.**~~
+    **CLOSED 2026-10-04 — resolved from Framework 6.2 source, and the folklore answer is wrong in
+    both halves.** The documentation genuinely does run out here: neither the `@Scheduled` javadoc
+    nor the reference page says what happens when a task overruns its period. The source does:
+
+    - `ReschedulingRunnable.run()` calls `super.run()` (the task) and **only afterwards**
+      computes the next execution and calls `schedule()` again. A task therefore **cannot overlap
+      itself** — the common claim that a `fixedRate` task runs concurrently with its own previous
+      run is false by construction.
+    - `PeriodicTrigger.nextExecution` returns `lastExecution.plus(period)` when `fixedRate` is
+      true and `lastCompletion.plus(period)` when it is false. So an overrun pushes the next
+      execution instant **into the past**, the computed delay goes **negative**, and
+      `ScheduledThreadPoolExecutor` documents: *"If the specified delay is less than or equal to
+      zero, the command is not delayed but is executed immediately."*
+
+    Net behaviour: **immediate catch-up** — the next run fires the instant the previous one returns,
+    and keeps firing back-to-back until the deficit is repaid. The second half of the folklore
+    ("it just falls behind") is also wrong. `fixedDelay` never accumulates the debt, because it
+    measures from completion.
+
+    Written into vol09 §5.9 as a new diagram plus a trap callout, Q16 (STAFF) and a Common
+    Mistake; the cheat09 trap callout was rewritten to the verified answer and given a number card.
+    Also useful as an interview framing: **the failure mode is load, not correctness** — a 5-second
+    period with a 14-second runtime runs permanently saturated at ~3x the requested work, so the
+    instance burns CPU before anything alerts.
+
+    **Follow-up worth a human eye** (not written, no claim made): the exact behaviour when the
+    task throws. `ReschedulingRunnable` reschedules after `super.run()`, and
+    `ScheduledThreadPoolExecutor` suppresses subsequent executions of a repeating task that threw
+    — so whether a failed `fixedRate` task keeps firing depends on which layer reschedules. That
+    needs a read of the whole 6.2 `ReschedulingRunnable` plus a test, and the corpus makes no claim
+    about it.
 11. **Boot's metrics reference page contradicts Boot's own source** on whether `ObservedAspect` is
-    auto-configured. I wrote the source behaviour (`management.observations.annotations.enabled`
-    must be `true`). If Spring's docs are corrected, or if the intended behaviour actually *is*
-    on-by-default, §5.3 and cheat11 need a one-line edit. Worth raising upstream either way — this
-    is the third time in this corpus that a Spring reference page's prose has been contradicted by
-    its own code.
+    auto-configured. **No edit needed — this is a documentation issue, not a content gap, and the
+    corpus is already correct.** Recorded as CLOSED with the disagreement left standing on purpose.
+
+    The reference page says *"By default, Spring Boot will auto-configure an `ObservedAspect` to
+    enable `@Observed` support."* The source says otherwise: `ObservationAutoConfiguration`'s
+    `ObservedAspectConfiguration` carries `@ConditionalOnBooleanProperty("management.observations.annotations.enabled")`
+    **without** `matchIfMissing`, and `ConditionalOnBooleanProperty.matchIfMissing()` **defaults to
+    `false`** — verified in both `3.5.x` and `main`. Boot's own
+    `ObservationAutoConfigurationTests` sets the property explicitly in its shared context runner,
+    which is the giveaway. So the bean does not exist unless you ask for it.
+
+    vol11 §5.3 and cheat11 both state the source behaviour, and the trap callout names the
+    documentation contradiction explicitly rather than hiding it — which is the better answer in an
+    interview anyway. If Spring later corrects the page, nothing here needs to change; if the
+    intended behaviour really is on-by-default, §5.3 and cheat11 need a one-line edit each.
+
+    **Worth raising upstream.** This is the third time in this corpus that a Spring reference page's
+    prose has been contradicted by its own code (after the `HiddenHttpMethodFilter` default in
+    `gap-report.md` #6 and the `@MockBean` deprecation framing).
 
 ## Unverified / needs human check
 
@@ -702,17 +743,65 @@ corpus never claimed it, nothing needed removing.)
    in Boot 4 (not merely deprecated), and `@SpringBootTest` no longer supplies
    `MockMvc`/`WebClient`/`TestRestTemplate` — which breaks every Boot 4 test relying on the old
    default.
-7. **Messaging: `isolation.level=read_committed` as a Spring-managed setting — UNVERIFIED, not
-   written.** The research flagged exactly one item it could not confirm, and safety rule 5 applies.
-   `isolation.level` is a Kafka consumer config property; describing it as *Spring*-managed is a
-   claim I could not verify against source, so it is **not** in vol12. A human check against
-   `ConsumerFactory` / `ContainerProperties` would close it. Note this is the one thing that would
-   sharpen the §2.5 answer, since it is how a candidate would normally talk about `read_committed`.
-8. **`spring-01`'s `@MockBean` reference left in place.** Used as a contrast in a
-   constructor-injection argument, not as a recommendation. A defensible reading either way; worth
-   a human decision if you want the set to be uniformly 3.4-clean.
-9. **`@MockitoBean`'s `enforceOverride` default is absent from vol09 §2.5**, which covers the
-   deprecation and the `@Configuration`-class restriction thoroughly but not this. `enforceOverride`
-   defaults to `false` (`REPLACE_OR_CREATE`), so a typo'd field silently auto-creates a mock instead
-   of failing the test — the opposite of `@MockBean`'s behaviour, and a good senior question. Written
-   into `checklist.md`; recommend adding to vol09 alongside the existing material.
+7. ~~**Messaging: `isolation.level=read_committed` as a Spring-managed setting.**~~ **CLOSED
+   2026-10-04 — the question as posed was wrong, and the real answer is better than the flag.**
+   Safety rule 5 held: nothing was written until it was verified from source. Then it turned out
+   the framing "is it a Spring-managed setting?" has the wrong answer in **both** directions.
+
+   Evidence: all 354 `spring-kafka/src/main/java/**/*.java` files in the 4.1.1 tree were scanned
+   for `[Ii]solationLevel|isolation.level`. **Exactly two hits**, and neither is a setter:
+
+   - `ConsumerProperties.java` line 449 — a **javadoc comment** on `setFixTxOffsets`:
+     *"the lag will only be corrected if the consumer is configured with
+     `isolation.level=read_committed` and `max.poll.records` is greater than 1."*
+   - `KafkaTransactionManager.java` lines 143–144 — an explicit **rejection**:
+     `throw new InvalidIsolationLevelException("Apache Kafka does not support an isolation level concept")`
+
+   There is **no** `isolationLevel` on `ConsumerFactory`, on `DefaultKafkaConsumerFactory`, or on
+   `ContainerProperties`, and **no** `@KafkaListener` attribute for it. So the research agent's
+   framing was right that it is not a spring-kafka *API* — but the follow-on assumption that it is
+   therefore unmanaged was wrong. **Boot does expose it**, as a property:
+   `spring.kafka.consumer.isolation-level`, bound to `KafkaProperties.Consumer.isolationLevel`
+   (an enum of `READ_UNCOMMITTED` / `READ_COMMITTED`), **defaulting to `READ_UNCOMMITTED`**, and
+   mapped straight into `ConsumerConfig.ISOLATION_LEVEL_CONFIG`. Verified in **both** the `3.5.x`
+   branch (`spring-boot-project/spring-boot-autoconfigure`) and `4.0.x`
+   (`module/spring-boot-kafka`) — identical default and mapping, no change between them.
+
+   What went into the corpus, as a new `<h4>` in vol12 §2.5 plus a cheat12 trap callout and number
+   card:
+
+   - the property name, the two enum values, and the `read_uncommitted` **default**;
+   - that `read_uncommitted` means the consumer reads **aborted transactional records**, so enabling
+     EOS on the producer and leaving this at the default still surfaces rolled-back writes — which
+     completes the §2.5 exactly-once story that previously stopped at the sequence qualifier;
+   - the two real costs of turning it on (fetch held open until the transaction outcome is known →
+     latency; post-restart `UnknownProducerId` / `UnknownTopicOrPartition` while the producer epoch
+     is re-established);
+   - the **two-isolations trap**: Kafka's `isolation.level` decides what a consumer *reads*, while
+     Spring's `TransactionDefinition` isolation scopes a *transaction*, and asking for one where
+     the other belongs is a runtime `InvalidIsolationLevelException`, not a warning.
+
+   Plus vol12 Common Mistake bullet, Q7 (STAFF) and a Further Reading link to Boot's
+   `spring-kafka.html` configuration page. The section's earlier "deliberately not written" note in
+   the sixth pass is what this closes.
+8. ~~**`spring-01`'s `@MockBean` reference left in place.**~~ **CLOSED 2026-10-04 — updated to
+   `@MockitoBean`.** It was a single occurrence, in the constructor-injection argument: *"the test
+   supplies a fake `PaymentClient` directly, with no `@MockBean`, no context refresh, no proxy
+   weaving."* So it was a contrast, not a recommendation — but vol10 §8.3 had already been corrected
+   from `@MockBean` to `@MockitoBean` for exactly this reason in the third pass, and vol09 §2.5
+   devotes a section to why the old annotation is deprecated on Boot 3.4+. Leaving one file calling
+   it by the deprecated name made the corpus inconsistent with its own argument.
+
+   One-word change; the sentence's meaning is unchanged, because the point is that no Spring context
+   is needed at all. `@MockitoBean` is the correct name for "the bean-override approach we are not
+   using" on 3.4+.
+
+   **The remaining `@MockBean` mentions in the Spring track are correct and were left alone**: they
+   are all inside vol09 §2.5 / cheat09's *deprecation* treatment (the commented-out import, the
+   "deprecated as of Boot 3.4" bullets, the Boot 4 removal table). Naming the deprecated annotation
+   in order to explain it is the point.
+9. ~~**`@MockitoBean`'s `enforceOverride` default is absent from vol09 §2.5**~~ — **CLOSED 2026-10-04.**
+   It is present in **both** vol09 §2.5 (4 occurrences: prose, a Java snippet, a follow-up paragraph
+   and a trap callout) and the matching cheat09 block (2 occurrences). This entry was written when
+   the material had only been recorded in `checklist.md`; a later pass in the same day added it to
+   both pages. Closing rather than re-doing the work.

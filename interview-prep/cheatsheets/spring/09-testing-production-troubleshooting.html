@@ -1070,16 +1070,21 @@ cfg.setLeakDetectionThreshold(0);  // DEFAULT off — set 5000 while debugging, 
 spring.task.scheduling.thread-name-prefix=scheduling-  # NOT "task-"
 spring.task.scheduling.shutdown.await-termination=false</code></pre>
         <div class="callout callout--trap">
-          <span class="callout__label">Interview trap — what happens when a fixed-rate task
-          overruns?</span>
-          <p>For <code>@Scheduled</code> methods declared <strong>side by side</strong> in one
-          class, the Framework 6.2 javadoc is explicit that they <em>"may overlap and execute
-          multiple times in parallel or in immediate succession."</em> For a <strong>single</strong>
-          task's own <code>fixedRate</code> overrun behaviour, the 6.2 javadoc and the reference
-          page are <strong>silent</strong>. Say so rather than guessing: the folklore answer
-          ("it runs concurrently with itself") is asserted far more confidently than it is
-          documented. What <em>is</em> documented is the scheduling model's shape, and separating
-          that from the undocumented part is exactly what a careful answer should do.</p>
+          <span class="callout__label">Interview trap — an overrunning fixed-rate task neither
+          overlaps nor falls behind</span>
+          <p>Both halves of the folklore answer are wrong, and the real behaviour is the more
+          useful thing to know. It does <strong>not</strong> run concurrently with itself:
+          <code>ReschedulingRunnable.run()</code> executes the task and only <em>afterwards</em>
+          computes the next execution and reschedules, so a second copy can never exist. And it does
+          not merely fall behind either &mdash; <code>PeriodicTrigger</code> returns
+          <code>lastExecution + period</code>, so an overrun drives the next delay <strong>negative</strong>,
+          and <code>ScheduledExecutorService</code> runs a non-positive delay
+          <em>immediately</em>. The next run fires the instant the previous one returns and keeps
+          firing back-to-back until the deficit is repaid. <strong>The failure mode is load, not
+          correctness:</strong> a 5-second period with a 14-second runtime runs permanently
+          saturated at roughly 3&times; the requested work, so the instance is burning CPU before
+          anything alerts. <code>fixedDelay</code> never accumulates the debt &mdash; it measures
+          from completion.</p>
         </div>
         <div class="callout callout--scale">
           <span class="callout__label">Scaling reality check — one thread, and virtual threads do
@@ -1423,6 +1428,7 @@ CircuitBreaker paymentBreaker(CircuitBreakerRegistry registry) {
         <h2>Numbers worth memorising</h2>
       </div>
       <div class="numbers">
+        <div class="number"><span class="number__value">0</span><span class="number__label">concurrent executions of one <code>fixedRate</code> task &mdash; an overrun causes catch-up, not overlap</span></div>
         <div class="number"><span class="number__value">4</span><span class="number__label">tiers &mdash; and the last column is what each structurally cannot catch</span></div>
         <div class="number"><span class="number__value">3&ndash;15s</span><span class="number__label">refresh cost per <em>distinct</em> context, not per test class</span></div>
         <div class="number"><span class="number__value">32</span><span class="number__label">default test context cache size, and the ceiling on live contexts held</span></div>

@@ -185,7 +185,7 @@ senior depth. A rating of High with `Partial` is a real gap and drives the work 
 | Boot 2 → 3 migration, Jakarta rename | High | Partial | scattered; no dedicated treatment |
 | Boot 4 / Framework 7 | Medium | Not covered — see below for verified content | — |
 | **Structured logging** | Medium | **Added 2026-10-04** — vol07 §7.7: the two `logging.structured.format.*` properties, three format names (`ecs`/`gelf`/`logstash`/custom FQCN), **no default format** (opt-in, not a 3.4 behaviour change), Logback **and** Log4j2 both supported, MDC → JSON fields, `logging.group.*` (predefined `web`, `sql`) and the fact that `logging.logback.group` is not a property, correlation IDs coming from Micrometer Tracing rather than `spring.mvc.log`/`spring.web.log` (neither exists) | v7 §7.7, cheat07 |
-| **`@Scheduled`** | Medium | **Added 2026-10-04** — vol09 §5.9: `spring.task.scheduling.pool.size=1` co-tenancy, the six attribute defaults (`fixedRate`/`fixedDelay`/`initialDelay` = `-1L`, `cron` = `""`, `zone` = `""`, and **`timeUnit` = MILLISECONDS**), the **documented gap** on single-task `fixedRate` overrun, the virtual-threads `fixedDelay` trap quoted from the javadoc, `scheduling-` vs `task-` thread-name-prefix, both routes to a single-threaded scheduler, and the opt-in `tasks.scheduled.execution` observation | v9 §5.9, cheat09 |
+| **`@Scheduled`** | Medium | **Added 2026-10-04** — vol09 §5.9: `spring.task.scheduling.pool.size=1` co-tenancy, the six attribute defaults (`fixedRate`/`fixedDelay`/`initialDelay` = `-1L`, `cron` = `""`, `zone` = `""`, and **`timeUnit` = MILLISECONDS**), the **resolved** `fixedRate` overrun behaviour (see addendum below), the virtual-threads `fixedDelay` trap quoted from the javadoc, `scheduling-` vs `task-` thread-name-prefix, both routes to a single-threaded scheduler, and the opt-in `tasks.scheduled.execution` observation | v9 §5.9, cheat09 |
 | **OpenTelemetry / tracing depth** | Medium | **Added 2026-10-04** — vol11 §5.3/§5.4: **`@Observed` is Micrometer, not Spring Framework** (`io.micrometer.observation.annotation`, `@since 1.10.0`) with three attributes; the `ObservedAspect` is **opt-in** despite the reference page claiming otherwise; the two OTel dependency sets and the **Boot 4.2 removal** of the Zipkin route; `management.tracing.sampling.probability` = **0.10**. Also noted: there is **no `jdbc.queries` observation** — Boot gives `jdbc.connections.*` gauges instead | v11 §5.3–5.4, cheat11 |
 
 ### Addendum: Spring Boot 4 baseline (verified 2026-10-03, not yet in the corpus)
@@ -237,3 +237,32 @@ its own code (after the `HiddenHttpMethodFilter` default in `gap-report.md` item
   `http.client.requests`, `jms.message.publish`, `jms.message.process` and
   `tasks.scheduled.execution` — and the last is **opt-in**, requiring an `ObservationRegistry` on
   the `ScheduledTaskRegistrar` via a `SchedulingConfigurer`.
+
+### Addendum: Kafka's `isolation.level` — verified, and easy to get wrong in both directions
+
+**There is no `isolationLevel` anywhere in the spring-kafka API.** A scan of all 354 files in
+`spring-kafka/src/main/java/**/*.java` at 4.1.1 for `[Ii]solationLevel|isolation.level` returns
+exactly two hits: a javadoc comment on `ConsumerProperties.setFixTxOffsets`, and the
+`InvalidIsolationLevelException` thrown by `KafkaTransactionManager`. No setter on `ConsumerFactory`,
+no field on `ContainerProperties`, no `@KafkaListener` attribute.
+
+**Boot does expose it as a property.** `spring.kafka.consumer.isolation-level` binds to
+`KafkaProperties.Consumer.isolationLevel` (enum: `READ_UNCOMMITTED`, `READ_COMMITTED`) and is
+written into `ConsumerConfig.ISOLATION_LEVEL_CONFIG`. It **defaults to `read_uncommitted`** — which
+means the consumer reads *aborted* transactional records, so EOS enabled on the producer and not
+configured on the consumer still surfaces rolled-back writes. Verified identically in `3.5.x`
+(`spring-boot-project/spring-boot-autoconfigure`) and `4.0.x` (`module/spring-boot-kafka`).
+
+**The trap worth memorising: two unrelated isolation levels.** Kafka's `isolation.level` decides
+which records a consumer *reads*; Spring's `TransactionDefinition` isolation scopes a *transaction*.
+Setting the latter on a `KafkaTransactionManager` is not ignored — it throws
+`InvalidIsolationLevelException("Apache Kafka does not support an isolation level concept")`.
+
+### Addendum: `fixedRate` overrun — resolved from Framework 6.2 source
+
+`ReschedulingRunnable.run()` executes the task and **only then** reschedules, so a task **cannot
+overlap itself**. `PeriodicTrigger` returns `lastExecution + period` for `fixedRate`, so an overrun
+pushes the next execution into the past, the delay goes negative, and
+`ScheduledThreadPoolExecutor` runs non-positive delays immediately. Result: **immediate catch-up**,
+back-to-back, until the deficit is repaid. Both halves of the folklore answer are wrong. `fixedDelay`
+measures from completion and never accumulates debt. See change-log unverified item 10.
