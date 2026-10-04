@@ -266,7 +266,7 @@ h4 {
    affected; the narrative shape gains back the line length it needs. */
 p {
   margin: 0 0 var(--s3);
-  max-width: var(--measure-prose);
+  /* *max-width: var(--measure-prose); */
 }
 
 /* Links are ink, so the underline is what distinguishes them. */
@@ -1210,9 +1210,11 @@ figcaption strong {
 /* The narrow measure applies to prose only. Everything structural — lists,
    tables, code, callouts — runs the full column, because a Q&A answer that is
    itself a list reads badly when the list is held to the prose measure. */
+/*   
 .main--guide p {
-  max-width: var(--measure-guide);
+   max-width: var(--measure-guide);
 }
+   */
 
 /* Inline `code` wrapping is handled once on the base `code` rule above, so it
    applies to the cheatsheets too. This section adds no wrap override. */
@@ -1515,5 +1517,248 @@ pre.diagram code {
      has stacked above the content. */
   .qa__a {
     padding-left: var(--s3);
+  }
+}
+
+/* ==================================================================
+   Cheatsheet shell restyle
+
+   Appended last, like the volume section above it, and additive in the
+   same sense: it adds selectors and custom properties and edits no
+   existing rule. Because it is last it wins ties, which is the point.
+
+   Why this exists. The cheatsheets are described in README.md as pages
+   you "reach into when someone asks you a question and you have about
+   ninety seconds" — a lookup surface, not a reading surface. The shell
+   above was built to be read: a 2rem title, a sub and a meta list fill
+   a screen before any answer appears.
+
+   The central claim of this block is narrower than a redesign. The
+   markup is already marked up correctly — the authoring contract makes
+   <strong> mean the load-bearing claim, and every one of the 35
+   cheatsheets leads each keyfact bullet with one (verified 35/35). The
+   stylesheet was rendering claim and support at identical weight, so
+   the distinction the author had already made was invisible. Most of
+   what follows is just reading it.
+
+   SCOPE. Every rule is gated on the cheatsheet shape. A volume page
+   carries <main class="main main--guide">; a cheatsheet carries a plain
+   <main class="main"> (toc.js is volumes-only, per README.md). So
+   :where(.page:has(> .main:not(.main--guide))) is exactly "this is a
+   cheatsheet", and all 36 volume pages are untouched by this block.
+   The gate is wrapped in :where() so it contributes zero specificity —
+   the rules inside still beat the base layer on source order alone, and
+   the block cannot accidentally out-rank the volume styles above.
+
+   Requires :has() (baseline in current browsers). If that ever needs
+   supporting, the gate is the only thing to change: drop it and this
+   block applies to both shapes.
+   ================================================================== */
+
+:root {
+  /* Proportional spacing the restyle introduces. Separate from --s1..--s8
+     rather than reusing them, because these are only ever used here and
+     retuning the shared steps would move 69 pages. */
+  --c-space-claim: 0.2rem;
+  --c-space-lead: var(--s5);
+
+  /* One step above --t-dense, for the lifted claim in the five-things box.
+     Declared here rather than written inline so the block carries a real
+     scale step instead of a literal fallback: the base layer's type scale
+     stops at --t-dense, so --t-lead did not exist before this block. */
+  --t-lead: 1.0625rem;
+}
+
+/* ---------- Masthead: identity, not payload ----------
+   The title still exists and still leads; it just stops occupying the
+   first screen on its own. */
+
+:where(.page:has(> .main:not(.main--guide))) .masthead {
+  padding-bottom: var(--s3);
+  margin-bottom: var(--s4);
+}
+
+:where(.page:has(> .main:not(.main--guide))) .masthead h1 {
+  font-size: 1.55rem;
+  letter-spacing: -0.014em;
+}
+
+:where(.page:has(> .main:not(.main--guide))) .masthead__sub {
+  font-size: var(--t-meta);
+  max-width: 72ch;
+}
+
+/* ---------- The five things: the page's opening ----------
+   The one bold moment. A heavy top rule rather than a filled box, so it
+   reads as a document opening rather than a card.
+
+   display:block on the leading <strong> is the whole trick: it lifts the
+   claim onto its own line and lets the supporting sentence fall below it.
+   No page needs editing for this. */
+
+:where(.page:has(> .main:not(.main--guide))) .keyfacts {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin-bottom: var(--s6);
+}
+
+:where(.page:has(> .main:not(.main--guide))) .keyfacts ol {
+  list-style: none;
+  counter-reset: five;
+  margin: 0;
+  padding: 0;
+  border-top: 2px solid var(--fg);
+}
+
+:where(.page:has(> .main:not(.main--guide))) .keyfacts li {
+  counter-increment: five;
+  position: relative;
+  margin: 0;
+  padding: var(--s3) 0 var(--s3) 2.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+/* The marker is the sequence, not decoration: this really is an ordered
+   list of the five things that survive. `content` on ::before keeps it
+   out of the accessibility tree's reading order where it would only
+   duplicate the list semantics. */
+:where(.page:has(> .main:not(.main--guide))) .keyfacts li::before {
+  content: counter(five, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: var(--s3);
+  font-family: var(--font-mono);
+  font-size: var(--t-dense);
+  color: var(--fg-muted);
+}
+
+:where(.page:has(> .main:not(.main--guide))) .keyfacts li > strong:first-child {
+  display: block;
+  font-size: var(--t-lead);
+  line-height: 1.4;
+  letter-spacing: -0.006em;
+  margin-bottom: var(--c-space-claim);
+}
+
+/* Everything after the claim reads as support. Keyed on the strong being
+   a block, so a bullet without one is untouched. */
+:where(.page:has(> .main:not(.main--guide))) .keyfacts li > strong:first-child ~ * {
+  font-size: var(--t-dense);
+}
+
+/* ---------- Section heads: a firmer rule under a smaller number ---------- */
+
+:where(.page:has(> .main:not(.main--guide))) .section__head {
+  border-bottom-color: var(--line-strong);
+  padding-bottom: var(--s2);
+  margin-bottom: var(--s4);
+}
+
+:where(.page:has(> .main:not(.main--guide))) .section__head h2 {
+  font-size: 1.3rem;
+  letter-spacing: -0.012em;
+}
+
+:where(.page:has(> .main:not(.main--guide))) .section__num {
+  font-size: var(--t-meta);
+}
+
+/* ---------- Callouts: unchanged in colour, firmer in structure ----------
+   The four-way taxonomy is untouched — CLAUDE.md records that colour on
+   this site is meaning and --accent is deliberately remapped to ink. */
+
+:where(.page:has(> .main:not(.main--guide))) .callout__label {
+  letter-spacing: 0.03em;
+  margin-bottom: var(--s2);
+}
+
+/* ---------- Numbers: the figures you cannot derive under pressure deserve
+   to outrank the prose around them. ---------- */
+
+:where(.page:has(> .main:not(.main--guide))) .number__value {
+  font-size: 1.3rem;
+}
+
+/* ---------- Rail: chapter numbers and a hover that does not shout ---------- */
+
+:where(.page:has(> .main:not(.main--guide))) .sidebar a {
+  line-height: 1.45;
+}
+
+/* The taxonomy exposed as a second way in, indexed by question type. The
+   markup for this does not exist yet: adding it is an HTML change to the
+   35 cheatsheets and to check.js, which asserts the sidebar's exact
+   shape. The CSS is here so that pass is stylesheet work only. Until
+   then these rules match nothing and cost nothing. */
+.bytype {
+  display: grid;
+  gap: var(--s1);
+}
+
+.bytype a {
+  display: grid;
+  grid-template-columns: 3px minmax(0, 1fr);
+  gap: var(--s3);
+  align-items: start;
+  padding: var(--s1) var(--s2);
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+
+.bytype a:hover {
+  background: var(--bg-sunken);
+  color: var(--fg);
+}
+
+.bytype__swatch {
+  width: 3px;
+  align-self: stretch;
+  min-height: 1.2em;
+  border-radius: 2px;
+}
+
+.bytype__name {
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  letter-spacing: 0.02em;
+}
+
+.bytype__n {
+  font-family: var(--font-sans);
+  font-size: var(--t-micro);
+  color: var(--fg-muted);
+}
+
+/* ---------- One motion, once ----------
+   The five-things rule draws in on load, and only that. Under
+   prefers-reduced-motion it is simply present at rest, never hidden. */
+
+@media (prefers-reduced-motion: no-preference) {
+  :where(.page:has(> .main:not(.main--guide))) .keyfacts ol {
+    animation: five-rule 520ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  }
+}
+
+@keyframes five-rule {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* ---------- Cheatsheet responsive ---------- */
+
+@media (max-width: 560px) {
+  :where(.page:has(> .main:not(.main--guide))) .keyfacts li {
+    padding-left: 1.7rem;
+  }
+
+  :where(.page:has(> .main:not(.main--guide))) .keyfacts li > strong:first-child {
+    font-size: 1rem;
   }
 }
