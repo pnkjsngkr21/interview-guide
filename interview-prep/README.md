@@ -56,10 +56,11 @@ Four things follow from sharing them:
   *add* selectors and custom properties — they never edit an existing rule. Reversing the order
   would let the additions stop winning.
 - **`search.js` and `highlight.js` are used unmodified by both content types.**
-- **`highlight.js` selects `pre.snippet` and nothing else.** That is what keeps the 715 ASCII
-  diagrams from being tokenised — a volume diagram is emitted as `pre.diagram` with no `data-lang`,
-  so the highlighter structurally cannot reach it. `check.js --volume` asserts this rather than
-  relying on anyone re-reading `highlight.js`.
+- **`highlight.js` selects `pre.snippet` and nothing else.** That is what keeps the residual
+  `pre.diagram` blocks — the terminal transcripts and ASCII tables a volume keeps for text rather
+  than drawing — from being tokenised; a volume diagram is emitted as `pre.diagram` with no
+  `data-lang`, so the highlighter structurally cannot reach it. `check.js --volume` asserts this
+  rather than relying on anyone re-reading `highlight.js`.
 - **`toc.js` belongs to volumes only.** It drives the chapter scroll-spy, which cheatsheets have no
   use for.
 
@@ -78,13 +79,19 @@ are present, ids are unique, every `href="#…"` resolves to an emitted id, **ev
 resolves to a real file on disk**, no unparsed `[text](url)` remains, no double-escaped entity
 remains, tag balance holds, and the encoding is clean — no BOM, no CRLF, no tabs.
 
-**`--volume` adds:** the `<h1>` is not repeated in the body, and `pre.diagram` carries no
-`data-lang`.
+**`--volume` adds:** the `<h1>` is not repeated in the body, `pre.diagram` carries no `data-lang`
+and is not empty, and the masthead's figure count matches the page.
+
+**Both page shapes add:** the SVG figure contract — `role="img"`, a non-degenerate `viewBox`, an
+`aria-label`, a drawing primitive, a `<figcaption>` opening with a `<strong>`, one `<marker>` per
+figure with `orient="auto-start-reverse"`, every `url(#…)` resolving to a marker defined in that
+figure or an earlier one, and no literal `fill="#…"`/`stroke="#…"` inside a figure.
 
 **`--cheatsheet` adds:** script order (`search.js` before `highlight.js`), the `class=` shell
 contract, filter-markup exactness, TOC↔section bidirectional match, table structure and
 colspan/rowspan resolution, the callout prefix taxonomy, keyfacts-exactly-5, snippet attributes,
-SVG marker ordering and `aria-label` presence, and a literal-hue rejection.
+and the 2-4 figure density guide. Density is **not** checked on volumes: a volume's figure count
+is however many drawings its source prose contained, not a composition choice.
 
 **`--index` adds:** exactly 35 volumes and 34 cheatsheets with the right path prefixes, four
 track groups, and every track id reachable from the sidebar.
@@ -110,9 +117,12 @@ These were previously enforced by the build and are now on you:
   `-text` to stop a Windows checkout rewriting them to CRLF, which would churn every diff. The
   checker reads files as raw bytes and fails on any CR, so this is load-bearing.
 - **No tabs, no trailing whitespace.** Both are enforced by the checker.
-- **No emoji anywhere outside `pre` blocks.** Volume pages use `✓ ⚠ ✅ ★` deliberately inside ASCII
-  diagrams, where the glyph is the drawing; the checker masks every `<pre>` before scanning, so
-  those are fine and anything in prose is not.
+- **No emoji anywhere outside `pre` blocks.** A volume uses `✓ ⚠ ✅ ★` inside `pre.diagram`, where
+  the glyph is the drawing, and inside a `<figure>` **not at all** — a converted figure carries the
+  same meaning through `.node--good`/`--warn`/`--bad` and `.fill-warn`/`.fill-bad`. The checker
+  masks every `<pre>` before scanning and does not mask figures, so a glyph inside an SVG is a hard
+  failure pointing at the right line. That asymmetry is deliberate: it is what forces the drawing to
+  be semantic rather than transliterated.
 - **Keep the shell intact.** The filter box needs `data-filter-input`, `data-filter-empty` and at
   least one `data-filter-target`; the skip link needs `<main id="main">`; the volume scroll-spy
   needs the sidebar `.toc` anchors. `check.js` checks all of these.
@@ -182,8 +192,55 @@ A volume page loads `site.css`, then `search.js`, `highlight.js` and `toc.js` at
 
 ## Notes
 
-- A `pre.diagram` block is an ASCII diagram, not code. Leave it untagged so the highlighter skips
-  it.
+- A `pre.diagram` block is text, not a drawing — a terminal transcript, an ASCII table, a numbered
+  prose list. Leave it untagged so the highlighter skips it. Drawings are `<figure class="figure">`
+  SVG, not `pre.diagram`; see *Figures* below.
+
+### Figures
+
+Draw in inline SVG, not ASCII. A volume's drawings used to be `text` fences because markdown had
+nowhere else to put a diagram; it does not need one, and an ASCII state machine costs a paragraph
+to explain and reads worse than it looks.
+
+The rules that keep them legible — identical on both page shapes:
+
+- **Show the mechanism, not the name.** A box labelled "cache" says less than the path a request
+  takes through it. Draw what the reader has to picture.
+- **One figure, one claim.** The `<figcaption>` states what the picture shows; if it needs a
+  paragraph, the figure is doing the wrong job.
+- **`viewBox` sized to the content**, CSS scales it to `width: 100%`. Wide flows read
+  left-to-right; layered stacks top-to-bottom. On a volume, author between **840 and 960 units
+  wide** and under **900 tall**: the content column is 1054 px at the page's 1440 px max-width, so
+  that band renders the 12px `.label` and 10.5px `.edge-label` between 11 and 14 px at every
+  viewport from 900px up. A figure authored outside the band is legible at exactly one window
+  width. (`java-04-collections-framework.html` predates this band at 1180 units and renders its
+  labels at 8-9px — it is the shape to copy, not its width.)
+- **Structure in `currentColor`-family classes** (`.node`, `.edge`, `.label`); these inherit the page
+  foreground and so survive a theme switch for free. Reserve a literal hue for the element that
+  carries the claim, via `.node--good` / `--warn` / `--bad` / `.edge--good` etc. A literal
+  `fill="#…"` inside a figure is a checker failure, scoped to figure innards so that a code snippet
+  quoting SVG or CSS is not mistaken for a drawing.
+- **No glyphs.** `✓ ⚠ ✅ ❌ ★` become `.node--good`/`--warn`/`--bad` and `.fill-warn`/`.fill-bad`. A
+  `<figure>` is not inside a `<pre>`, so the emoji check reads it and a glyph there fails the page.
+- **Arrowheads are `<marker>`s**, one per figure, `orient="auto-start-reverse"` with
+  `fill="context-stroke"` so the head matches its line. Give each figure's marker a distinct id —
+  ids are document-global — using `arw-<track>-<NN>-<FF>-<v>`, e.g. `arw-database-04-07-a`, where
+  `NN` is the volume number, `FF` the figure's index in document order and `v` the head variant
+  (`a` unless a figure needs a second, differently-shaped head). Spell the track in full: the
+  cheatsheets' older `arw-s4-a` style would collide silently under a copy, because `url(#…)` still
+  resolves to *a* marker and duplicate-id detection is per-page.
+- **No literal `>` in an `aria-label`.** The checker reads `<svg([^>]*)>`, so a `>` inside the
+  attribute truncates what it inspects. Write `&gt;` or "to".
+- **Label arrows with a word or three.** Anything longer belongs in the caption.
+- **Every `<svg>` carries `role="img"` and an `aria-label`** stating the same claim as the caption,
+  for readers who cannot see it.
+
+**Density differs by page shape, and only the cheatsheet's is a rule.** A cheatsheet carries two
+to four figures; a volume carries as many as its chapters have claims that need a picture, and the
+practical cap is **one figure per `vol__h3` subsection that had at least one diagram block** —
+convert the block the surrounding prose argues from and leave the rest as `pre.diagram`.
+`database-04` holds 65 blocks and should land near 15 figures and 50 residual blocks, not 65
+figures. A volume page of nothing but figures has not been deepened, only redrawn.
 - The `.bridge` paragraph marks a chapter that continues in the next volume — a plain paragraph,
   deliberately not a heading, so it gets no id and no sidebar entry.
 - Volumes cross-link to sibling volumes by bare filename within the volume tree. A link from
@@ -308,7 +365,7 @@ invents a new vocabulary.
 | `.keyfacts` | `CHAPTER N SUMMARY` | the page's opening five |
 | `.numbers` / `.number` | memorable figures | defaults, thresholds, limits |
 | `table.table--decision` | "framed as a decision with a failure mode" | Concept / Rule / When it bites |
-| `.figure` | ASCII diagrams in the volumes | inline SVG, mechanism not name |
+| `.figure` | drawings on both page shapes | inline SVG, mechanism not name |
 | `pre.snippet` | language-tagged code fences | the two or three snippets worth typing from memory |
 
 A `TRADE-OFF` callout without the condition that flips the answer is not a trade-off. If you cannot
@@ -340,30 +397,11 @@ render correctly, but exotic syntax will simply render uncoloured rather than br
 
 ### Figures
 
-Draw in inline SVG, not ASCII. The volumes use `text` fences because markdown has nowhere else to
-put a diagram; the cheatsheets do, and an ASCII state machine costs a paragraph to explain and reads
-worse than it looks.
+Cheatsheets draw in inline SVG under the same rules as the volumes — see *Figures* in the volume
+page contract above, which is shared rather than repeated.
 
-The rules that keep them legible:
-
-- **Show the mechanism, not the name.** A box labelled "cache" says less than the path a request
-  takes through it. Draw what the reader has to picture.
-- **One figure, one claim.** The `<figcaption>` states what the picture shows; if it needs a
-  paragraph, the figure is doing the wrong job.
-- **`viewBox` sized to the content**, CSS scales it to `width: 100%`. Wide flows read
-  left-to-right; layered stacks top-to-bottom.
-- **Structure in `currentColor`-family classes** (`.node`, `.edge`, `.label`); these inherit the page
-  foreground and so survive a theme switch for free. Reserve a literal hue for the element that
-  carries the claim, via `.node--good` / `--warn` / `--bad` / `.edge--good` etc.
-- **Arrowheads are `<marker>`s**, one per figure, `orient="auto-start-reverse"` with
-  `fill="context-stroke"` so the head matches its line. Give each figure's marker a distinct id —
-  ids are document-global.
-- **Label arrows with a word or three.** Anything longer belongs in the caption.
-- **Every `<svg>` carries `role="img"` and an `aria-label`** stating the same claim as the caption,
-  for readers who cannot see it.
-
-Aim for roughly two to four figures on a full page, each replacing a paragraph of prose. A page of
-nothing but diagrams has not been condensed, only redrawn.
+Cheatsheet-specific density: aim for roughly two to four figures on a full page, each replacing a
+paragraph of prose. A page of nothing but diagrams has not been condensed, only redrawn.
 
 ## The catalogue wall
 

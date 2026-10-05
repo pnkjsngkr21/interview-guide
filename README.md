@@ -3,7 +3,7 @@
 A curated study collection for technical interview preparation — concept notes, deep-dive
 volumes, and printable PDF editions.
 
-> **Start here:** [Interview Prep Guide](index.html) → browse all 34 volumes as a site, or jump
+> **Start here:** [Interview Prep Guide](index.html) → browse all 35 volumes as a site, or jump
 > straight to a track. Everything below is also listed per volume.
 
 > **Looking to revise rather than learn?** Each volume has a condensed [cheatsheet](index.html)

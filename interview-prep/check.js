@@ -16,9 +16,13 @@
 
      - The encoding, link, id and encoding-hygiene core runs on every mode.
      - The volume contract adds the diagram guarantee, which is what keeps
-       `highlight.js` out of 725 ASCII diagrams.
-     - The cheatsheet contract adds the density, table, callout, snippet and
-       figure checks that the one-page shape is held to.
+       `highlight.js` out of the residual `pre.diagram` blocks.
+     - The figure contract runs on every page that draws: the SVG structure,
+       marker integrity and literal-hue rejection. Both page shapes draw in
+       inline SVG and both are held to the same structure; only the density
+       guide differs, so only that is mode-gated.
+     - The cheatsheet contract adds the density, table, callout and snippet
+       checks that the one-page shape is held to.
      - The index contract adds the catalogue counts. It is the only page that
        links all 68 content pages, so its link resolution is the check that would
        catch a rename anywhere in the tree.
@@ -81,10 +85,16 @@ var diagrams = 0, snippetCount = 0;
 var figs = [], callouts = [], markerIds = [];
 
 // -------------------------------------------------------------------- emoji ---
-// Volume pages use ✓ ⚠ ✅ ★ deliberately inside `pre.diagram` and `pre.snippet`
-// ASCII art, where the glyph IS the drawing. Blanking every <pre> block leaves
-// zero pictographs outside code on all 68 pages, which is the invariant this
+// Volume pages use ✓ ⚠ ✅ ★ deliberately inside `pre.diagram` and `pre.snippet`,
+// where the glyph IS the drawing. Blanking every <pre> block leaves zero
+// pictographs outside code on all 69 pages, which is the invariant this
 // asserts: no emoji in prose.
+//
+// Note the asymmetry, which is deliberate: the mask stops at `</pre>`, so a
+// `<figure>` is NOT masked. A status glyph inside a converted SVG figure is a
+// hard failure here, pointing at the right line. That is the mechanism by which
+// a figure is forced to carry its meaning in `.node--good/warn/bad` rather than
+// in a glyph — read that failure as a design instruction, not a checker bug.
 //
 // The mask preserves newlines so the reported line number is the real one —
 // collapsing each block to a single space would slide every later line up by
@@ -244,11 +254,21 @@ if (isVolume) {
   }
 
   // --- the diagram guarantee ---
-  // `highlight.js` selects `pre.snippet` only. An ASCII diagram is therefore
-  // `pre.diagram` with NO `data-lang`; if one ever carries one, the highlighter
-  // reaches into the box-drawing characters and mangles them. This is the one
-  // structural guarantee protecting all 725 diagrams, so it is asserted here
-  // rather than left to a re-read of highlight.js.
+  // `highlight.js` selects `pre.snippet` only, and the diagram classes carry no
+  // `data-lang`, so the highlighter structurally cannot reach them.
+  //
+  // This is the volume contract's share of that guarantee, and it still has a
+  // population: a volume keeps a residual set of `pre.diagram` blocks for what
+  // is text rather than drawing — terminal transcripts (SHOW CREATE TABLE,
+  // EXPLAIN, replica status, jstack), ASCII `+---+` tables, bean-definition
+  // dumps and numbered prose lists. Drawings are not here at all; they are
+  // `<figure class="figure">` SVG, which the highlighter cannot select either
+  // because it carries no `data-lang`, and which the figure contract checks
+  // instead.
+  //
+  // So the invariant is: nothing tagged `data-lang` may sit in a `pre.diagram`.
+  // The counts this file used to quote (725) described the pre-conversion corpus
+  // and are historical, not a target to hold the pages to.
   const diagRe = /<pre class="diagram"([^>]*)>/g;
   while ((m = diagRe.exec(s))) {
     diagrams++;
@@ -256,8 +276,99 @@ if (isVolume) {
       fail("pre.diagram carries data-lang and would be highlighted");
     }
   }
-  if (/<pre class="diagram"[^>]*><code><\/code><\/pre>/.test(s)) {
+  if (/<pre class="diagram"[^>]*>\s*(?:<code>\s*<\/code>)?\s*<\/pre>/.test(s)) {
     fail("an empty pre.diagram — a fence lost its body");
+  }
+}
+
+// ====================================================== the figure contract ===
+
+// The figure rules are shared, not cheatsheet-only: both page shapes draw in
+// inline SVG and both are held to the same structure. What differs is density,
+// and only the density rule is mode-gated. See interview-prep/README.md
+// "Figures" for the authoring rules these assertions protect.
+
+for (const mm of s.matchAll(/<figure class="figure">\s*<svg([^>]*)>([\s\S]*?)<\/svg>([\s\S]*?)<\/figure>/g)) {
+  figs.push([mm[1], mm[2], mm[3]]);
+}
+
+// Density is a composition guide and it is cheatsheet-tuned: a cheatsheet is a
+// condensed page where a figure must earn its place against a 400-500 word
+// narration budget, so 2-4 is the guide there. A volume's figure count is not a
+// choice — it is however many diagram blocks the source prose contained, and
+// during a staged conversion it is transiently 0 on a page whose drawings are
+// still ASCII. Range-checking it on a volume would warn on every page for a
+// number the author did not pick, so the check does not run there.
+if (isCheatsheet && (figs.length < 2 || figs.length > 4)) {
+  warn("figure count " + figs.length + " outside 2-4");
+}
+
+for (const f of figs) {
+  const attrs = f[0], inner = f[1], rest = f[2];
+  if (attrs.indexOf('role="img"') === -1) fail("svg missing role=img");
+  if (attrs.indexOf('aria-label="') === -1) fail("svg missing aria-label");
+  const vb = attrs.match(/viewBox="([^"]+)"/);
+  if (!vb) fail("svg missing viewBox");
+  else {
+    const n = vb[1].trim().split(/\s+/).map(Number);
+    if (n.length !== 4 || n.some(isNaN) || n[2] <= 0 || n[3] <= 0) fail("degenerate viewBox " + vb[1]);
+  }
+  if (!/<(text|rect|line|path|circle|polygon|polyline)[\s>]/.test(inner)) fail("svg draws nothing");
+  const cap = rest.match(/<figcaption>([\s\S]*?)<\/figcaption>/);
+  if (!cap) fail("figure without figcaption");
+  else {
+    const w = words(cap[1].replace(/<[^>]+>/g, " ").replace(/&mdash;/g, " "));
+    if (w < 25) warn("figcaption under 25 words (" + w + ")");
+    if (cap[1].indexOf("<strong>") === -1) warn("figcaption states no <strong> claim");
+  }
+  // Markers are pushed in document order before this figure's references are
+  // checked, so the test is "defined in this figure or an earlier one" — the
+  // same guarantee it gave a cheatsheet. It is order-sensitive in one direction
+  // only: a figure referencing a marker defined in a LATER figure fails. Hence
+  // <defs> is the first child of <svg> in the pattern.
+  for (const mm of inner.matchAll(/<marker id="([^"]+)"/g)) markerIds.push(mm[1]);
+  for (const mm of inner.matchAll(/url\(#([^)]+)\)/g)) {
+    if (markerIds.indexOf(mm[1]) === -1) {
+      fail("marker #" + mm[1] + " referenced before or without definition");
+    }
+  }
+}
+for (const id of markerIds) {
+  const uses = (s.match(new RegExp("url\\(#" + id + "\\)", "g")) || []).length;
+  if (!uses) warn("marker " + id + " is defined but never used");
+}
+
+// Literal hues are rejected inside figures, not across the page. Scoping it to
+// the figure innards is what lets this run on volumes at all: a volume is full of
+// <pre class="snippet"> blocks quoting real Java, SQL and CSS, and a snippet that
+// happens to show SVG or CSS markup must not be read as a figure drawing a wrong
+// colour. On the cheatsheets the unscoped scan found nothing outside figures
+// anyway, so this is equivalent there and strictly safer here.
+//
+// The old `!== "context-stroke"` guard was unreachable: the capture group is
+// `#[0-9a-fA-F]{3,8}` and "context-stroke" can never match it. The only permitted
+// literal fill is the marker's own `context-stroke`, which does not match and so
+// needs no exemption.
+for (const f of figs) {
+  for (const mm of f[1].matchAll(/(?:fill|stroke)="(#[0-9a-fA-F]{3,8})"/g)) {
+    fail("literal hue " + mm[1] + " in a figure - use the currentColor classes");
+  }
+}
+if (count(/orient="auto-start-reverse"/g) !== markerIds.length) {
+  fail("each marker needs orient=auto-start-reverse");
+}
+
+// The masthead carries a hand-maintained figure count and it has drifted — four
+// of 36 pages were already wrong before any conversion. Reporting it is cheap. It
+// is a warning rather than a failure because the wording rule has branches
+// ("N figures", optionally plus "M console transcripts") and the exact vocabulary
+// is the author's call.
+const mast = s.match(/<ul class="masthead__meta">([\s\S]*?)<\/ul>/);
+if (mast && figs.length) {
+  const claimed = /<li>(\d+) figures?<\/li>/.exec(mast[1]);
+  if (!claimed) warn("masthead carries no figure count (" + figs.length + " on page)");
+  else if (+claimed[1] !== figs.length) {
+    warn("masthead says " + claimed[1] + " figures, page has " + figs.length);
   }
 }
 
@@ -415,47 +526,6 @@ if (isCheatsheet) {
   }
   if (snippetCount < 3 || snippetCount > 8) warn("snippet count " + snippetCount + " outside 3-8");
 
-  // --- figures and SVG ---
-  for (const mm of s.matchAll(/<figure class="figure">\s*<svg([^>]*)>([\s\S]*?)<\/svg>([\s\S]*?)<\/figure>/g)) {
-    figs.push([mm[1], mm[2], mm[3]]);
-  }
-  if (figs.length < 2 || figs.length > 4) warn("figure count " + figs.length + " outside 2-4");
-  for (const f of figs) {
-    const attrs = f[0], inner = f[1], rest = f[2];
-    if (attrs.indexOf('role="img"') === -1) fail("svg missing role=img");
-    if (attrs.indexOf('aria-label="') === -1) fail("svg missing aria-label");
-    const vb = attrs.match(/viewBox="([^"]+)"/);
-    if (!vb) fail("svg missing viewBox");
-    else {
-      const n = vb[1].trim().split(/\s+/).map(Number);
-      if (n.length !== 4 || n.some(isNaN) || n[2] <= 0 || n[3] <= 0) fail("degenerate viewBox " + vb[1]);
-    }
-    if (!/<(text|rect|line|path|circle|polygon|polyline)[\s>]/.test(inner)) fail("svg draws nothing");
-    const cap = rest.match(/<figcaption>([\s\S]*?)<\/figcaption>/);
-    if (!cap) fail("figure without figcaption");
-    else {
-      const w = words(cap[1].replace(/<[^>]+>/g, " ").replace(/&mdash;/g, " "));
-      if (w < 25) warn("figcaption under 25 words (" + w + ")");
-      if (cap[1].indexOf("<strong>") === -1) warn("figcaption states no <strong> claim");
-    }
-    for (const mm of inner.matchAll(/<marker id="([^"]+)"/g)) markerIds.push(mm[1]);
-    for (const mm of inner.matchAll(/url\(#([^)]+)\)/g)) {
-      if (markerIds.indexOf(mm[1]) === -1) {
-        fail("marker #" + mm[1] + " referenced before or without definition");
-      }
-    }
-  }
-  for (const id of markerIds) {
-    const uses = (s.match(new RegExp("url\\(#" + id + "\\)", "g")) || []).length;
-    if (!uses) warn("marker " + id + " is defined but never used");
-  }
-  for (const mm of s.matchAll(/(?:fill|stroke)="(#[0-9a-fA-F]{3,8})"/g)) {
-    if (mm[1].toLowerCase() !== "context-stroke") fail("literal hue " + mm[1] + " - use currentColor classes");
-  }
-  if (count(/orient="auto-start-reverse"/g) !== markerIds.length) {
-    fail("each marker needs orient=auto-start-reverse");
-  }
-
   // --- number cards ---
   for (const mm of s.matchAll(/<div class="number">([\s\S]*?)<\/div>/g)) {
     if (mm[1].indexOf("number__value") === -1) fail("number card with no number__value");
@@ -494,7 +564,8 @@ console.log("=== " + path.relative(process.cwd(), PAGE) + " [" + MODE.slice(2) +
 if (isVolume) {
   console.log("chapters " + count(/<section[\s>]/g) +
               " | questions " + count(/class="qa__q"/g) +
-              " | diagrams " + diagrams +
+              " | figures " + figs.length +
+              " | ascii blocks " + diagrams +
               " | snippets " + count(/<pre class="snippet"/g) +
               " | tables " + count(/<table[\s>]/g) +
               " | callouts " + count(/<aside class="callout/g));

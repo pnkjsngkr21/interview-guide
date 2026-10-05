@@ -66,10 +66,12 @@ or a filter behaviour in one and expect every page on the site to move.
 long-form volume styles are appended after it, because the second half only *adds* selectors and
 custom properties; reversing the order would let the additions stop winning.
 
-**Corollary you must preserve:** `highlight.js` selects `pre.snippet` only. ASCII diagrams are
-`pre.diagram` with **no** `data-lang`, so the highlighter structurally cannot tokenise the 725
-diagrams. `check.js --volume` asserts this rather than trusting that someone re-reads `highlight.js`.
-When adding a code-block case, keep that guarantee.
+**Corollary you must preserve:** `highlight.js` selects `pre.snippet` only. The residual
+`pre.diagram` blocks — terminal transcripts, ASCII tables and numbered prose lists, roughly forty
+across the volumes — carry **no** `data-lang`, so the highlighter structurally cannot tokenise
+them; and the drawings that used to be ASCII are now `<figure class="figure">` SVG that it cannot
+select either. `check.js --volume` asserts the `pre.diagram` half and `check.js` asserts the SVG
+half on every page. When adding a code-block case, keep both guarantees.
 
 ## Contracts for contributors
 
@@ -83,7 +85,9 @@ Key invariants:
   Every page depends on them.
 - Cheatsheets are hand-authored from their volume and must **link, not restate**, any concept
   another volume owns.
-- A `pre.diagram` block is an ASCII diagram, not code. Leave it untagged.
+- A `pre.diagram` block is text, not a drawing — a terminal transcript, an ASCII table, a numbered
+  prose list. Leave it untagged. Drawings are `<figure class="figure">` inline SVG, never
+  `pre.diagram`.
 - `.bridge` marks a chapter continuing in the next volume — a plain paragraph, deliberately not a
   heading, so it has no id and no sidebar entry.
 
@@ -92,7 +96,10 @@ Key invariants:
 - UTF-8, **LF line endings**. `.gitattributes` pins `interview-prep/**/*.{html,css}` **and
   `index.html`** to `-text` so a Windows checkout cannot rewrite them to CRLF and churn every diff.
   The checker reads files as raw bytes and fails on any CR, so this is load-bearing, not cosmetic.
-- No emoji anywhere outside `pre` blocks, which the checker asserts with the code masked out.
+- No emoji anywhere outside `pre` blocks, which the checker asserts with the code masked out. Note
+  the asymmetry: a `<pre>` is masked, a `<figure>` is not, so `✓ ⚠ ✅ ❌ ★` inside a converted figure
+  is a hard failure. That is deliberate — it forces a drawing to carry meaning in
+  `.node--good`/`--warn`/`--bad` rather than in a glyph.
 - Zero dependencies in any script; `fs` and `path` only.
 - HTML is committed as-is. Edit the file; there is nothing to rebuild.
 
@@ -101,6 +108,10 @@ Key invariants:
 - **There is no build.** If you are looking for a generator, a task runner, or a way to
   "regenerate" the volumes, there isn't one — `interview-prep/**/*.html` is the source. Editing it
   directly is correct, not a shortcut.
+- **A figure is not a `<pre>`.** The emoji mask, the highlighter's `pre.snippet` selector and the
+  `pre.diagram` no-`data-lang` guarantee all stop at `</pre>`. An SVG figure sits outside all three,
+  which is why the emoji rule applies to figure text and why the figure contract in `check.js` is a
+  separate block from the diagram guarantee.
 - **The checker verifies structure, not content.** It has no source to compare a page against, so it
   catches broken links, duplicate ids, missing assets and encoding damage — but it cannot tell you
   that a chapter was dropped or a paragraph mangled. Read the diff.
