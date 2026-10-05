@@ -16,7 +16,7 @@
 
 <main class="main main--guide" id="main">
 
-<header class="masthead"><p class="masthead__eyebrow">Java</p><h1>Part 3 — Core Java</h1><ul class="masthead__meta"><li>12 chapters</li><li>426 questions</li></ul></header>
+<header class="masthead"><p class="masthead__eyebrow">Java</p><h1>Part 3 — Core Java</h1><ul class="masthead__meta"><li>12 chapters</li><li>426 questions</li><li>2 figures</li><li>3 text blocks</li></ul></header>
 
 <div class="toolbar"><div class="search"><input type="search" data-filter-input placeholder="Filter chapters — press /" aria-label="Filter chapters"><span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span></div><div class="pager"><a class="pager__prev" href="java-02-object-oriented-programming.html">&larr; Object-Oriented Programming</a><a class="pager__next" href="java-04-collections-framework.html">The Collections Framework &rarr;</a></div></div>
 
@@ -152,17 +152,43 @@ class InvoiceValidator { ... }   // package-private (default) — invisible OUTS
                   private  (this module only) -> nothing else
 
   a module can READ a type it cannot ACCESS:
-  reads com.acme.api but does not export com.acme.billing  ->  compiles, then fails at runtime</code></pre><p>The distinction that earns its keep is <code>exports</code> versus <code>opens</code>. <code>exports</code> grants normal compile-time and runtime access to the package's public types. <code>opens</code> grants <em>reflection</em> — <code>setAccessible</code>, <code>getDeclaredMethod</code>, private-field reads. Ordinary code needs <code>exports</code>; frameworks that reflect over your types need <code>opens</code>. That is why a Spring or Jackson application fails at runtime with <code>IllegalAccessException</code> on a private field of an exported package: the package was exported, never opened.</p><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p><code>requires transitive</code> does <strong>not</strong> re-export packages. The JLS is explicit about this in §7.7.1: a package in module <code>m.D</code> is not re-exported by <code>m.C</code> or by <code>m.B</code>. What <code>requires transitive</code> does is make the <em>dependency</em> readable to your own readers — it propagates the edge in the graph, not an <code>exports</code>. If your consumers need <code>m.D</code>&rsquo;s types directly, <code>m.D</code> itself must <code>exports</code> them. This is the most commonly tested JPMS misconception.</p></aside><h4 class="vol__h4" id="module-path-vs-classpath-mechanics">Where module-info.java goes, and what breaks without it</h4><p><code>module-info.java</code> must <strong>not</strong> sit inside a package directory. The usual Maven and Gradle layout puts it beside the package roots:</p><pre class="diagram"><code>  my.library/
-    src/main/java/
-      module-info.java            &lt;- here: sibling of the package directories
-      com/acme/billing/           &lt;- a package directory
-        Invoice.java
-
-  NOT src/main/java/com/acme/billing/module-info.java
-
-  why: module-info.java is not a member of any package. A source file's
-  package must match its directory, and this file's package is the
-  unnamed package, which by rule has no directory.</code></pre><p>A JAR without <code>module-info.class</code> still works — it becomes an <strong>automatic module</strong>, named from the JAR filename (<code>commons-lang3-3.14.jar</code> becomes module <code>commons.lang3</code>). Automatic modules read every other module and export every one of their packages, so they are a compatibility bridge, not an encapsulation win. That is why a modular application does not actually gain encapsulation from its third-party dependencies until they ship real module descriptors.</p><p>Everything left on the <em>classpath</em> — no <code>--module-path</code> — collapses into a single <strong>unnamed module</strong>. The unnamed module reads every named module and exports all of its own packages, so it can see inside <code>java.base</code>. Named modules can see the unnamed module but not vice versa in terms of encapsulation. This is the whole reason JDK 9 shipped with dozens of <code>--illegal-access=permit</code> warnings: the JDK&rsquo;s own internal packages were being opened to code on the classpath. <strong>JEP 403</strong> made that default deny in JDK 16 and removed the escape hatch entirely in JDK 17 — on the JDK 25 baseline there is no <code>--illegal-access</code> flag at all.</p><aside class="callout callout--must"><span class="callout__label">Must remember</span><p>The four <code>--add-*</code> flags differ in what they open, and using the wrong one produces a warning that does not fix the problem:</p><ul><li><code>--add-modules</code> &mdash; add a module to the <strong>root set</strong> so it is resolved at all</li><li><code>--add-reads</code> &mdash; grant <strong>readability</strong> (the <code>requires</code> graph)</li><li><code>--add-exports</code> &mdash; grant <strong>accessibility</strong> for normal use</li><li><code>--add-opens</code> &mdash; grant <strong>deep reflection</strong> into a package</li></ul><p><code>--patch-module</code> is the odd one out: it is <strong>module augmentation</strong>, for adding classes and overriding classes <em>inside</em> an existing named module. It is documented for that purpose and is not a supported remedy for a split package.</p></aside><h4 class="vol__h4" id="services-without-a-classpath-scan">Services without a classpath scan</h4><p>Java 9 gave <code>ServiceLoader</code> a compile-time contract. The consumer declares what it consumes, the provider declares what it supplies, and the module graph connects them at launch time — no reflection, no scanning, and no dependency on an implementation library that the consumer never names.</p><pre class="snippet" data-lang="java"><code>// consumer module
+  reads com.acme.api but does not export com.acme.billing  ->  compiles, then fails at runtime</code></pre><p>The distinction that earns its keep is <code>exports</code> versus <code>opens</code>. <code>exports</code> grants normal compile-time and runtime access to the package's public types. <code>opens</code> grants <em>reflection</em> — <code>setAccessible</code>, <code>getDeclaredMethod</code>, private-field reads. Ordinary code needs <code>exports</code>; frameworks that reflect over your types need <code>opens</code>. That is why a Spring or Jackson application fails at runtime with <code>IllegalAccessException</code> on a private field of an exported package: the package was exported, never opened.</p><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p><code>requires transitive</code> does <strong>not</strong> re-export packages. The JLS is explicit about this in §7.7.1: a package in module <code>m.D</code> is not re-exported by <code>m.C</code> or by <code>m.B</code>. What <code>requires transitive</code> does is make the <em>dependency</em> readable to your own readers — it propagates the edge in the graph, not an <code>exports</code>. If your consumers need <code>m.D</code>&rsquo;s types directly, <code>m.D</code> itself must <code>exports</code> them. This is the most commonly tested JPMS misconception.</p></aside><h4 class="vol__h4" id="module-path-vs-classpath-mechanics">Where module-info.java goes, and what breaks without it</h4><p><code>module-info.java</code> must <strong>not</strong> sit inside a package directory. The usual Maven and Gradle layout puts it beside the package roots:</p><figure class="figure">
+  <svg viewBox="0 0 900 300" role="img" aria-label="module-info.java belongs beside the package directories under src/main/java, never inside one, because the file is a member of the unnamed package, and the unnamed package has no directory for a source file's package to match.">
+    <text class="edge-label edge-label--strong" x="40" y="44">beside the package roots</text>
+    <rect class="node" x="40" y="56" width="340" height="38" rx="4"/>
+    <text class="label" x="210" y="80" text-anchor="middle">my.library/src/main/java</text>
+    <rect class="node node--good" x="80" y="104" width="300" height="38" rx="4"/>
+    <text class="label" x="230" y="128" text-anchor="middle">module-info.java</text>
+    <rect class="node" x="80" y="152" width="300" height="48" rx="4"/>
+    <text class="label" x="230" y="174" text-anchor="middle">com/acme/billing/</text>
+    <text class="label label--sub" x="230" y="192" text-anchor="middle">a package directory</text>
+    <rect class="node" x="120" y="210" width="260" height="34" rx="4"/>
+    <text class="label" x="250" y="232" text-anchor="middle">Invoice.java</text>
+    <path class="edge" d="M 60 94 L 60 176 M 60 123 L 80 123 M 60 176 L 80 176 M 100 200 L 100 227 L 120 227"/>
+    <text class="edge-label edge-label--strong" x="500" y="44">inside a package directory</text>
+    <rect class="node" x="500" y="56" width="340" height="38" rx="4"/>
+    <text class="label" x="670" y="80" text-anchor="middle">my.library/src/main/java</text>
+    <rect class="node" x="540" y="104" width="300" height="38" rx="4"/>
+    <text class="label" x="690" y="128" text-anchor="middle">com/acme/billing/</text>
+    <rect class="node node--bad" x="580" y="152" width="260" height="48" rx="4"/>
+    <text class="label" x="710" y="174" text-anchor="middle">module-info.java</text>
+    <text class="label label--sub" x="710" y="192" text-anchor="middle">no directory matches it</text>
+    <rect class="node" x="580" y="210" width="260" height="34" rx="4"/>
+    <text class="label" x="710" y="232" text-anchor="middle">Invoice.java</text>
+    <path class="edge edge--bad" d="M 520 94 L 520 123 L 540 123 M 560 142 L 560 227 M 560 176 L 580 176 M 560 227 L 580 227"/>
+    <text class="edge-label" x="450" y="272" text-anchor="middle">module-info.java is in the unnamed package, and a source file's</text>
+    <text class="edge-label" x="450" y="290" text-anchor="middle">package must match its directory &mdash; so it has no directory to sit in</text>
+  </svg>
+  <figcaption>
+    <strong><code>module-info.java</code> is a member of the unnamed package, so it sits beside the
+    package directories, never inside one.</strong> A source file&rsquo;s package declaration has to
+    match the directory it lives in, and the unnamed package &mdash; which is what a
+    <code>module-info.java</code> with no <code>package</code> line belongs to &mdash; is defined to
+    have no directory at all. Put it under <code>com/acme/billing/</code> and the build rejects it
+    on the package-matches-directory rule, before JPMS is ever consulted; leave it at the source
+    root and the same file declares the module for every package beside it.
+  </figcaption>
+</figure><p>A JAR without <code>module-info.class</code> still works — it becomes an <strong>automatic module</strong>, named from the JAR filename (<code>commons-lang3-3.14.jar</code> becomes module <code>commons.lang3</code>). Automatic modules read every other module and export every one of their packages, so they are a compatibility bridge, not an encapsulation win. That is why a modular application does not actually gain encapsulation from its third-party dependencies until they ship real module descriptors.</p><p>Everything left on the <em>classpath</em> — no <code>--module-path</code> — collapses into a single <strong>unnamed module</strong>. The unnamed module reads every named module and exports all of its own packages, so it can see inside <code>java.base</code>. Named modules can see the unnamed module but not vice versa in terms of encapsulation. This is the whole reason JDK 9 shipped with dozens of <code>--illegal-access=permit</code> warnings: the JDK&rsquo;s own internal packages were being opened to code on the classpath. <strong>JEP 403</strong> made that default deny in JDK 16 and removed the escape hatch entirely in JDK 17 — on the JDK 25 baseline there is no <code>--illegal-access</code> flag at all.</p><aside class="callout callout--must"><span class="callout__label">Must remember</span><p>The four <code>--add-*</code> flags differ in what they open, and using the wrong one produces a warning that does not fix the problem:</p><ul><li><code>--add-modules</code> &mdash; add a module to the <strong>root set</strong> so it is resolved at all</li><li><code>--add-reads</code> &mdash; grant <strong>readability</strong> (the <code>requires</code> graph)</li><li><code>--add-exports</code> &mdash; grant <strong>accessibility</strong> for normal use</li><li><code>--add-opens</code> &mdash; grant <strong>deep reflection</strong> into a package</li></ul><p><code>--patch-module</code> is the odd one out: it is <strong>module augmentation</strong>, for adding classes and overriding classes <em>inside</em> an existing named module. It is documented for that purpose and is not a supported remedy for a split package.</p></aside><h4 class="vol__h4" id="services-without-a-classpath-scan">Services without a classpath scan</h4><p>Java 9 gave <code>ServiceLoader</code> a compile-time contract. The consumer declares what it consumes, the provider declares what it supplies, and the module graph connects them at launch time — no reflection, no scanning, and no dependency on an implementation library that the consumer never names.</p><pre class="snippet" data-lang="java"><code>// consumer module
 module com.acme.web { requires com.acme.billing; }
 
 // consumer code — the interface need not be in the module being loaded
@@ -250,22 +276,48 @@ String s = (String) strings2.get(0);   // compiler auto-inserts this cast for yo
 
   the day that separates them: 2024-03-09 in New York, spring forward
       .plus(Duration.ofDays(1))     -&gt; 2024-03-10 01:30 EST  one second early
-      .plus(Period.ofDays(1))       -&gt; 2024-03-10 01:30 EST  skipped entirely</code></pre><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&ldquo;<code>Duration</code> can&rsquo;t do days&rdquo; is wrong. <code>Duration.ofDays(1)</code> exists and is exactly 24 hours — which is precisely the point: a <code>Duration</code> day is <strong>not</strong> a calendar day, so across a DST boundary it lands at a different wall-clock time. What <code>Duration</code> genuinely cannot express is months and years, because those have no fixed length. And the converse: <code>Period.ofDays(1)</code> exists but a <code>Period</code> cannot express hours, because an hour is not a calendar unit.</p></aside><p>Both implement <code>TemporalAmount</code>, so <code>plus()</code> accepts either. They are not interchangeable, and picking the wrong one is how &ldquo;the subscription renews 23 hours late, twice a year&rdquo; happens.</p><h3 class="vol__h3" id="84-zones-and-dst">8.4 Zones and DST</h3><p>A zone database lives in <code>$JAVA_HOME/lib/tzdb.dat</code>, and the JDK ships its own copy — which is why a JRE can resolve <code>ZoneId.of(&quot;Europe/London&quot;)</code> without any system library. The rules are historical, not just current: <code>Asia/Kolkata</code> was <code>Asia/Calcutta</code> and had a +05:30 offset during British rule, and <code>Europe/Moscow</code> has changed its offset several times. This is why the zone id is a string and not a numeric offset stored forever.</p><p>DST produces two anomalies and both have defined, non-obvious resolution rules in <code>java.time</code>:</p><div class="table-wrap"><table><thead><tr><th>Anomaly</th><th>What happened</th><th>What <code>ZonedDateTime.of</code> does</th></tr></thead><tbody><tr><td><strong>Gap</strong></td><td>Clocks jump forward — 02:00 becomes 03:00, so 02:30 never happens</td><td>Shifts the time <em>forward</em> by the length of the gap: 02:30 becomes 03:30</td></tr><tr><td><strong>Overlap</strong></td><td>Clocks fall back — 01:00 happens twice</td><td>Chooses the <em>earlier</em> of the two offsets, i.e. still summer time</td></tr></tbody></table></div><aside class="callout callout--must"><span class="callout__label">Must remember</span><p><code>ZonedDateTime</code> stores two things: the instant, and the <em>zone rule</em> it was resolved with. Calling <code>withZoneSameInstant(ZoneId.of(&quot;America/New_York&quot;))</code> keeps the moment on the timeline identical and changes only what the clock face reads. That is the difference from <code>withZoneSameLocal()</code>, which keeps the wall-clock reading and <strong>moves the moment</strong> — which is what you want for &ldquo;same time next week&rdquo; and never what you want for an event.</p></aside><p>The rule that makes a correct design fall out: <strong>store <code>Instant</code> or <code>OffsetDateTime</code> in the database, convert to <code>ZonedDateTime</code> only at the edges</strong> — rendering, and the &ldquo;9am local&rdquo; input to a scheduler. Storing a <code>LocalDateTime</code> that means an instant is the bug; storing a <code>LocalDateTime</code> that means &ldquo;the user&rsquo;s birthday&rdquo; is correct.</p><pre class="diagram"><code>  user types "2024-06-01T09:00"
-      |
-      v
-  ZoneId.of(user.getZoneId())   -- stored per user, IANA id like "Asia/Kolkata"
-      |
-      v
-  ZonedDateTime.ofLocal(localDateTime, zone, preferredOffset)  -- resolves the gap/overlap
-      |
-      v
-  .toInstant()                  -- what you persist
-      |
-      v
-  Instant.atZone(zone)           -- when you read it back and display
-
-  persist the ZonedDateTime instead and you persist the zone,
-  so the same event now reads differently depending on who looks at it</code></pre><h3 class="vol__h3" id="85-parsing-and-formatting">8.5 Parsing and Formatting</h3><p><code>DateTimeFormatter</code> is immutable and thread-safe, so one static constant is enough — the opposite of <code>SimpleDateFormat</code>. It is both a parser and a printer, and the same pattern parses and formats.</p><pre class="snippet" data-lang="java"><code>// the shared, thread-safe constant — make it static final and reuse it
+      .plus(Period.ofDays(1))       -&gt; 2024-03-10 01:30 EST  skipped entirely</code></pre><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&ldquo;<code>Duration</code> can&rsquo;t do days&rdquo; is wrong. <code>Duration.ofDays(1)</code> exists and is exactly 24 hours — which is precisely the point: a <code>Duration</code> day is <strong>not</strong> a calendar day, so across a DST boundary it lands at a different wall-clock time. What <code>Duration</code> genuinely cannot express is months and years, because those have no fixed length. And the converse: <code>Period.ofDays(1)</code> exists but a <code>Period</code> cannot express hours, because an hour is not a calendar unit.</p></aside><p>Both implement <code>TemporalAmount</code>, so <code>plus()</code> accepts either. They are not interchangeable, and picking the wrong one is how &ldquo;the subscription renews 23 hours late, twice a year&rdquo; happens.</p><h3 class="vol__h3" id="84-zones-and-dst">8.4 Zones and DST</h3><p>A zone database lives in <code>$JAVA_HOME/lib/tzdb.dat</code>, and the JDK ships its own copy — which is why a JRE can resolve <code>ZoneId.of(&quot;Europe/London&quot;)</code> without any system library. The rules are historical, not just current: <code>Asia/Kolkata</code> was <code>Asia/Calcutta</code> and had a +05:30 offset during British rule, and <code>Europe/Moscow</code> has changed its offset several times. This is why the zone id is a string and not a numeric offset stored forever.</p><p>DST produces two anomalies and both have defined, non-obvious resolution rules in <code>java.time</code>:</p><div class="table-wrap"><table><thead><tr><th>Anomaly</th><th>What happened</th><th>What <code>ZonedDateTime.of</code> does</th></tr></thead><tbody><tr><td><strong>Gap</strong></td><td>Clocks jump forward — 02:00 becomes 03:00, so 02:30 never happens</td><td>Shifts the time <em>forward</em> by the length of the gap: 02:30 becomes 03:30</td></tr><tr><td><strong>Overlap</strong></td><td>Clocks fall back — 01:00 happens twice</td><td>Chooses the <em>earlier</em> of the two offsets, i.e. still summer time</td></tr></tbody></table></div><aside class="callout callout--must"><span class="callout__label">Must remember</span><p><code>ZonedDateTime</code> stores two things: the instant, and the <em>zone rule</em> it was resolved with. Calling <code>withZoneSameInstant(ZoneId.of(&quot;America/New_York&quot;))</code> keeps the moment on the timeline identical and changes only what the clock face reads. That is the difference from <code>withZoneSameLocal()</code>, which keeps the wall-clock reading and <strong>moves the moment</strong> — which is what you want for &ldquo;same time next week&rdquo; and never what you want for an event.</p></aside><p>The rule that makes a correct design fall out: <strong>store <code>Instant</code> or <code>OffsetDateTime</code> in the database, convert to <code>ZonedDateTime</code> only at the edges</strong> — rendering, and the &ldquo;9am local&rdquo; input to a scheduler. Storing a <code>LocalDateTime</code> that means an instant is the bug; storing a <code>LocalDateTime</code> that means &ldquo;the user&rsquo;s birthday&rdquo; is correct.</p><figure class="figure">
+  <svg viewBox="0 0 900 420" role="img" aria-label="A local date-time only becomes a stored instant after the user's IANA zone is attached and the gap or overlap is resolved. ZonedDateTime.ofLocal is the step that decides the offset, toInstant is what you persist, and atZone re-applies the zone on the way back out for display.">
+    <defs>
+      <marker id="arw-java-03-02-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="200" y="20" width="500" height="52" rx="5"/>
+    <text class="label" x="450" y="42" text-anchor="middle">user types 2024-06-01T09:00</text>
+    <text class="label label--sub" x="450" y="60" text-anchor="middle">a local time, no zone attached</text>
+    <path class="edge" d="M 450 72 L 450 104" marker-end="url(#arw-java-03-02-a)"/>
+    <rect class="node" x="200" y="108" width="500" height="52" rx="5"/>
+    <text class="label" x="450" y="130" text-anchor="middle">ZoneId.of(user.getZoneId())</text>
+    <text class="label label--sub" x="450" y="148" text-anchor="middle">IANA id stored on the user, e.g. Asia/Kolkata</text>
+    <path class="edge" d="M 450 160 L 450 192" marker-end="url(#arw-java-03-02-a)"/>
+    <rect class="node node--accent" x="200" y="196" width="500" height="60" rx="5"/>
+    <text class="label" x="450" y="220" text-anchor="middle">ZonedDateTime.ofLocal(local, zone, offset)</text>
+    <text class="label label--sub" x="450" y="240" text-anchor="middle">resolves the gap and the overlap</text>
+    <path class="edge" d="M 450 256 L 450 288" marker-end="url(#arw-java-03-02-a)"/>
+    <rect class="node node--good" x="200" y="292" width="500" height="52" rx="5"/>
+    <text class="label" x="450" y="314" text-anchor="middle">.toInstant()</text>
+    <text class="label label--sub" x="450" y="332" text-anchor="middle">what you persist</text>
+    <path class="edge edge--return" d="M 200 318 L 120 318 L 120 378 L 200 378" marker-end="url(#arw-java-03-02-a)"/>
+    <rect class="node" x="200" y="356" width="500" height="44" rx="5"/>
+    <text class="label" x="450" y="383" text-anchor="middle">Instant.atZone(zone) &mdash; only to display</text>
+    <text class="edge-label fill-bad" x="790" y="222" text-anchor="middle">persist the ZonedDateTime</text>
+    <text class="edge-label fill-bad" x="790" y="239" text-anchor="middle">and you persist the zone</text>
+  </svg>
+  <figcaption>
+    <strong>Convert to <code>Instant</code> at the boundary and back to
+    <code>ZonedDateTime</code> at the edge, never in between.</strong> The user&rsquo;s input arrives
+    as a <code>LocalDateTime</code> with no zone, so the IANA id on their record is what makes
+    <code>2024-06-01T09:00</code> a moment rather than a wall-clock reading.
+    <code>ZonedDateTime.ofLocal</code> is the step that decides the offset, and it is the step that
+    has to know the gap and overlap rules &mdash; <code>2024-03-10 02:30</code> in New York never
+    happens, and the resolver shifts it forward by the length of the gap. What crosses the database
+    boundary is the <code>Instant</code>; the zone is re-applied on the way out, so two users in
+    different zones read the same stored event on their own clocks. Persisting the
+    <code>ZonedDateTime</code> instead bakes the zone into the row, and the same event then reads
+    differently depending on who looks at it.
+  </figcaption>
+</figure><h3 class="vol__h3" id="85-parsing-and-formatting">8.5 Parsing and Formatting</h3><p><code>DateTimeFormatter</code> is immutable and thread-safe, so one static constant is enough — the opposite of <code>SimpleDateFormat</code>. It is both a parser and a printer, and the same pattern parses and formats.</p><pre class="snippet" data-lang="java"><code>// the shared, thread-safe constant — make it static final and reuse it
 static final DateTimeFormatter ISO_OFFSET =
         DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX");
 
