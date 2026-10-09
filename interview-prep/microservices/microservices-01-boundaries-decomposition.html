@@ -16,7 +16,7 @@
 
 <main class="main main--guide" id="main">
 
-<header class="masthead"><p class="masthead__eyebrow">Microservices — BOUNDARIES, DECOMPOSITION &amp; TEAM TOPOLOGY</p><h1>The Microservices Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>9 chapters</li><li>118 questions</li><li>38 diagrams</li></ul></header>
+<header class="masthead"><p class="masthead__eyebrow">Microservices — BOUNDARIES, DECOMPOSITION &amp; TEAM TOPOLOGY</p><h1>The Microservices Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>9 chapters</li><li>118 questions</li><li>7 figures</li><li>34 text blocks</li></ul></header>
 
 <div class="toolbar"><div class="search"><input type="search" data-filter-input placeholder="Filter chapters — press /" aria-label="Filter chapters"><span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span></div><div class="pager"><a class="pager__next" href="microservices-02-communication-data-consistency.html">COMMUNICATION, DATA &amp; CONSISTENCY &rarr;</a></div></div>
 
@@ -32,23 +32,77 @@ CROSS-AVAILABILITY-ZONE, same region       ~5 – 15 ms
 CROSS-REGION (us-east → eu-west)           ~30 – 80 ms
 CROSS-CONTINENT                           ~80 – 150 ms
 
-None of those numbers is the problem. The CHAIN is the problem.
+None of those numbers is the problem. The CHAIN is the problem.</code></pre><figure class="figure">
+  <svg viewBox="0 0 900 350" role="img" aria-label="Six serial hops of twenty milliseconds each add their tails, giving a p50 of 120 ms and a p99 over 600 ms, while three independent calls in parallel followed by a join give a p50 of 60 ms and a p99 near 120 ms. The hop latency is the same in both arrangements; only the shape differs.">
+    <defs>
+      <marker id="arw-microservices-01-01-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="edge-label edge-label--strong" x="25" y="22">SERIAL — six hops, 20 ms median each</text>
+    <rect class="node" x="25" y="34" width="104" height="46" rx="5"/>
+    <text class="label" x="77" y="62" text-anchor="middle">gateway</text>
+    <rect class="node" x="145" y="34" width="104" height="46" rx="5"/>
+    <text class="label" x="197" y="62" text-anchor="middle">orders</text>
+    <rect class="node" x="265" y="34" width="104" height="46" rx="5"/>
+    <text class="label" x="317" y="62" text-anchor="middle">inventory</text>
+    <rect class="node" x="385" y="34" width="104" height="46" rx="5"/>
+    <text class="label" x="437" y="62" text-anchor="middle">pricing</text>
+    <rect class="node" x="505" y="34" width="104" height="46" rx="5"/>
+    <text class="label" x="557" y="62" text-anchor="middle">fraud</text>
+    <rect class="node" x="625" y="34" width="104" height="46" rx="5"/>
+    <text class="label" x="677" y="62" text-anchor="middle">payment</text>
+    <rect class="node" x="745" y="34" width="104" height="46" rx="5"/>
+    <text class="label" x="797" y="62" text-anchor="middle">notification</text>
+    <path class="edge" d="M 129 57 L 145 57" marker-end="url(#arw-microservices-01-01-a)"/>
+    <path class="edge" d="M 249 57 L 265 57" marker-end="url(#arw-microservices-01-01-a)"/>
+    <path class="edge" d="M 369 57 L 385 57" marker-end="url(#arw-microservices-01-01-a)"/>
+    <path class="edge" d="M 489 57 L 505 57" marker-end="url(#arw-microservices-01-01-a)"/>
+    <path class="edge" d="M 609 57 L 625 57" marker-end="url(#arw-microservices-01-01-a)"/>
+    <path class="edge" d="M 729 57 L 745 57" marker-end="url(#arw-microservices-01-01-a)"/>
+    <text class="edge-label edge-label--strong" x="25" y="108">p50  6 × 20 ms = 120 ms</text>
+    <text class="edge-label edge-label--strong" x="265" y="108">p99  6 × ~100 ms = 600 ms+</text>
+    <text class="edge-label fill-bad" x="575" y="108">p99.9  6 × ~350 ms = 2 s+</text>
 
-  SERIAL CHAIN — six hops, 20ms median each
-
-    gateway → orders(20) → inventory(20) → pricing(20)
-            → fraud(20) → payment(20) → notification(20)
-
-    p50:    6 × 20ms   = 120 ms      ← the number everyone quotes
-    p99:    6 × ~100ms = 600 ms+     ← the number users experience as &quot;down&quot;
-    p99.9:  6 × ~350ms = 2 s+         ← the number that generates pages
-
-  PARALLEL — three independent, then join
-
-    gateway → {inventory(20), fraud(20), pricing(20)} → join → payment(20)
-
-    p50:    20 + 20 + 20 = 60 ms      ← 2× better at the median
-    p99:    ~100 + 20     = 120 ms    ← 5× better at the tail</code></pre><p>The rule is short enough to memorise and important enough to be the centre of the volume: <strong>the p99 of a sum is approximately the sum of the p99s.</strong> Serial hops add their tails; parallel hops do not.</p><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p>A same-datacentre service-to-service HTTP call is <strong>0.5–1ms</strong>; a cross-region call is <strong>30–80ms</strong>. Neither number is the problem. The problem is the chain: six <em>serial</em> dependencies at 20ms median give a <strong>p50 of 120ms and a p99 closer to 600ms+</strong>, because the p99 of a sum is roughly the sum of the p99s. The tail is where incidents come from, and the tail is entirely a consequence of how you arranged the calls, not how fast any one of them is.</p></aside><p>Notice what this arithmetic does <em>not</em> say. It does not say &quot;avoid network calls.&quot; It says <strong>avoid serial network calls</strong>, and it says the leverage is in the arrangement, not the per-hop speed. A team that spends a quarter shaving 4ms off a 20ms call has missed the available win by a factor of five, and Volume 2's chapter on communication style is where the fix lives.</p><p>There is a second, subtler consequence that only appears at staff level: the p99 is not just latency, it is <strong>occupancy</strong>. A service at p50 120ms and p99 600ms is holding a request thread for 600ms on 1% of requests. Thread pools sized on the p50 will exhaust on the p99, and the exhaustion is not a latency problem — it is a cascading failure, because the exhausted caller is now holding ITS pool while it waits. Six hops of this is a coordinated thundering herd with a 600ms fuse.</p><aside class="callout callout--prod"><span class="callout__label">In production</span><p>Latency budgets are the one architectural constraint that is measurable from outside and therefore negotiable inside. Put the budget in writing before the split — &quot;the checkout path may make at most four synchronous calls and must stay under 400ms at p99&quot; — and you turn a taste argument into a constraint a design review can actually enforce. Teams that split without a budget discover the budget when a service review adds one call to a path that was already at the edge, and the fix is a month of work reverting it.</p></aside><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&quot;Microservices add latency but give independent deployment and independent scaling.&quot; This is the true answer and it scores about half marks, because it names the cost in the abstract and the benefits in the concrete. The staff-level continuation names the specific mechanism: they convert compile-time failures into runtime ones, they remove ACID across a business operation, they multiply the operational surface by the number of deployables, and the latency arithmetic is a <strong>sum of distributions, not a sum of medians</strong> — so serial chains produce p99s nobody budgeted for. The candidate who says &quot;and here's what it costs, here is the number&quot; is the one who gets the follow-up question.</p></aside><p>Volume 11 Chapter 1 sells the trade-off — it is the version to read if you want the persuasive summary. This chapter is the version to read if you want to be able to defend the cost model under questioning, which is a different skill.</p><h3 class="vol__h3" id="12-the-costs-that-actually-decide-it">1.2 The Costs That Actually Decide It</h3><p>Latency is the cost everyone names and the cost that decides the fewest extractions. The costs that decide real boundaries are the ones that do not show up in a latency graph.</p><p><strong>1. Partial failure becomes the normal case, not the exception.</strong></p><p>In a monolith, an exception means the request failed and the transaction rolled back — atomicity is the default and failure is a special case the runtime handles for you. Across six services, the <em>realistic</em> outcome of an operation is that three succeeded and three did not, and there is no rollback. This is not an edge case; at 99.9% availability per service and six dependencies, the probability that every call in a chain succeeds over a day is astonishingly low, and the probability that a <em>user</em> ever sees a fully-successful chain is what you are actually designing for.</p><pre class="diagram"><code>  ONE CALL AT 99.9% AVAILABILITY
+    <text class="edge-label edge-label--strong" x="25" y="170">PARALLEL — three independent, then a join</text>
+    <rect class="node" x="25" y="196" width="104" height="46" rx="5"/>
+    <text class="label" x="77" y="224" text-anchor="middle">gateway</text>
+    <path class="edge" d="M 129 219 L 175 219"/>
+    <path class="edge" d="M 175 168 L 175 272"/>
+    <path class="edge" d="M 175 168 L 231 168" marker-end="url(#arw-microservices-01-01-a)"/>
+    <path class="edge" d="M 175 219 L 231 219" marker-end="url(#arw-microservices-01-01-a)"/>
+    <path class="edge" d="M 175 272 L 231 272" marker-end="url(#arw-microservices-01-01-a)"/>
+    <rect class="node" x="235" y="148" width="140" height="40" rx="5"/>
+    <text class="label" x="305" y="173" text-anchor="middle">inventory</text>
+    <rect class="node" x="235" y="199" width="140" height="40" rx="5"/>
+    <text class="label" x="305" y="224" text-anchor="middle">fraud</text>
+    <rect class="node" x="235" y="252" width="140" height="40" rx="5"/>
+    <text class="label" x="305" y="277" text-anchor="middle">pricing</text>
+    <path class="edge" d="M 375 168 L 425 168"/>
+    <path class="edge" d="M 375 219 L 425 219"/>
+    <path class="edge" d="M 375 272 L 425 272"/>
+    <path class="edge" d="M 425 168 L 425 272"/>
+    <path class="edge" d="M 425 219 L 461 219" marker-end="url(#arw-microservices-01-01-a)"/>
+    <rect class="node node--good" x="465" y="199" width="100" height="40" rx="5"/>
+    <text class="label" x="515" y="224" text-anchor="middle">join</text>
+    <path class="edge" d="M 565 219 L 601 219" marker-end="url(#arw-microservices-01-01-a)"/>
+    <rect class="node" x="605" y="199" width="150" height="40" rx="5"/>
+    <text class="label" x="680" y="224" text-anchor="middle">payment</text>
+    <text class="edge-label edge-label--strong" x="25" y="330">p50  20 + 20 + 20 = 60 ms</text>
+    <text class="edge-label edge-label--strong" x="265" y="330">p99  ~100 + 20 = 120 ms</text>
+    <text class="edge-label fill-warn" x="575" y="330">tails do not add</text>
+  </svg>
+  <figcaption>
+    <strong>Serial hops add their tails; parallel hops do not, and the hop latency is identical in
+    both arrangements.</strong>
+    Six hops at 20&nbsp;ms median give a p50 of 120&nbsp;ms but a p99 over 600&nbsp;ms and a
+    p99.9 in seconds — the p99 of a sum is roughly the sum of the p99s, so the number users
+    experience as &quot;down&quot; is five times the number anyone quotes. Fanning three calls out in
+    parallel and joining costs nothing extra and takes the p99 to roughly 120&nbsp;ms. The
+    per-hop numbers matter far less: 0.5–1&nbsp;ms in the same datacentre, 30–80&nbsp;ms
+    cross-region, and neither is what makes the checkout page slow.
+  </figcaption>
+</figure><p>The rule is short enough to memorise and important enough to be the centre of the volume: <strong>the p99 of a sum is approximately the sum of the p99s.</strong> Serial hops add their tails; parallel hops do not.</p><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p>A same-datacentre service-to-service HTTP call is <strong>0.5–1ms</strong>; a cross-region call is <strong>30–80ms</strong>. Neither number is the problem. The problem is the chain: six <em>serial</em> dependencies at 20ms median give a <strong>p50 of 120ms and a p99 closer to 600ms+</strong>, because the p99 of a sum is roughly the sum of the p99s. The tail is where incidents come from, and the tail is entirely a consequence of how you arranged the calls, not how fast any one of them is.</p></aside><p>Notice what this arithmetic does <em>not</em> say. It does not say &quot;avoid network calls.&quot; It says <strong>avoid serial network calls</strong>, and it says the leverage is in the arrangement, not the per-hop speed. A team that spends a quarter shaving 4ms off a 20ms call has missed the available win by a factor of five, and Volume 2's chapter on communication style is where the fix lives.</p><p>There is a second, subtler consequence that only appears at staff level: the p99 is not just latency, it is <strong>occupancy</strong>. A service at p50 120ms and p99 600ms is holding a request thread for 600ms on 1% of requests. Thread pools sized on the p50 will exhaust on the p99, and the exhaustion is not a latency problem — it is a cascading failure, because the exhausted caller is now holding ITS pool while it waits. Six hops of this is a coordinated thundering herd with a 600ms fuse.</p><aside class="callout callout--prod"><span class="callout__label">In production</span><p>Latency budgets are the one architectural constraint that is measurable from outside and therefore negotiable inside. Put the budget in writing before the split — &quot;the checkout path may make at most four synchronous calls and must stay under 400ms at p99&quot; — and you turn a taste argument into a constraint a design review can actually enforce. Teams that split without a budget discover the budget when a service review adds one call to a path that was already at the edge, and the fix is a month of work reverting it.</p></aside><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&quot;Microservices add latency but give independent deployment and independent scaling.&quot; This is the true answer and it scores about half marks, because it names the cost in the abstract and the benefits in the concrete. The staff-level continuation names the specific mechanism: they convert compile-time failures into runtime ones, they remove ACID across a business operation, they multiply the operational surface by the number of deployables, and the latency arithmetic is a <strong>sum of distributions, not a sum of medians</strong> — so serial chains produce p99s nobody budgeted for. The candidate who says &quot;and here's what it costs, here is the number&quot; is the one who gets the follow-up question.</p></aside><p>Volume 11 Chapter 1 sells the trade-off — it is the version to read if you want the persuasive summary. This chapter is the version to read if you want to be able to defend the cost model under questioning, which is a different skill.</p><h3 class="vol__h3" id="12-the-costs-that-actually-decide-it">1.2 The Costs That Actually Decide It</h3><p>Latency is the cost everyone names and the cost that decides the fewest extractions. The costs that decide real boundaries are the ones that do not show up in a latency graph.</p><p><strong>1. Partial failure becomes the normal case, not the exception.</strong></p><p>In a monolith, an exception means the request failed and the transaction rolled back — atomicity is the default and failure is a special case the runtime handles for you. Across six services, the <em>realistic</em> outcome of an operation is that three succeeded and three did not, and there is no rollback. This is not an edge case; at 99.9% availability per service and six dependencies, the probability that every call in a chain succeeds over a day is astonishingly low, and the probability that a <em>user</em> ever sees a fully-successful chain is what you are actually designing for.</p><pre class="diagram"><code>  ONE CALL AT 99.9% AVAILABILITY
 
   1 hour      → ~4 calls fail          (1 call/15 min at 99.9% ⇒ 240/hour... see below)
   1 day       → ~1,400 failed calls    at ~57 calls/min × 1440 min × 0.1%
@@ -120,45 +174,57 @@ None of those numbers is the problem. The CHAIN is the problem.
 
   Same word. Different model. Different invariants. Different change rate.
   A service boundary that puts them together preserves the WORD and loses the
-  meaning — which is the most common way a well-intentioned split goes wrong.</code></pre><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&quot;A bounded context maps one-to-one onto a microservice.&quot; Half true, and the false half is the load-bearing half. A bounded context is a <strong>semantic</strong> boundary and a service is a <strong>runtime</strong> boundary. The mapping is <em>frequent and desirable</em> but it is not identity: two contexts in one process is a perfectly good modular monolith (Chapter 5), one context split across two services is a distributed monolith, and a context with a genuinely different scaling or release profile sometimes deserves two services. The senior answer separates the two ideas explicitly, because conflating them is how teams end up with 14 services that are 6 contexts and no idea which.</p></aside><p>The corollary, and it is the useful part: <strong>the test for whether a boundary is real is whether the two sides would use the same word and mean different things.</strong> If &quot;Customer&quot; means the same thing to both sides, you probably have a <em>data</em> boundary, not a <em>context</em> boundary — a candidate for a schema change inside one service, not a service split. If &quot;Order&quot; means &quot;a thing the customer intends to buy&quot; on one side and &quot;a thing we have shipped&quot; on the other, you have found a real context boundary, and it will pay for itself in change independence.</p><h3 class="vol__h3" id="23-context-maps-six-relationships-and-their-failure-modes">2.3 Context Maps: Six Relationships and Their Failure Modes</h3><p>A <strong>context map</strong> describes how two bounded contexts relate, and the relationship type is a <em>decision with a cost</em>. The canonical set is six, and each has a characteristic way of failing.</p><div class="table-wrap"><table><thead><tr><th>Relationship</th><th>What it is</th><th>Failure mode</th><th>When it is right</th></tr></thead><tbody><tr><td><strong>Shared Kernel</strong></td><td>Both contexts share a piece of model and code</td><td>A shared kernel across teams is a distributed monolith's twin — the coupling is now invisible and enforced by neither compiler nor org</td><td>Two teams, one codebase, genuinely inseparable, and you accept it deliberately</td></tr><tr><td><strong>Customer-Supplier</strong></td><td>Downstream's needs are on upstream's roadmap</td><td>Upstream ignores the customer's needs until they stop consuming; the power imbalance is the risk</td><td>Clear, enforceable commercial or technical relationship where the supplier has incentive</td></tr><tr><td><strong>Conformist</strong></td><td>Downstream simply uses upstream's model</td><td>Downstream's domain is distorted to fit a model designed for someone else's reasons; it accumulates a permanent translation burden</td><td>Cheap and correct when the upstream model is good and the downstream is not differentiating</td></tr><tr><td><strong>Anti-Corruption Layer</strong></td><td>Downstream builds a translation layer protecting its model from upstream's</td><td>Extra code and latency, and it rots if upstream changes and nobody updates the ACL</td><td>The downstream has a real model worth protecting and upstream is not under your control</td></tr><tr><td><strong>Separate Ways</strong></td><td>Deliberately no link; each side goes its own way</td><td>Duplicated logic and a business requirement to keep both sides consistent by hand</td><td>Two genuinely independent domains, and duplication is cheaper than coupling</td></tr><tr><td><strong>Published Language</strong></td><td>A shared, well-documented interchange format</td><td>The language is a lowest common denominator and drifts toward the least technical consumer</td><td>A genuine integration surface with many consumers</td></tr></tbody></table></div><p><strong>Shared Kernel deserves its own paragraph, because it is the one that gets chosen enthusiastically and regretted.</strong> Inside one codebase, a shared kernel is a reasonable thing: two modules that genuinely cannot be separated, sharing a model, enforced by the compiler and by a test. Across teams, the same decision is a different thing entirely. The coupling is still there, it is now invisible to both compilers, neither team can refactor the shared part without the other, and you have <em>added</em> a network call and a release-train problem to what was previously a compile error. <strong>A shared kernel across a service boundary is a distributed monolith that has been given HTTP interfaces</strong> — the coupling is the same coupling, and you have paid for latency and partial failure on top of it.</p><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off</span><p>Shared Kernel versus Anti-Corruption Layer is the real decision. Both accept a dependency. A shared kernel accepts the dependency <em>into your model</em> — cheap, fast, and it means the two teams can never diverge their understanding. An ACL accepts the dependency <em>at the edge</em> — expensive, one extra hop and a translation layer to maintain, and it means the two models can evolve independently. The flip condition is <strong>who has the power</strong>: if you control the upstream, conform or share; if you do not, and your model is worth protecting, build the ACL.</p></aside><h3 class="vol__h3" id="24-the-anti-corruption-layer-is-the-most-practically-useful-one">2.4 The Anti-Corruption Layer Is the Most Practically Useful One</h3><p>The <strong>ACL</strong> is a translation layer that sits between your model and someone else's, so that their concepts never leak into your code. It is the pattern in this list that pays for itself most reliably in production, and the reason is that it is the only one that is <em>incremental</em>.</p><pre class="diagram"><code>  WITHOUT AN ACL — the supplier's model leaks in
+  meaning — which is the most common way a well-intentioned split goes wrong.</code></pre><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&quot;A bounded context maps one-to-one onto a microservice.&quot; Half true, and the false half is the load-bearing half. A bounded context is a <strong>semantic</strong> boundary and a service is a <strong>runtime</strong> boundary. The mapping is <em>frequent and desirable</em> but it is not identity: two contexts in one process is a perfectly good modular monolith (Chapter 5), one context split across two services is a distributed monolith, and a context with a genuinely different scaling or release profile sometimes deserves two services. The senior answer separates the two ideas explicitly, because conflating them is how teams end up with 14 services that are 6 contexts and no idea which.</p></aside><p>The corollary, and it is the useful part: <strong>the test for whether a boundary is real is whether the two sides would use the same word and mean different things.</strong> If &quot;Customer&quot; means the same thing to both sides, you probably have a <em>data</em> boundary, not a <em>context</em> boundary — a candidate for a schema change inside one service, not a service split. If &quot;Order&quot; means &quot;a thing the customer intends to buy&quot; on one side and &quot;a thing we have shipped&quot; on the other, you have found a real context boundary, and it will pay for itself in change independence.</p><h3 class="vol__h3" id="23-context-maps-six-relationships-and-their-failure-modes">2.3 Context Maps: Six Relationships and Their Failure Modes</h3><p>A <strong>context map</strong> describes how two bounded contexts relate, and the relationship type is a <em>decision with a cost</em>. The canonical set is six, and each has a characteristic way of failing.</p><div class="table-wrap"><table><thead><tr><th>Relationship</th><th>What it is</th><th>Failure mode</th><th>When it is right</th></tr></thead><tbody><tr><td><strong>Shared Kernel</strong></td><td>Both contexts share a piece of model and code</td><td>A shared kernel across teams is a distributed monolith's twin — the coupling is now invisible and enforced by neither compiler nor org</td><td>Two teams, one codebase, genuinely inseparable, and you accept it deliberately</td></tr><tr><td><strong>Customer-Supplier</strong></td><td>Downstream's needs are on upstream's roadmap</td><td>Upstream ignores the customer's needs until they stop consuming; the power imbalance is the risk</td><td>Clear, enforceable commercial or technical relationship where the supplier has incentive</td></tr><tr><td><strong>Conformist</strong></td><td>Downstream simply uses upstream's model</td><td>Downstream's domain is distorted to fit a model designed for someone else's reasons; it accumulates a permanent translation burden</td><td>Cheap and correct when the upstream model is good and the downstream is not differentiating</td></tr><tr><td><strong>Anti-Corruption Layer</strong></td><td>Downstream builds a translation layer protecting its model from upstream's</td><td>Extra code and latency, and it rots if upstream changes and nobody updates the ACL</td><td>The downstream has a real model worth protecting and upstream is not under your control</td></tr><tr><td><strong>Separate Ways</strong></td><td>Deliberately no link; each side goes its own way</td><td>Duplicated logic and a business requirement to keep both sides consistent by hand</td><td>Two genuinely independent domains, and duplication is cheaper than coupling</td></tr><tr><td><strong>Published Language</strong></td><td>A shared, well-documented interchange format</td><td>The language is a lowest common denominator and drifts toward the least technical consumer</td><td>A genuine integration surface with many consumers</td></tr></tbody></table></div><p><strong>Shared Kernel deserves its own paragraph, because it is the one that gets chosen enthusiastically and regretted.</strong> Inside one codebase, a shared kernel is a reasonable thing: two modules that genuinely cannot be separated, sharing a model, enforced by the compiler and by a test. Across teams, the same decision is a different thing entirely. The coupling is still there, it is now invisible to both compilers, neither team can refactor the shared part without the other, and you have <em>added</em> a network call and a release-train problem to what was previously a compile error. <strong>A shared kernel across a service boundary is a distributed monolith that has been given HTTP interfaces</strong> — the coupling is the same coupling, and you have paid for latency and partial failure on top of it.</p><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off</span><p>Shared Kernel versus Anti-Corruption Layer is the real decision. Both accept a dependency. A shared kernel accepts the dependency <em>into your model</em> — cheap, fast, and it means the two teams can never diverge their understanding. An ACL accepts the dependency <em>at the edge</em> — expensive, one extra hop and a translation layer to maintain, and it means the two models can evolve independently. The flip condition is <strong>who has the power</strong>: if you control the upstream, conform or share; if you do not, and your model is worth protecting, build the ACL.</p></aside><h3 class="vol__h3" id="24-the-anti-corruption-layer-is-the-most-practically-useful-one">2.4 The Anti-Corruption Layer Is the Most Practically Useful One</h3><p>The <strong>ACL</strong> is a translation layer that sits between your model and someone else's, so that their concepts never leak into your code. It is the pattern in this list that pays for itself most reliably in production, and the reason is that it is the only one that is <em>incremental</em>.</p><figure class="figure">
+  <svg viewBox="0 0 900 400" role="img" aria-label="Without an anti-corruption layer your domain imports the supplier's SDK, branches on their versions, stores their identifiers and handles their nulls, so their field renames become a quarterly rewrite. With the layer, your domain imports only its own interfaces and the layer translates their nouns to yours, so their migration becomes one adapter class with a test.">
+    <defs>
+      <marker id="arw-microservices-01-02-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="edge-label edge-label--strong" x="25" y="22">WITHOUT AN ACL — the supplier's model leaks in</text>
+    <rect class="node" x="25" y="34" width="180" height="54" rx="5"/>
+    <text class="label" x="115" y="57" text-anchor="middle">your-domain</text>
+    <text class="label label--sub" x="115" y="75" text-anchor="middle">order service</text>
+    <path class="edge" d="M 205 57 L 325 57" marker-end="url(#arw-microservices-01-02-a)"/>
+    <text class="edge-label" x="265" y="49" text-anchor="middle">imports their SDK</text>
+    <rect class="node node--bad" x="325" y="34" width="180" height="54" rx="5"/>
+    <text class="label" x="415" y="57" text-anchor="middle">SUPPLIER API</text>
+    <text class="label label--sub" x="415" y="75" text-anchor="middle">their nouns and invariants</text>
+    <rect class="node" x="25" y="104" width="840" height="80" rx="5"/>
+    <text class="edge-label edge-label--strong" x="45" y="126">their model leaks into your domain, in four places</text>
+    <text class="edge-label" x="45" y="150">branches on supplier.get(&quot;legacy&quot;) vs supplier.get(&quot;v2&quot;)</text>
+    <text class="edge-label" x="45" y="170">stores supplierIds in your order table</text>
+    <text class="edge-label" x="465" y="150">handles their nulls, their retries, their field renames</text>
+    <text class="edge-label" x="465" y="170">their breaking changes, their rate limits, their outages</text>
+    <text class="edge-label edge-label--strong fill-bad" x="25" y="212">a distributed monolith — and a quarterly rewrite when they migrate fields</text>
 
-    your-domain (order service)
-      │  imports supplier.sdk.SupplierOrder
-      │  branches on supplier.get(&quot;legacy&quot;) vs supplier.get(&quot;v2&quot;)
-      │  stores supplierIds in your order table
-      │  handles their nulls, their retries, their field renames
-      ▼
-    ┌──────────────────────────────────────────┐
-    │  SUPPLIER API                            │
-    │  · their nouns (Product, Listing)        │
-    │  · their invariants                      │
-    │  · their breaking changes                │
-    │  · their rate limits, their outages      │
-    └──────────────────────────────────────────┘
-    You have a distributed monolith and a
-    quarterly rewrite when they migrate fields.
-
-  WITH AN ACL — the supplier's model stops at the edge
-
-    your-domain (order service)
-      │  imports only YOUR interfaces
-      │  knows nothing about their SDK
-      ▼
-    ┌──────────────────────────────────────────┐
-    │  ANTI-CORRUPTION LAYER                   │
-    │  · translates their nouns → yours        │
-    │  · is the ONLY place that knows about    │
-    │    their versioning, their nulls, their  │
-    │    retries                               │
-    │  · is owned by YOU and changes when YOU  │
-    │    decide, not when they decide          │
-    ▼
-    ┌──────────────────────────────────────────┐
-    │  SUPPLIER API                            │
-    └──────────────────────────────────────────┘
-    Their migration becomes a change to one
-    adapter class, reviewed by one team, with
-    a test that fails loudly when the shape moves.</code></pre><p>In code, the shape is a translating interface that your domain depends on:</p><pre class="snippet" data-lang="java"><code>// Your domain depends on THIS. It has your vocabulary, your invariants,
+    <text class="edge-label edge-label--strong" x="25" y="242">WITH AN ACL — the supplier's model stops at the edge</text>
+    <rect class="node" x="25" y="254" width="190" height="96" rx="5"/>
+    <text class="label" x="120" y="288" text-anchor="middle">your-domain</text>
+    <text class="label label--sub" x="120" y="308" text-anchor="middle">imports only your API</text>
+    <text class="label label--sub" x="120" y="326" text-anchor="middle">no knowledge of their SDK</text>
+    <path class="edge" d="M 215 295 L 320 295" marker-end="url(#arw-microservices-01-02-a)"/>
+    <text class="edge-label" x="267" y="287" text-anchor="middle">knows nothing</text>
+    <text class="edge-label" x="267" y="305" text-anchor="middle">about their SDK</text>
+    <rect class="node node--good" x="320" y="254" width="230" height="96" rx="5"/>
+    <text class="label" x="435" y="282" text-anchor="middle">ANTI-CORRUPTION</text>
+    <text class="label" x="435" y="300" text-anchor="middle">LAYER</text>
+    <text class="label label--sub" x="435" y="318" text-anchor="middle">translates their nouns to yours</text>
+    <text class="label label--sub" x="435" y="336" text-anchor="middle">the only place that knows</text>
+    <path class="edge" d="M 550 295 L 640 295" marker-end="url(#arw-microservices-01-02-a)"/>
+    <text class="edge-label" x="595" y="287" text-anchor="middle">their API</text>
+    <text class="edge-label" x="595" y="305" text-anchor="middle">in their terms</text>
+    <rect class="node" x="640" y="254" width="170" height="96" rx="5"/>
+    <text class="label" x="725" y="288" text-anchor="middle">SUPPLIER API</text>
+    <text class="label label--sub" x="725" y="308" text-anchor="middle">owned by them</text>
+    <text class="label label--sub" x="725" y="326" text-anchor="middle">their breaking changes</text>
+    <text class="edge-label edge-label--strong" x="25" y="378">their migration becomes one adapter class, reviewed by one team, with a test that fails loudly</text>
+  </svg>
+  <figcaption>
+    <strong>The anti-corruption layer is the only place that knows about the supplier, and that is what makes their migration cheap.</strong>
+    Without it your domain imports <code>supplier.sdk.SupplierOrder</code>, branches on their versions and stores their identifiers in your tables, so every field rename is a quarterly rewrite. With it, the domain imports only its own interfaces; the layer translates their nouns to yours and carries their versioning, nulls and retries, so their migration becomes one adapter class, reviewed by one team, with a test that fails loudly when the shape moves.
+  </figcaption>
+</figure><p>In code, the shape is a translating interface that your domain depends on:</p><pre class="snippet" data-lang="java"><code>// Your domain depends on THIS. It has your vocabulary, your invariants,
 // and no knowledge of the supplier's SDK, their versioning, or their nulls.
 public interface SupplierCatalog {
 
@@ -315,29 +381,70 @@ final class SupplierCatalogAcl implements SupplierCatalog {
   If the honest answer is (b) for a hot path, you do not have a boundary —
   you have a distributed monolith with an HTTP call in the middle of a join.
   Option (a) is legitimate and is Volume 2's subject, but it is real work and
-  it introduces a consistency window you must be able to explain.</code></pre><p>A team that cannot answer this for its candidate boundary has not scoped the project. The extraction is not &quot;move the classes&quot; — it is &quot;replace every join that touched a foreign table, and own the consistency window you just created.&quot;</p><p><strong>Test 2 — the latency budget test.</strong> How many hops does this add, and to which path?</p><p>Not &quot;what is the latency&quot; but &quot;<strong>which path</strong> and <strong>what is the budget</strong>&quot;. A boundary on a cold path (a nightly report, an admin screen, a webhook handler) costs nothing. A boundary inserted into a four-hop hot path costs you a fifth hop on the most user-visible journey in the product, and the answer needs to say what the new p99 is, not that it &quot;should be fine&quot;.</p><p><strong>Test 3 — the org test.</strong> Can one team own this end to end, including its on-call, its schema, and its roadmap? If two teams have to agree to deploy it, the boundary has not bought anything — you have converted an in-process dependency into a cross-team dependency, which is <em>worse</em>, because now it has a network hop in it too.</p><p><strong>Test 4 — the failure independence test.</strong> Can this component be down without the rest of the system being down? If the answer is no, the boundary is a naming decision. If the answer is yes, you have found something where a circuit breaker, a degraded mode, or a queue can actually buy you availability.</p><pre class="diagram"><code>  THE FOUR TESTS, ON ONE PAGE
+  it introduces a consistency window you must be able to explain.</code></pre><p>A team that cannot answer this for its candidate boundary has not scoped the project. The extraction is not &quot;move the classes&quot; — it is &quot;replace every join that touched a foreign table, and own the consistency window you just created.&quot;</p><p><strong>Test 2 — the latency budget test.</strong> How many hops does this add, and to which path?</p><p>Not &quot;what is the latency&quot; but &quot;<strong>which path</strong> and <strong>what is the budget</strong>&quot;. A boundary on a cold path (a nightly report, an admin screen, a webhook handler) costs nothing. A boundary inserted into a four-hop hot path costs you a fifth hop on the most user-visible journey in the product, and the answer needs to say what the new p99 is, not that it &quot;should be fine&quot;.</p><p><strong>Test 3 — the org test.</strong> Can one team own this end to end, including its on-call, its schema, and its roadmap? If two teams have to agree to deploy it, the boundary has not bought anything — you have converted an in-process dependency into a cross-team dependency, which is <em>worse</em>, because now it has a network hop in it too.</p><p><strong>Test 4 — the failure independence test.</strong> Can this component be down without the rest of the system being down? If the answer is no, the boundary is a naming decision. If the answer is yes, you have found something where a circuit breaker, a degraded mode, or a queue can actually buy you availability.</p><figure class="figure">
+  <svg viewBox="0 0 900 430" role="img" aria-label="Four tests decide whether a candidate boundary is worth extracting: data ownership, latency budget, org and failure independence. Each asks one question and names what a no means. Passing three is probably worth the extraction, passing two is a judgement call with the risk written down, and passing one means you are building a distributed monolith.">
+    <defs>
+      <marker id="arw-microservices-01-03-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="25" y="40" width="199" height="186" rx="5"/>
+    <text class="label" x="124" y="64" text-anchor="middle">DATA OWNERSHIP</text>
+    <text class="label label--sub" x="124" y="104" text-anchor="middle">can it own its tables</text>
+    <text class="label label--sub" x="124" y="122" text-anchor="middle">with no cross-service join</text>
+    <text class="label label--sub" x="124" y="140" text-anchor="middle">on the request path?</text>
+    <path class="edge" d="M 40 156 L 209 156" stroke-width="0.6"/>
+    <text class="label label--sub" x="124" y="176" text-anchor="middle">if no — what replaces</text>
+    <text class="label label--sub" x="124" y="194" text-anchor="middle">the join, and what is the</text>
+    <text class="label label--sub" x="124" y="212" text-anchor="middle">consistency window?</text>
+    <rect class="node" x="242" y="40" width="199" height="186" rx="5"/>
+    <text class="label" x="341" y="64" text-anchor="middle">LATENCY BUDGET</text>
+    <text class="label label--sub" x="341" y="104" text-anchor="middle">which path, how many</text>
+    <text class="label label--sub" x="341" y="122" text-anchor="middle">hops does it add, and</text>
+    <text class="label label--sub" x="341" y="140" text-anchor="middle">what is the new p99?</text>
+    <path class="edge" d="M 257 156 L 426 156" stroke-width="0.6"/>
+    <text class="label label--sub" x="341" y="176" text-anchor="middle">against a written budget</text>
+    <text class="label label--sub" x="341" y="194" text-anchor="middle">a cold path costs nothing</text>
+    <text class="label label--sub" x="341" y="212" text-anchor="middle">a hot-path hop regresses</text>
+    <rect class="node" x="459" y="40" width="199" height="186" rx="5"/>
+    <text class="label" x="558" y="64" text-anchor="middle">ORG</text>
+    <text class="label label--sub" x="558" y="104" text-anchor="middle">can ONE team own build,</text>
+    <text class="label label--sub" x="558" y="122" text-anchor="middle">deploy, on-call, schema</text>
+    <text class="label label--sub" x="558" y="140" text-anchor="middle">and roadmap?</text>
+    <path class="edge" d="M 474 156 L 643 156" stroke-width="0.6"/>
+    <text class="label label--sub" x="558" y="176" text-anchor="middle">if two teams must agree</text>
+    <text class="label label--sub" x="558" y="194" text-anchor="middle">to deploy, the boundary</text>
+    <text class="label label--sub" x="558" y="212" text-anchor="middle">bought nothing at all</text>
+    <rect class="node" x="676" y="40" width="199" height="186" rx="5"/>
+    <text class="label" x="775" y="64" text-anchor="middle">FAILURE</text>
+    <text class="label" x="775" y="82" text-anchor="middle">INDEPENDENCE</text>
+    <text class="label label--sub" x="775" y="104" text-anchor="middle">can it be down without</text>
+    <text class="label label--sub" x="775" y="122" text-anchor="middle">the rest of the system</text>
+    <text class="label label--sub" x="775" y="140" text-anchor="middle">being down?</text>
+    <path class="edge" d="M 691 156 L 860 156" stroke-width="0.6"/>
+    <text class="label label--sub" x="775" y="176" text-anchor="middle">if no, the boundary is</text>
+    <text class="label label--sub" x="775" y="194" text-anchor="middle">a naming decision; if yes,</text>
+    <text class="label label--sub" x="775" y="212" text-anchor="middle">a breaker or queue buys it</text>
 
-  ┌─ DATA OWNERSHIP ────────────────────────────────────────────┐
-  │  Can it own its tables with no cross-service join on the    │
-  │  request path?                        [ ] yes  [ ] no      │
-  │  If no: what replaces the join, and what is the            │
-  │  consistency window?                     ───────────────    │
-  └─────────────────────────────────────────────────────────────┘
-  ┌─ LATENCY BUDGET ────────────────────────────────────────────┐
-  │  Which path? How many hops does it add? What is the new     │
-  │  p99 against a written budget?         ───────────────      │
-  └─────────────────────────────────────────────────────────────┘
-  ┌─ ORG ──────────────────────────────────────────────────────┐
-  │  Can ONE team own build, deploy, on-call, schema, roadmap? │
-  │                                              [ ] yes [ ] no │
-  └─────────────────────────────────────────────────────────────┘
-  ┌─ FAILURE INDEPENDENCE ─────────────────────────────────────┐
-  │  Can it be down without the rest being down?  [ ] yes [ ] no │
-  └─────────────────────────────────────────────────────────────┘
-
-  Pass 3+ and the extraction is probably worth it.
-  Pass 2, and it is a judgement call with a documented risk.
-  Pass 1, and you are building a distributed monolith.</code></pre><h3 class="vol__h3" id="35-worked-example-the-invoiceorder-split">3.5 Worked Example: The Invoice/Order Split</h3><p>An e-commerce monolith. <code>orders</code> and <code>invoice</code> tables, changed together in 71% of commits that touch either. Sales owns the order; finance owns the invoice. The team is arguing about whether to split them into two services.</p><p><strong>The argument for:</strong> co-change is 0.71, so they always change together — which sounds like <em>one</em> service by the rule above. But look at the <em>reason</em> the team gives: &quot;when marketing runs a promotion, the pricing changes and the invoice format has to follow.&quot; That is a shared business event, and it is not the same as &quot;these two things have the same reason to change.&quot;</p><p><strong>The real analysis:</strong></p><pre class="diagram"><code>  orders                          invoice
+    <text class="edge-label edge-label--strong" x="25" y="258">how many of the four does the boundary pass?</text>
+    <rect class="node node--good" x="25" y="272" width="110" height="40" rx="5"/>
+    <text class="label" x="80" y="297" text-anchor="middle">Pass 3+</text>
+    <path class="edge" d="M 135 292 L 195 292" marker-end="url(#arw-microservices-01-03-a)"/>
+    <text class="edge-label edge-label--strong" x="211" y="297">the extraction is probably worth it</text>
+    <rect class="node node--warn" x="25" y="326" width="110" height="40" rx="5"/>
+    <text class="label" x="80" y="351" text-anchor="middle">Pass 2</text>
+    <path class="edge" d="M 135 346 L 195 346" marker-end="url(#arw-microservices-01-03-a)"/>
+    <text class="edge-label edge-label--strong" x="211" y="351">a judgement call, with the risk written down</text>
+    <rect class="node node--bad" x="25" y="380" width="110" height="40" rx="5"/>
+    <text class="label" x="80" y="405" text-anchor="middle">Pass 1</text>
+    <path class="edge" d="M 135 400 L 195 400" marker-end="url(#arw-microservices-01-03-a)"/>
+    <text class="edge-label edge-label--strong fill-bad" x="211" y="405">you are building a distributed monolith</text>
+  </svg>
+  <figcaption>
+    <strong>Four tests decide whether a boundary is worth extracting, and the count of passes is the verdict.</strong>
+    Data ownership asks whether the service can own its tables with no cross-service join on the request path, and a no means naming what replaces the join and the consistency window it creates. Latency budget asks which path gains the hops and what the new p99 is against a written number — a cold path costs nothing, a hot-path hop regresses. Org asks whether one team can own build, deploy, on-call, schema and roadmap. Pass three and the extraction is probably worth it; pass two and it is a judgement call with the risk written down; pass one and you are building a distributed monolith.
+  </figcaption>
+</figure><h3 class="vol__h3" id="35-worked-example-the-invoiceorder-split">3.5 Worked Example: The Invoice/Order Split</h3><p>An e-commerce monolith. <code>orders</code> and <code>invoice</code> tables, changed together in 71% of commits that touch either. Sales owns the order; finance owns the invoice. The team is arguing about whether to split them into two services.</p><p><strong>The argument for:</strong> co-change is 0.71, so they always change together — which sounds like <em>one</em> service by the rule above. But look at the <em>reason</em> the team gives: &quot;when marketing runs a promotion, the pricing changes and the invoice format has to follow.&quot; That is a shared business event, and it is not the same as &quot;these two things have the same reason to change.&quot;</p><p><strong>The real analysis:</strong></p><pre class="diagram"><code>  orders                          invoice
   ──────                          ───────
   changes WHEN the sales cycle     changes WHEN the billing cycle runs
   changes BECAUSE a customer       changes BECAUSE finance's rules
@@ -356,23 +463,47 @@ final class SupplierCatalogAcl implements SupplierCatalog {
   crucially the DEPENDENCY DIRECTION is one-way: invoice reads order, order
   never reads invoice.
 
-  ONE-WAY DEPENDENCY + DIFFERENT OWNER + DIFFERENT CADENCE = a real seam.</code></pre><p><strong>The extraction, done properly:</strong></p><ol><li>Invoice service creates its own schema; a replication job (or CDC, or an outbox-fed consumer — Volume 2) keeps a local read model of the order fields the invoice needs.</li><li>The invoice service never joins to <code>orders</code>. It holds its own copy. There is a consistency window — the invoice may show an order state that is up to N seconds stale — and that window is <em>acceptable</em> because an invoice is a legal document that is generated after the fact, not a live view.</li><li>The sales team's promotion PRs now touch only the order side; the invoice service adapts.</li><li>The finance team can change the invoice format without a sales release.</li></ol><p><strong>The honest counter-case</strong>, which the team also has to consider: the &quot;my account&quot; page shows both orders and invoices, so the read path needs both, and if that is a hot path you have just put a join into an API composition (Volume 2), with its own latency and its own failure mode. Sometimes the right answer is to <em>not</em> split, and to instead make the boundary explicit in the schema — a separate <code>invoice</code> module with a foreign key inside one database — which gets you 80% of the organisational benefit for 0% of the distributed-system cost. Chapter 5 is about exactly that option.</p><h3 class="vol__h3" id="36-the-classic-wrong-split-by-technical-layer">3.6 The Classic Wrong Split: By Technical Layer</h3><p>The most common decomposition mistake, and the one that produces a system that is worse than both the monolith it replaced and the microservices it was supposed to become.</p><pre class="diagram"><code>  ✗ THE LAYER SPLIT — the distributed monolith
-
-  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-  │ API SERVICE  │  │ DOMAIN SVC   │  │ DATA SVC     │
-  │              │  │              │  │              │
-  │ controllers  │  │ business     │  │ repositories │
-  │ DTOs         │  │  logic       │  │ DAOs         │
-  │ validation   │  │ domain       │  │ migrations   │
-  │              │  │ entities     │  │ queries      │
-  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
-         │                 │                 │
-         └────────► HTTP, twice, per call ◄──┘
-         │                 │                 │
-         └────────► SHARED DATABASE ◄────────┘
-                        (one schema, all of it)
-
-  WHY IT IS WRONG, PRECISELY:
+  ONE-WAY DEPENDENCY + DIFFERENT OWNER + DIFFERENT CADENCE = a real seam.</code></pre><p><strong>The extraction, done properly:</strong></p><ol><li>Invoice service creates its own schema; a replication job (or CDC, or an outbox-fed consumer — Volume 2) keeps a local read model of the order fields the invoice needs.</li><li>The invoice service never joins to <code>orders</code>. It holds its own copy. There is a consistency window — the invoice may show an order state that is up to N seconds stale — and that window is <em>acceptable</em> because an invoice is a legal document that is generated after the fact, not a live view.</li><li>The sales team's promotion PRs now touch only the order side; the invoice service adapts.</li><li>The finance team can change the invoice format without a sales release.</li></ol><p><strong>The honest counter-case</strong>, which the team also has to consider: the &quot;my account&quot; page shows both orders and invoices, so the read path needs both, and if that is a hot path you have just put a join into an API composition (Volume 2), with its own latency and its own failure mode. Sometimes the right answer is to <em>not</em> split, and to instead make the boundary explicit in the schema — a separate <code>invoice</code> module with a foreign key inside one database — which gets you 80% of the organisational benefit for 0% of the distributed-system cost. Chapter 5 is about exactly that option.</p><h3 class="vol__h3" id="36-the-classic-wrong-split-by-technical-layer">3.6 The Classic Wrong Split: By Technical Layer</h3><p>The most common decomposition mistake, and the one that produces a system that is worse than both the monolith it replaced and the microservices it was supposed to become.</p><figure class="figure">
+  <svg viewBox="0 0 900 300" role="img" aria-label="Three services split by technical layer call each other over HTTP twice per business operation, and all three join one shared database with a single schema. Every operation therefore crosses two network hops that buy nothing, the one transaction boundary sits in the data service, and a schema change needs all three teams.">
+    <defs>
+      <marker id="arw-microservices-01-04-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="edge-label edge-label--strong" x="25" y="22">THE LAYER SPLIT — a relay, not a decomposition</text>
+    <rect class="node" x="25" y="40" width="240" height="84" rx="5"/>
+    <text class="label" x="145" y="64" text-anchor="middle">API SERVICE</text>
+    <text class="label label--sub" x="145" y="86" text-anchor="middle">controllers</text>
+    <text class="label label--sub" x="145" y="104" text-anchor="middle">DTOs, validation</text>
+    <rect class="node" x="330" y="40" width="240" height="84" rx="5"/>
+    <text class="label" x="450" y="64" text-anchor="middle">DOMAIN SVC</text>
+    <text class="label label--sub" x="450" y="86" text-anchor="middle">business logic</text>
+    <text class="label label--sub" x="450" y="104" text-anchor="middle">domain entities</text>
+    <rect class="node" x="635" y="40" width="240" height="84" rx="5"/>
+    <text class="label" x="755" y="64" text-anchor="middle">DATA SVC</text>
+    <text class="label label--sub" x="755" y="86" text-anchor="middle">repositories, DAOs</text>
+    <text class="label label--sub" x="755" y="104" text-anchor="middle">migrations, queries</text>
+    <path class="edge" d="M 265 82 L 330 82" marker-end="url(#arw-microservices-01-04-a)"/>
+    <text class="edge-label" x="297" y="74" text-anchor="middle">HTTP</text>
+    <path class="edge edge--return" d="M 330 100 L 265 100" marker-end="url(#arw-microservices-01-04-a)"/>
+    <path class="edge" d="M 570 82 L 635 82" marker-end="url(#arw-microservices-01-04-a)"/>
+    <text class="edge-label" x="602" y="74" text-anchor="middle">HTTP</text>
+    <path class="edge edge--return" d="M 635 100 L 570 100" marker-end="url(#arw-microservices-01-04-a)"/>
+    <path class="edge" d="M 145 124 L 145 190" marker-end="url(#arw-microservices-01-04-a)"/>
+    <path class="edge" d="M 450 124 L 450 190" marker-end="url(#arw-microservices-01-04-a)"/>
+    <path class="edge" d="M 755 124 L 755 190" marker-end="url(#arw-microservices-01-04-a)"/>
+    <text class="edge-label" x="295" y="142" text-anchor="middle">every operation crosses both, twice</text>
+    <text class="edge-label" x="610" y="142" text-anchor="middle">every join now crosses a network</text>
+    <rect class="node node--bad" x="25" y="190" width="850" height="64" rx="5"/>
+    <text class="label" x="450" y="218" text-anchor="middle">SHARED DATABASE</text>
+    <text class="label label--sub" x="450" y="238" text-anchor="middle">one schema, all of it</text>
+    <text class="edge-label edge-label--strong fill-bad" x="25" y="282">a distributed monolith — all of the cost, none of the benefit</text>
+  </svg>
+  <figcaption>
+    <strong>Splitting by technical layer is a relay, not a decomposition: two HTTP hops per call into one shared schema.</strong>
+    The API service calls the domain service, which calls the data service, and all three join the same schema — so every business operation crosses two network hops that buy nothing, the one transaction boundary sits in the data service, and a schema change needs all three teams on the same day. The domain entity ends up behind two HTTP calls and a serialisation boundary, which is why the result is a distributed monolith: all of the cost, none of the benefit.
+  </figcaption>
+</figure><pre class="diagram"><code>  WHY IT IS WRONG, PRECISELY:
 
   • Every business operation now crosses two network hops that buy nothing
   • There is ONE transaction boundary, and it is in the data service — so
@@ -480,14 +611,35 @@ final class SupplierCatalogAcl implements SupplierCatalog {
   the same team, changed in the same commit sequence, and never scaled
   independently, is: all of the fixed cost, none of the benefit.</code></pre><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p>The number where a service stops paying for itself: <strong>roughly when a candidate service cannot justify its own fixed cost</strong> — the pipeline, dashboard, SLO, runbook and on-call slot, which in most organisations runs into the low hundreds of pounds a month once observability and on-call rota are priced in. In practice that is a service of a few hundred lines to a couple of thousand, deployed with its parent, with no independent scaling profile and no independent team. The test is not line count. It is: <strong>could this be deleted tomorrow and merged into its neighbour, and would anything actually get worse?</strong> If the answer is no, it is not a service; it is a folder.</p></aside><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&quot;Small services are good because they're easy to reason about.&quot; The senior correction: small is necessary but nowhere near sufficient, and taken as a goal it produces <em>too small</em> services, which pay the full fixed cost — pipeline, dashboard, SLO, runbook, on-call slot, one more thing that can be down — and get none of the benefit that made the boundary worth drawing. The goal is not small; it is <strong>independently deployable and independently owned</strong>, and a 300-line service that always deploys with its parent is neither.</p></aside><h4 class="vol__h4" id="common-mistakes-4">Common Mistakes</h4><ul><li>Decomposing by noun and producing a service that internally contains several processes with different rates. This is the most common outcome and it is invisible in the diagram, because the diagram says &quot;Order Service&quot; and the code says five services' worth of coupling.</li><li>Decomposing by table, which maximises the appearance of data independence while guaranteeing that every join that touched the extracted table now crosses a network.</li><li>Using atomicity as a general licence to keep things together. The rule is &quot;must be consistent at every instant&quot;, and a great many business invariants only need to be consistent eventually with a repair path.</li><li>Overfitting a boundary to two years of git history. The quietest module is often the least finished, not the most stable.</li><li>Deriving a boundary from today's org chart without asking what happens when the org changes. The org has a two-year cycle; the code boundary is a multi-year commitment.</li><li>Splitting on a signal (&quot;it has tables&quot;, &quot;it's a noun&quot;) rather than a reason, because signals are unfalsifiable in a design review and reasons are not.</li><li>Splitting below the size where a service pays for its own fixed cost. The diagnostic is &quot;could this be merged back tomorrow, and would anything get worse?&quot;</li></ul><h4 class="vol__h4" id="interview-questions-decomposition-patterns">Interview Questions — Decomposition Patterns</h4><article class="qa" id="4-decomposition-patterns-1"><p class="qa__q"><a class="qa__num" href="#4-decomposition-patterns-1">Q1</a> Our order service handles placing, amending, cancelling, fulfilment and returns. Is that a problem? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>Probably, and the way to see it is that it is not a service, it is five services' worth of coupling in a trench coat. Each of those processes has a different change rate, a different data requirement, and often a different owner — returns data and invoicing data that placing orders does not need. A service boundary is supposed to buy independent change, and a service that changes for five unrelated reasons has the release coordination problem without the independent-deployment benefit. I would split it along the noun+verb line: the order as a commercial object, and fulfilment and returns as processes with their own data and their own cycle. The check before doing that is co-change — if all five change in the same commits for the same reasons, the split is wrong.</p></div></article><article class="qa" id="4-decomposition-patterns-2"><p class="qa__q"><a class="qa__num" href="#4-decomposition-patterns-2">Q2</a> A team justifies a boundary with &quot;it has its own tables&quot;. Is that a good enough reason? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>No, and it is a good example of a signal masquerading as a reason. Owning a table is necessary and it is not sufficient, because the real question is whether the service can own its tables <em>with no cross-service join in the request path</em>. A service that owns one table, has two foreign keys pointing at tables it does not own, and is joined to on every read has its own tables and is still a distributed join with extra steps. The data ownership test is the version of this that decides things: can you answer, for every query on the request path, which tables it touches and what replaces the join when one of them moves? If you can, &quot;it has its own tables&quot; was the beginning of an argument. If you cannot, it was the whole argument and it is not enough.</p></div></article><article class="qa" id="4-decomposition-patterns-3"><p class="qa__q"><a class="qa__num" href="#4-decomposition-patterns-3">Q3</a> When would you keep two things in one service even though they could be split? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>When there is an invariant that must hold at every instant between them, because splitting converts a row-level guarantee into an eventually-consistent approximation and somebody whose money is involved is going to have to be told about the window. Also when the co-change is high <em>for the same reason</em> — the coupling is real, and hiding it behind a network hop does not remove it, it just makes it invisible to the compiler. And when the team count does not justify a deployable: with three teams, a split produces coordination rather than autonomy. The staff-level version is that the question is not &quot;can we split these&quot; but &quot;what specifically gets better&quot;, and if the honest answer is &quot;nothing concrete&quot;, then the right answer is a module boundary inside one deployable, which Chapter 5 is about.</p></div></article><article class="qa" id="4-decomposition-patterns-4"><p class="qa__q"><a class="qa__num" href="#4-decomposition-patterns-4">Q4</a> We have 22 services. How do you work out whether any of them should not exist? <span class="qa__badge"><code>SCENARIO</code></span></p><div class="qa__a"><p>For each one, ask the merge test first: could this be deleted and merged into a neighbour tomorrow, and would anything actually get worse? If nothing gets worse, it is not a service — it is a folder paying the full fixed cost. Then the ownership test: is there exactly one team that builds, deploys, on-calls, owns the schema and sets the roadmap for it, and did that team exist when the boundary was drawn? Then the coupling test: how many other services does it call synchronously on a user-facing path, and what is the summed p99 of that chain? Services that fail the merge test and pass the ownership test are usually services that a team split for reporting lines rather than for change independence, and they are the cheapest to fold back.</p></div></article><article class="qa" id="4-decomposition-patterns-5"><p class="qa__q"><a class="qa__num" href="#4-decomposition-patterns-5">Q5</a> Is one service per bounded context the right default? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>It is the right default <em>about 60% of the time</em>, and the interesting question is the other 40%. It is right when the context is genuinely one capability, has one owner, and its tables hang together. It is wrong when a context has a genuinely different scaling profile in part of it — one part of a context that is bursty and IO-heavy, and the rest steady, deserves to be a separate deployable for scaling reasons alone, and that is a deployment boundary rather than a semantic one. And it is wrong when the context is still a container for two processes with different rates, in which case you have one service carrying two release cadences. The question is never &quot;is one service per context right&quot;, it is &quot;what happens to this boundary when the org splits next quarter&quot;.</p></div></article><article class="qa" id="4-decomposition-patterns-6"><p class="qa__q"><a class="qa__num" href="#4-decomposition-patterns-6">Q6</a> What is the strongest signal that a proposed boundary is real? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>That one team owns it end to end — build, deploy, on-call, schema, and roadmap — because that is the only signal that directly predicts the benefit you are buying. Every other signal is a proxy: tables are a proxy for data ownership, nouns are a proxy for capability, change rate is a proxy for independence, bounded contexts are a proxy for meaning. The ownership signal is the thing itself. And it has a useful diagnostic property: if you ask &quot;which team will be on call for this at 3am?&quot; in a design review and the proposals go quiet, the proposals were about structure rather than about independence, and the fleet is about to acquire a lot of coordination it cannot afford.</p><aside class="callout callout--summary"><span class="callout__label">Chapter summary</span><p>The decomposition catalogue is a set of <em>signals</em>, and a signal is not a reason — the same discipline applies whether you decompose by noun, by table, by transaction, by change rate, or by org chart. Decomposing by noun works right up until the noun names several processes, and then it produces a service that is internally several services; the generalisation is the noun+verb rule, where &quot;Order&quot; is a thing and &quot;OrderFulfilment&quot; is a process with different data, a different rate, and a different owner. Decomposing by business capability is a better default because capabilities have owners and nouns mostly do not, though it fails by inflation into organisational functions. The transaction-boundary pattern earns its keep mostly by producing <em>negative</em> constraints — telling you where not to split — and fails when teams use it to keep things together that only need eventual consistency. The wrong-signals table is the chapter's practical core: &quot;it has its own tables&quot; and &quot;it's a noun&quot; are weak, &quot;it changes at a different rate&quot; is strong, and &quot;a team owns it end to end&quot; is strongest because it directly predicts the benefit. And the error that is hardest to reverse is decomposing too fine: a few-hundred-line service pays the full fixed cost of a deployable — pipeline, dashboard, SLO, runbook, on-call slot, one more thing that can be down — and gets none of the independence that justified the boundary.</p></aside></div></article><h4 class="vol__h4" id="further-reading-4">Further Reading</h4><ul><li><a href="https://microservices.io/patterns/decomposition/decompose-by-business-capability.html" rel="noopener noreferrer">Decompose by Business Capability</a> — the canonical statement of the capability rule, worth reading precisely so you can see where it breaks.</li><li><a href="https://microservices.io/patterns/decomposition/decompose-by-subdomain.html" rel="noopener noreferrer">Decompose by Subdomain</a> — the DDD-flavoured version, and the closest thing in the catalogue to a bounded-context decomposition.</li><li><a href="https://microservices.io/patterns/decomposition/self-contained-service.html" rel="noopener noreferrer">Self-Contained Service</a> — the pattern that pulls a piece of functionality into one service so it can be changed in one place; the clearest statement of the &quot;same reason&quot; test.</li><li><a href="https://microservices.io/patterns/decomposition/service-per-team.html" rel="noopener noreferrer">Service per Team</a> — the org-derived decomposition in its canonical form, and an honest read of when the team boundary is the right one.</li></ul></section>
 
-<section id="chapter-5-the-modular-monolith" data-filter-target><h2 class="vol__h2">Chapter 5 — The Modular Monolith</h2><p>This is the chapter that most candidates avoid, and avoiding it is the mistake. The honest recommendation for a very large fraction of teams considering microservices is <strong>do not split</strong>, and a candidate who can argue that convincingly is demonstrating judgment rather than caution. This chapter is the argument.</p><h3 class="vol__h3" id="51-why-it-is-very-often-the-right-answer">5.1 Why It Is Very Often the Right Answer</h3><p>A <strong>modular monolith</strong> is a single deployable in which the code is organised into modules with boundaries enforced by tooling — Spring Modulith verifies them at test time, ArchUnit enforces them as a test, JPMS at compile time. The code has service boundaries before the runtime does.</p><p>Start with what it gives you, because the list is longer than people expect:</p><div class="table-wrap"><table><thead><tr><th></th><th>Monolith (ball of mud)</th><th>Modular monolith</th><th>Microservices</th></tr></thead><tbody><tr><td>Transactional integrity across the domain</td><td>yes, if used</td><td><strong>yes</strong></td><td>no — Saga required</td></tr><tr><td>Deployables</td><td>1</td><td><strong>1</strong></td><td>N</td></tr><tr><td>Processes to profile in an incident</td><td>1</td><td><strong>1</strong></td><td>N</td></tr><tr><td>Partial failure</td><td>not applicable</td><td><strong>not applicable</strong></td><td>the default</td></tr><tr><td>Code boundaries</td><td>by convention</td><td><strong>enforced by a test that fails the build</strong></td><td>enforced by the network</td></tr><tr><td>Local dev</td><td>clone and run</td><td><strong>clone and run</strong></td><td>N containers or mocks</td></tr><tr><td>Team-level ownership</td><td>package convention</td><td><strong>module + CODEOWNERS</strong></td><td>service + team</td></tr><tr><td>Latency between modules</td><td>nanoseconds</td><td>nanoseconds</td><td>0.5–80ms</td></tr><tr><td>Can one part be scaled differently</td><td>no</td><td><strong>no</strong></td><td>yes</td></tr><tr><td>Can one part be deployed independently</td><td>no</td><td><strong>no</strong></td><td>yes</td></tr></tbody></table></div><p>The last two rows are the entire cost, and they are real. The question is whether the benefit is worth them <em>for your team now</em>, and for a great many teams the answer is that the benefit is not yet reachable.</p><p><strong>Transactional integrity across the whole domain</strong> is the one people underrate. In a monolith, &quot;place order, reserve stock, create shipment, write ledger entry&quot; is one <code>@Transactional</code> method. In microservices it is a Saga with compensating actions, an at-least-once delivery model, and a reconciliation job for the states the Saga did not manage to reach. The Saga is not a design pattern you add; it is a <em>permanent, ongoing operational commitment</em> to a class of bug that a monolith simply does not have. If your domain has cross-entity invariants — and most do — this is the biggest single item on the cost side, and it is invisible until the first time one of them is violated in production.</p><p><strong>One process to profile</strong> is the second, and it is the one engineers feel most. A distributed trace tells you a call was slow. A profiler on a single JVM tells you <em>which allocation</em> or <em>which lock</em> made it slow, with a flame graph, in the same tool, immediately. Latency debugging across 15 services requires: a trace to identify the slow span, a service to identify, logs for that service, a metric to confirm, and then a hypothesis. In a monolith it is: a flame graph. For teams that do not have a mature observability stack yet, this is not a preference — it is the difference between debugging in minutes and debugging in a day.</p><p><strong>No partial failure</strong> sounds obvious and is worth stating, because the whole of Volume 2 exists because of it. In a modular monolith there is no such thing as &quot;the inventory service is down&quot;. There is a method that throws, and it is inside your transaction, and the transaction rolls back. The entire class of bugs that motivates Sagas, outbox patterns, idempotent consumers, circuit breakers, and bulkheads does not exist in this architecture, because there is no network in it. You are giving up a large amount of hard-won distributed knowledge in exchange for a system where a request either commits or does not.</p><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off</span><p>A modular monolith gives up exactly two things: independent scaling, and independent deployment. Everything else on the table — transactional integrity, single-process debugging, no partial failure, runnable-on-a-laptop testing — it keeps. So the argument for microservices reduces entirely to: <strong>do we need one of those two, now?</strong> The flip condition is team count and change independence. Seven teams blocked by each other's release train need independent deployment. A context that takes 100× the traffic of the rest needs independent scaling. Neither of those is true of most systems at the moment somebody proposes splitting them.</p></aside><h3 class="vol__h3" id="52-a-monolith-is-not-automatically-modular">5.2 A Monolith Is Not Automatically Modular</h3><p>Here is where the argument usually gets lost, and the sentence that has to be said out loud: <strong>a monolith is not modular by default. Extract a module and what you have is a monolith with a folder in it, which is worth less than a monolith with a good design and worth nothing extra.</strong></p><p>Without enforcement, a modular monolith degrades into a ball of mud in a specific and predictable way — the <strong>package cycle</strong>:</p><pre class="diagram"><code>  A MODULE BOUNDARY NOBODY ENFORCES
-
-  com.acme.order      ──────►  com.acme.customer
-      ▲                        │
-      └────────────────────────┘
-            a cycle.
-
-  How it actually happens, in order:
+<section id="chapter-5-the-modular-monolith" data-filter-target><h2 class="vol__h2">Chapter 5 — The Modular Monolith</h2><p>This is the chapter that most candidates avoid, and avoiding it is the mistake. The honest recommendation for a very large fraction of teams considering microservices is <strong>do not split</strong>, and a candidate who can argue that convincingly is demonstrating judgment rather than caution. This chapter is the argument.</p><h3 class="vol__h3" id="51-why-it-is-very-often-the-right-answer">5.1 Why It Is Very Often the Right Answer</h3><p>A <strong>modular monolith</strong> is a single deployable in which the code is organised into modules with boundaries enforced by tooling — Spring Modulith verifies them at test time, ArchUnit enforces them as a test, JPMS at compile time. The code has service boundaries before the runtime does.</p><p>Start with what it gives you, because the list is longer than people expect:</p><div class="table-wrap"><table><thead><tr><th></th><th>Monolith (ball of mud)</th><th>Modular monolith</th><th>Microservices</th></tr></thead><tbody><tr><td>Transactional integrity across the domain</td><td>yes, if used</td><td><strong>yes</strong></td><td>no — Saga required</td></tr><tr><td>Deployables</td><td>1</td><td><strong>1</strong></td><td>N</td></tr><tr><td>Processes to profile in an incident</td><td>1</td><td><strong>1</strong></td><td>N</td></tr><tr><td>Partial failure</td><td>not applicable</td><td><strong>not applicable</strong></td><td>the default</td></tr><tr><td>Code boundaries</td><td>by convention</td><td><strong>enforced by a test that fails the build</strong></td><td>enforced by the network</td></tr><tr><td>Local dev</td><td>clone and run</td><td><strong>clone and run</strong></td><td>N containers or mocks</td></tr><tr><td>Team-level ownership</td><td>package convention</td><td><strong>module + CODEOWNERS</strong></td><td>service + team</td></tr><tr><td>Latency between modules</td><td>nanoseconds</td><td>nanoseconds</td><td>0.5–80ms</td></tr><tr><td>Can one part be scaled differently</td><td>no</td><td><strong>no</strong></td><td>yes</td></tr><tr><td>Can one part be deployed independently</td><td>no</td><td><strong>no</strong></td><td>yes</td></tr></tbody></table></div><p>The last two rows are the entire cost, and they are real. The question is whether the benefit is worth them <em>for your team now</em>, and for a great many teams the answer is that the benefit is not yet reachable.</p><p><strong>Transactional integrity across the whole domain</strong> is the one people underrate. In a monolith, &quot;place order, reserve stock, create shipment, write ledger entry&quot; is one <code>@Transactional</code> method. In microservices it is a Saga with compensating actions, an at-least-once delivery model, and a reconciliation job for the states the Saga did not manage to reach. The Saga is not a design pattern you add; it is a <em>permanent, ongoing operational commitment</em> to a class of bug that a monolith simply does not have. If your domain has cross-entity invariants — and most do — this is the biggest single item on the cost side, and it is invisible until the first time one of them is violated in production.</p><p><strong>One process to profile</strong> is the second, and it is the one engineers feel most. A distributed trace tells you a call was slow. A profiler on a single JVM tells you <em>which allocation</em> or <em>which lock</em> made it slow, with a flame graph, in the same tool, immediately. Latency debugging across 15 services requires: a trace to identify the slow span, a service to identify, logs for that service, a metric to confirm, and then a hypothesis. In a monolith it is: a flame graph. For teams that do not have a mature observability stack yet, this is not a preference — it is the difference between debugging in minutes and debugging in a day.</p><p><strong>No partial failure</strong> sounds obvious and is worth stating, because the whole of Volume 2 exists because of it. In a modular monolith there is no such thing as &quot;the inventory service is down&quot;. There is a method that throws, and it is inside your transaction, and the transaction rolls back. The entire class of bugs that motivates Sagas, outbox patterns, idempotent consumers, circuit breakers, and bulkheads does not exist in this architecture, because there is no network in it. You are giving up a large amount of hard-won distributed knowledge in exchange for a system where a request either commits or does not.</p><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off</span><p>A modular monolith gives up exactly two things: independent scaling, and independent deployment. Everything else on the table — transactional integrity, single-process debugging, no partial failure, runnable-on-a-laptop testing — it keeps. So the argument for microservices reduces entirely to: <strong>do we need one of those two, now?</strong> The flip condition is team count and change independence. Seven teams blocked by each other's release train need independent deployment. A context that takes 100× the traffic of the rest needs independent scaling. Neither of those is true of most systems at the moment somebody proposes splitting them.</p></aside><h3 class="vol__h3" id="52-a-monolith-is-not-automatically-modular">5.2 A Monolith Is Not Automatically Modular</h3><p>Here is where the argument usually gets lost, and the sentence that has to be said out loud: <strong>a monolith is not modular by default. Extract a module and what you have is a monolith with a folder in it, which is worth less than a monolith with a good design and worth nothing extra.</strong></p><p>Without enforcement, a modular monolith degrades into a ball of mud in a specific and predictable way — the <strong>package cycle</strong>:</p><figure class="figure">
+  <svg viewBox="0 0 900 250" role="img" aria-label="An unenforced module boundary degrades into a package cycle. com.acme.order imports an enum from com.acme.customer because it is tiny, and com.acme.customer reaches back for the order repository, so the arrows run both ways. Two years later there are 3,000 cross-module imports, and the boundary diagram has arrows between most pairs of modules.">
+    <defs>
+      <marker id="arw-microservices-01-05-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="edge-label edge-label--strong" x="25" y="22">A MODULE BOUNDARY NOBODY ENFORCES</text>
+    <rect class="node node--warn" x="100" y="40" width="260" height="70" rx="5"/>
+    <text class="label" x="230" y="70" text-anchor="middle">com.acme.order</text>
+    <text class="label label--sub" x="230" y="92" text-anchor="middle">the order module</text>
+    <path class="edge" d="M 360 64 L 540 64" marker-end="url(#arw-microservices-01-05-a)"/>
+    <text class="edge-label" x="450" y="56" text-anchor="middle">imports an enum — it's tiny</text>
+    <rect class="node node--warn" x="540" y="40" width="260" height="70" rx="5"/>
+    <text class="label" x="670" y="70" text-anchor="middle">com.acme.customer</text>
+    <text class="label label--sub" x="670" y="92" text-anchor="middle">the customer module</text>
+    <path class="edge edge--return" d="M 540 100 L 360 100" marker-end="url(#arw-microservices-01-05-a)"/>
+    <text class="edge-label" x="450" y="118" text-anchor="middle">reaches for the repository</text>
+    <path class="edge" d="M 450 110 L 450 140" marker-end="url(#arw-microservices-01-05-a)"/>
+    <rect class="node node--bad" x="100" y="140" width="700" height="84" rx="5"/>
+    <text class="label" x="450" y="168" text-anchor="middle">that is not modularity</text>
+    <text class="label label--sub" x="450" y="190" text-anchor="middle">it is a diagram of a monolith — arrows both ways between most pairs</text>
+    <text class="label label--sub" x="450" y="208" text-anchor="middle">3,000 cross-module imports later, the boundary diagram lies</text>
+  </svg>
+  <figcaption>
+    <strong>A module boundary nobody enforces becomes a package cycle, and a cycle is a diagram of a monolith.</strong>
+    The three words that do the damage are <em>tiny</em>, <em>just this once</em> and <em>it's just a utility</em>: every import is locally reasonable and globally fatal, and nothing fails while it drifts. The tell is the direction of the arrows, not their number — a boundary diagram with arrows both ways between most pairs of modules is not modularity.
+  </figcaption>
+</figure><pre class="diagram"><code>  How it actually happens, in order:
     1. &quot;I'll just import that enum, it's tiny&quot;
     2. &quot;The repository is right there, no point in a port&quot;
     3. &quot;This is a utility, it doesn't really belong to either module&quot;
@@ -601,21 +753,50 @@ class ModularityTests {
      thing that is hard to deploy. Extract it and isolate the blast
      radius. This is a legitimate reason and it is reactive rather than
      preventive, which is fine — reactive architecture is often the
-     honest kind.</code></pre><p>Note what is <strong>not</strong> on that list, because each of these is a reason people give and each is wrong:</p><ul><li><em>&quot;It is conceptually separate.&quot;</em> Everything is conceptually separate from something. Conceptual separability is the input to the analysis, not a result of it.</li><li><em>&quot;It has a lot of code.&quot;</em> Size is a build problem.</li><li><em>&quot;The team wants to own it.&quot;</em> If the team has not existed before, wanting is not having. The test is whether a team exists, has a roadmap, and will carry the on-call.</li><li><em>&quot;It is a good candidate for reuse.&quot;</em> Reuse is a code-reuse problem. If two things need the same code, extract a library, not a service.</li></ul><pre class="diagram"><code>  THE HONEST SEQUENCE
-
-  day 0    monolith, one deployable, 5 teams
-           │
-           ├─ carve out modules, enforce boundaries          ← 2 days
-           │  (the value is immediate: better test speed,
-           │   clearer ownership, no distributed-system cost)
-           │
-  month 3  a team forms around fulfilment; it has a roadmap
-           │  and an on-call rotation                        ← signal 3
-           │
-           ├─ extract it properly: data first, code second   ← 2–4 months
-           │
-  month 8  two teams, each on their own rotation, each
-           shipping weekly                                    ← the benefit</code></pre><p>The point of the sequence is that <strong>every step before the extraction was free</strong>, and the extraction itself became mechanical because the boundary was already real. A team that skips to the extraction from a boundaryless monolith does the same final step in the same 2–4 months and arrives with a different, worse boundary, because they had to discover it under schedule pressure.</p><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p>The number that keeps the modular monolith honest: <strong>extracting one boundary from a boundaryless monolith is a 2–4 month project, and extracting the same boundary from a monolith where it is already an enforced module is a 3–6 week project.</strong> The difference is entirely the data migration and the join replacement, both of which are hard either way — but in the modular monolith you know which tables moved and which imports are already legal, because a build has been telling you for six months. Teams consistently report the 2–4 month figure and then treat the modular step as a delay, which inverts the arithmetic.</p></aside><h3 class="vol__h3" id="55-the-migration-discipline-it-is-a-data-project-first">5.5 The Migration Discipline: It Is a Data Project First</h3><p>The last thing this chapter needs to say, and it is the thing that is stated worst in industry: <strong>a monolith-to-microservices migration is a data project first and a code move second.</strong> Chapter 7 has the full procedure; the principle belongs here because it is the reason the modular monolith is the right starting point.</p><pre class="diagram"><code>  WHAT THE PROJECT ACTUALLY IS
+     honest kind.</code></pre><p>Note what is <strong>not</strong> on that list, because each of these is a reason people give and each is wrong:</p><ul><li><em>&quot;It is conceptually separate.&quot;</em> Everything is conceptually separate from something. Conceptual separability is the input to the analysis, not a result of it.</li><li><em>&quot;It has a lot of code.&quot;</em> Size is a build problem.</li><li><em>&quot;The team wants to own it.&quot;</em> If the team has not existed before, wanting is not having. The test is whether a team exists, has a roadmap, and will carry the on-call.</li><li><em>&quot;It is a good candidate for reuse.&quot;</em> Reuse is a code-reuse problem. If two things need the same code, extract a library, not a service.</li></ul><figure class="figure">
+  <svg viewBox="0 0 900 488" role="img" aria-label="The honest sequence for extracting a service. Day 0: one monolith, five teams. Carve out modules and enforce boundaries first, which takes two days and pays immediately. By month 3 a team has formed around fulfilment with a roadmap and on-call rotation, so extract it properly, data first, in two to four months. By month 8 two teams ship weekly.">
+    <defs>
+      <marker id="arw-microservices-01-06-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="25" y="44" width="220" height="78" rx="5"/>
+    <text class="label" x="135" y="70" text-anchor="middle">day 0</text>
+    <text class="label label--sub" x="135" y="90" text-anchor="middle">monolith, one deployable</text>
+    <text class="label label--sub" x="135" y="108" text-anchor="middle">5 teams</text>
+    <path class="edge" d="M 245 83 L 330 83" marker-end="url(#arw-microservices-01-06-a)"/>
+    <text class="edge-label" x="287" y="75" text-anchor="middle">2 days</text>
+    <rect class="node node--good" x="330" y="44" width="440" height="78" rx="5"/>
+    <text class="label" x="550" y="70" text-anchor="middle">carve out modules, enforce boundaries</text>
+    <text class="label label--sub" x="550" y="90" text-anchor="middle">the value is immediate: better test speed,</text>
+    <text class="label label--sub" x="550" y="108" text-anchor="middle">clearer ownership, no distributed-system cost</text>
+    <path class="edge" d="M 135 122 L 135 176"/>
+    <rect class="node" x="25" y="176" width="220" height="96" rx="5"/>
+    <text class="label" x="135" y="202" text-anchor="middle">month 3</text>
+    <text class="label label--sub" x="135" y="222" text-anchor="middle">a team forms around</text>
+    <text class="label label--sub" x="135" y="240" text-anchor="middle">fulfilment; it has a roadmap</text>
+    <text class="label label--sub" x="135" y="258" text-anchor="middle">and an on-call rotation</text>
+    <path class="edge" d="M 245 224 L 330 224" marker-end="url(#arw-microservices-01-06-a)"/>
+    <text class="edge-label" x="287" y="216" text-anchor="middle">2–4 months</text>
+    <rect class="node node--warn" x="330" y="176" width="440" height="96" rx="5"/>
+    <text class="label" x="550" y="202" text-anchor="middle">extract it properly: data first, code second</text>
+    <text class="label label--sub" x="550" y="222" text-anchor="middle">2–4 months — and the boundary is already real,</text>
+    <text class="label label--sub" x="550" y="240" text-anchor="middle">so the extraction is mechanical, not a rewrite</text>
+    <path class="edge" d="M 135 272 L 135 316"/>
+    <rect class="node" x="25" y="316" width="220" height="78" rx="5"/>
+    <text class="label" x="135" y="342" text-anchor="middle">month 8</text>
+    <text class="label label--sub" x="135" y="362" text-anchor="middle">two teams, each on its own</text>
+    <text class="label label--sub" x="135" y="380" text-anchor="middle">rotation, shipping weekly</text>
+    <path class="edge" d="M 135 394 L 135 412" marker-end="url(#arw-microservices-01-06-a)"/>
+    <rect class="node node--accent" x="25" y="412" width="850" height="58" rx="5"/>
+    <text class="label" x="450" y="436" text-anchor="middle">every step before the extraction was free</text>
+    <text class="label label--sub" x="450" y="456" text-anchor="middle">the extraction became mechanical because the boundary was already real</text>
+  </svg>
+  <figcaption>
+    <strong>Every step before the extraction is free, and it is what makes the extraction mechanical.</strong>
+    Carving the modules out and enforcing the boundaries costs two days and pays immediately in test speed and clearer ownership; the extraction only becomes a 2–4 month project once a team has actually formed around the capability, which is graduation signal three. A team that skips to the extraction from a boundaryless monolith does the same final step in the same time and arrives with a worse boundary, because it had to discover the boundary under schedule pressure.
+  </figcaption>
+</figure><p>The point of the sequence is that <strong>every step before the extraction was free</strong>, and the extraction itself became mechanical because the boundary was already real. A team that skips to the extraction from a boundaryless monolith does the same final step in the same 2–4 months and arrives with a different, worse boundary, because they had to discover it under schedule pressure.</p><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p>The number that keeps the modular monolith honest: <strong>extracting one boundary from a boundaryless monolith is a 2–4 month project, and extracting the same boundary from a monolith where it is already an enforced module is a 3–6 week project.</strong> The difference is entirely the data migration and the join replacement, both of which are hard either way — but in the modular monolith you know which tables moved and which imports are already legal, because a build has been telling you for six months. Teams consistently report the 2–4 month figure and then treat the modular step as a delay, which inverts the arithmetic.</p></aside><h3 class="vol__h3" id="55-the-migration-discipline-it-is-a-data-project-first">5.5 The Migration Discipline: It Is a Data Project First</h3><p>The last thing this chapter needs to say, and it is the thing that is stated worst in industry: <strong>a monolith-to-microservices migration is a data project first and a code move second.</strong> Chapter 7 has the full procedure; the principle belongs here because it is the reason the modular monolith is the right starting point.</p><pre class="diagram"><code>  WHAT THE PROJECT ACTUALLY IS
 
   CODE (what people plan for)            DATA (what takes the time)
   ─────────────────────────              ───────────────────────────
@@ -804,32 +985,63 @@ class ModularityTests {
   ◄── 2–3 weeks ──►                      ◄──────── 2–4 months ────────►
 
   ... plus the hidden multiplier: running TWO systems during the
-      migration, which is where the bugs actually live (7.4)</code></pre><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p>The number to carry: <strong>extracting one service from a shared-database monolith is a 2–4 month project, and from a monolith where the boundary is already an enforced module it is 3–6 weeks.</strong> The difference is entirely data migration and join replacement. The other number: a team's estimate of &quot;we'll just lift the code&quot; is reliably about a third of the truth, and the missing two-thirds is always the same two items — who owns the tables, and what replaces the join.</p></aside><p>Before starting, write down these four answers. If any of them is unknown, you have not scoped the project:</p><ol><li><strong>Who owns the tables, in writing, from someone who can commit to it?</strong></li><li><strong>What replaces every join on the request path, and what is the consistency window?</strong></li><li><strong>What is the rollback, at every step, and how long does it stay available?</strong></li><li><strong>What is the latency budget for the affected path, in writing?</strong></li></ol><h3 class="vol__h3" id="72-the-strangler-fig">7.2 The Strangler Fig</h3><p>The <strong>strangler fig pattern</strong> grows a new implementation alongside an old one and routes traffic at the edge until the new one has replaced it. It is the default migration strategy, and its mechanism is simple: the router becomes the thing you control.</p><pre class="diagram"><code>  STRANGLER — three phases, running BOTH for the middle one
+      migration, which is where the bugs actually live (7.4)</code></pre><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p>The number to carry: <strong>extracting one service from a shared-database monolith is a 2–4 month project, and from a monolith where the boundary is already an enforced module it is 3–6 weeks.</strong> The difference is entirely data migration and join replacement. The other number: a team's estimate of &quot;we'll just lift the code&quot; is reliably about a third of the truth, and the missing two-thirds is always the same two items — who owns the tables, and what replaces the join.</p></aside><p>Before starting, write down these four answers. If any of them is unknown, you have not scoped the project:</p><ol><li><strong>Who owns the tables, in writing, from someone who can commit to it?</strong></li><li><strong>What replaces every join on the request path, and what is the consistency window?</strong></li><li><strong>What is the rollback, at every step, and how long does it stay available?</strong></li><li><strong>What is the latency budget for the affected path, in writing?</strong></li></ol><h3 class="vol__h3" id="72-the-strangler-fig">7.2 The Strangler Fig</h3><p>The <strong>strangler fig pattern</strong> grows a new implementation alongside an old one and routes traffic at the edge until the new one has replaced it. It is the default migration strategy, and its mechanism is simple: the router becomes the thing you control.</p><figure class="figure">
+  <svg viewBox="0 0 900 545" role="img" aria-label="The strangler fig in three phases. Phase one builds the new service alongside the legacy monolith, with its own schema and no traffic. Phase two puts a router at the edge: 1% to the new service, 99% to the legacy monolith, with dual-write and a divergence alert. Phase three sends 100% to the new service and deletes the legacy code path.">
+    <defs>
+      <marker id="arw-microservices-01-07-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="edge-label edge-label--strong" x="25" y="22">PHASE 1 — BUILD ALONGSIDE</text>
+    <rect class="node" x="25" y="40" width="240" height="70" rx="5"/>
+    <text class="label" x="145" y="70" text-anchor="middle">legacy monolith</text>
+    <text class="label label--sub" x="145" y="90" text-anchor="middle">owns orders</text>
+    <text class="edge-label" x="450" y="90" text-anchor="middle">grows alongside the monolith</text>
+    <rect class="node node--good" x="635" y="40" width="240" height="96" rx="5"/>
+    <text class="label" x="755" y="64" text-anchor="middle">NEW SERVICE</text>
+    <text class="label label--sub" x="755" y="86" text-anchor="middle">own schema</text>
+    <text class="label label--sub" x="755" y="104" text-anchor="middle">reads replicated order data</text>
+    <text class="label label--sub" x="755" y="122" text-anchor="middle">no traffic yet</text>
 
-  PHASE 1: BUILD ALONGSIDE
-    ┌────────┐        ┌──────────────────────────────────────┐
-    │legacy  │        │ NEW SERVICE                          │
-    │monolith│        │  · own schema                        │
-    │        │        │  · read from replicated order data   │
-    │ owns   │        │  · no traffic yet                    │
-    │ orders │        │                                      │
-    └────┬───┘        └──────────────────────────────────────┘
-         │
-  PHASE 2: ROUTE, GROW, DUAL-WRITE          ◄── the expensive phase
-    ┌────────┐   1%    ┌──────────┐
-    │  NEW   │◄───────│  ROUTER  │───────► 99%  ┌──────────┐
-    │service │        │(canary)  │─────────────►│  LEGACY  │
-    └────────┘        └──────────┘              │ monolith │
-                                                └──────────┘
-                        + dual-write both paths
-                        + reconciliation job comparing them
-                        + metric + alert on divergence
+    <text class="edge-label edge-label--strong" x="25" y="180">PHASE 2 — ROUTE, GROW, DUAL-WRITE</text>
+    <text class="edge-label fill-warn" x="875" y="180" text-anchor="end">the expensive phase</text>
+    <rect class="node node--good" x="25" y="200" width="240" height="76" rx="5"/>
+    <text class="label" x="145" y="226" text-anchor="middle">NEW service</text>
+    <text class="label label--sub" x="145" y="246" text-anchor="middle">1% of traffic</text>
+    <text class="label label--sub" x="145" y="264" text-anchor="middle">dual-write, then reconcile</text>
+    <rect class="node node--accent" x="350" y="200" width="200" height="76" rx="5"/>
+    <text class="label" x="450" y="226" text-anchor="middle">ROUTER</text>
+    <text class="label label--sub" x="450" y="246" text-anchor="middle">canary weights</text>
+    <text class="label label--sub" x="450" y="264" text-anchor="middle">per-request routing</text>
+    <path class="edge" d="M 350 238 L 265 238" marker-end="url(#arw-microservices-01-07-a)"/>
+    <text class="edge-label" x="307" y="230" text-anchor="middle">1%</text>
+    <rect class="node node--bad" x="635" y="200" width="240" height="76" rx="5"/>
+    <text class="label" x="755" y="226" text-anchor="middle">LEGACY monolith</text>
+    <text class="label label--sub" x="755" y="246" text-anchor="middle">99% of traffic</text>
+    <text class="label label--sub" x="755" y="264" text-anchor="middle">still authoritative</text>
+    <path class="edge" d="M 550 238 L 635 238" marker-end="url(#arw-microservices-01-07-a)"/>
+    <text class="edge-label" x="592" y="230" text-anchor="middle">99%</text>
+    <rect class="node" x="25" y="296" width="850" height="80" rx="5"/>
+    <text class="edge-label edge-label--strong" x="45" y="320">the middle phase runs both, and that is where the cost is</text>
+    <text class="edge-label" x="45" y="342">dual-write both paths &middot; a reconciliation job comparing them &middot; a metric and an alert on divergence</text>
+    <text class="edge-label" x="45" y="362">the canary weight is a configuration change, so 1% to 100% is a number, not a deployment</text>
 
-  PHASE 3: RETIRE
-    ┌──────────┐              ┌────────┐
-    │  ROUTER  │─────────────►│  NEW   │   delete the legacy code path
-    │  100%    │              │service│   delete the legacy tables
-    └──────────┘              └────────┘   (a month later, separately)</code></pre><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off</span><p>The strangler is the right default because the router makes the cut-over a <strong>configuration change rather than a deployment</strong> — you can go from 1% to 100% by changing a weight, and you can go back by changing it the other way, in seconds, without a rollback. The flip condition is <strong>whether the old and new code are separable at all</strong>. If the feature is spread across a hundred call sites in the monolith with shared local state and no seam, there is no edge to route at, and strangling degenerates into a big-bang rewrite wearing a canary. That case is Branch by Abstraction, below.</p></aside><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&quot;Strangler fig is always the safe migration pattern.&quot; The senior correction: it is the safe pattern <strong>for separable functionality</strong>, and the phrase does most of its work in practice. When the thing you are extracting is a well-defined slice reachable at one entry point — a page, an endpoint, a job — routing works beautifully. When it is a behaviour woven through a hundred call sites with shared state, there is no seam to strangle, the canary becomes a lie about how much of the path is actually new, and you have a big-bang rewrite with extra steps. The question to ask before proposing a strangler is &quot;where exactly does traffic enter, and can that be routed per-request?&quot;</p></aside><h3 class="vol__h3" id="73-branch-by-abstraction">7.3 Branch by Abstraction</h3><p><strong>Branch by abstraction</strong> replaces behaviour behind an interface, in the same codebase, in small steps, and switches between old and new implementations at runtime behind that interface. It beats strangling exactly when the code is entangled rather than separable.</p><pre class="snippet" data-lang="java"><code>// Step 1: introduce an interface over the existing implementation.
+    <text class="edge-label edge-label--strong" x="25" y="410">PHASE 3 — RETIRE</text>
+    <rect class="node node--accent" x="200" y="428" width="220" height="64" rx="5"/>
+    <text class="label" x="310" y="454" text-anchor="middle">ROUTER</text>
+    <text class="label label--sub" x="310" y="474" text-anchor="middle">100% to the new service</text>
+    <path class="edge" d="M 420 460 L 500 460" marker-end="url(#arw-microservices-01-07-a)"/>
+    <text class="edge-label" x="460" y="452" text-anchor="middle">all traffic</text>
+    <rect class="node node--good" x="500" y="428" width="240" height="64" rx="5"/>
+    <text class="label" x="620" y="454" text-anchor="middle">NEW service</text>
+    <text class="label label--sub" x="620" y="474" text-anchor="middle">the only implementation</text>
+    <text class="edge-label" x="25" y="528">delete the legacy code path, then the legacy tables — a month later, separately</text>
+  </svg>
+  <figcaption>
+    <strong>The strangler routes traffic at the edge, so the cut-over is a configuration change rather than a deployment.</strong>
+    The new service is built alongside the legacy monolith with its own schema and replicated order data, then the router takes canary weights — 1% to the new service, 99% to the legacy — while both paths dual-write, a reconciliation job compares them, and a divergence metric carries an alert. The expensive phase is the middle one: it is the only period in which two implementations of one business rule are both live. Retirement deletes the legacy code path and then the legacy tables, a month later and as a separate change, so the rollback window is a calendar decision.
+  </figcaption>
+</figure><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off</span><p>The strangler is the right default because the router makes the cut-over a <strong>configuration change rather than a deployment</strong> — you can go from 1% to 100% by changing a weight, and you can go back by changing it the other way, in seconds, without a rollback. The flip condition is <strong>whether the old and new code are separable at all</strong>. If the feature is spread across a hundred call sites in the monolith with shared local state and no seam, there is no edge to route at, and strangling degenerates into a big-bang rewrite wearing a canary. That case is Branch by Abstraction, below.</p></aside><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&quot;Strangler fig is always the safe migration pattern.&quot; The senior correction: it is the safe pattern <strong>for separable functionality</strong>, and the phrase does most of its work in practice. When the thing you are extracting is a well-defined slice reachable at one entry point — a page, an endpoint, a job — routing works beautifully. When it is a behaviour woven through a hundred call sites with shared state, there is no seam to strangle, the canary becomes a lie about how much of the path is actually new, and you have a big-bang rewrite with extra steps. The question to ask before proposing a strangler is &quot;where exactly does traffic enter, and can that be routed per-request?&quot;</p></aside><h3 class="vol__h3" id="73-branch-by-abstraction">7.3 Branch by Abstraction</h3><p><strong>Branch by abstraction</strong> replaces behaviour behind an interface, in the same codebase, in small steps, and switches between old and new implementations at runtime behind that interface. It beats strangling exactly when the code is entangled rather than separable.</p><pre class="snippet" data-lang="java"><code>// Step 1: introduce an interface over the existing implementation.
 // Nothing changes. The interface exists, and the monolith is the only impl.
 public interface TaxCalculator {
     BigDecimal taxFor(Order order);
