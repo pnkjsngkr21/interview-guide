@@ -106,7 +106,7 @@ compare against, so it cannot catch content that was silently dropped — only s
 Read the page yourself for that.
 
 **Warnings are advisory.** The composition and density rules below are guides, not contracts, so a
-page that trips one is reported and still exits 0. There are ~559 such warnings across the 34
+page that trips one is reported and still exits 0. There are ~572 such warnings across the 34
 cheatsheets today; that is the baseline, not a regression.
 
 ## Editing rules

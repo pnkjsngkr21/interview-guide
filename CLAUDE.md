@@ -116,7 +116,7 @@ Key invariants:
   catches broken links, duplicate ids, missing assets and encoding damage — but it cannot tell you
   that a chapter was dropped or a paragraph mangled. Read the diff.
 - **Warnings are advisory, not failures.** The authoring contract treats density and composition as
-  guides, so a page that trips one is reported and still exits 0. There are ~559 such warnings across
+  guides, so a page that trips one is reported and still exits 0. There are ~572 such warnings across
   the 34 cheatsheets today; that is the baseline, not a regression.
 - **`README.md` at the root is unchecked.** `check.js --index` covers `index.html`, but there is no
   mode for the root README, so its links are unverified.
