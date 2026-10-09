@@ -805,3 +805,70 @@ corpus never claimed it, nothing needed removing.)
    and a trap callout) and the matching cheat09 block (2 occurrences). This entry was written when
    the material had only been recorded in `checklist.md`; a later pass in the same day added it to
    both pages. Closing rather than re-doing the work.
+
+## Eighth pass — ASD-STE100 conformance, `spring-01` (2026-10-09)
+
+A language pass, not a content pass: the volume's narrative prose was
+rewritten to ASD-STE100 (Simplified Technical English, Issue 9). The
+paired cheatsheet was deliberately left untouched, and nothing structural
+changed.
+
+### Scope
+
+- **In scope:** all narrative prose — body paragraphs, list items, callout
+  claims, the 78 Q&A answers, figcaptions, SVG `aria-label` text, the two
+  numbered `pre.diagram` lists, table cells, and the question stems
+  (contractions expanded; hard violations such as non-approved modals and
+  phrasal verbs in stems also fixed).
+- **25-word sentence cap** — Rule 6.3's descriptive-text limit. Rule 5.1's
+  20-word limit is procedural and does not apply.
+- **"container"** is the anchor term for the generic IoC concept
+  (Rule 1.11, one term per concept).
+- **Nine commits, one per chapter** (Chapter 2 took two), so a revert can
+  never wipe more than one chapter: `d2d6072` (Ch1 + front matter),
+  `14a76ee` + `fec0502` (Ch2), `2b0b392` (Ch3), `daf3c5b` (Ch4),
+  `d92f6c1` (Ch5), `c33aada` (Ch6), `0f343af` (Ch7), `afcddd3` (Ch8).
+
+### What the rewrite changed
+
+Sentence splits to the 25-word cap; contractions expanded; semicolons
+removed (Rule 8.1); non-approved modals replaced with the approved
+CAN / MUST / WILL set (Rule 6); gerund subjects re-anchored to the house
+"The mistake is to …" pattern and sentence-initial `-ing` converted
+(Rules 3.4–3.5); passives put in active voice where the agent is named
+(Rule 7); phrasal verbs replaced with single verbs (Rule 9.3); idioms and
+slang replaced ("sharp edge" → "known edge", "escape hatch" → "a way
+around", "stringly-typed" → "string-based", the bare "swallow" →
+"drops" / "ignores"); vague pronoun openers re-anchored (Rule 1.11);
+hedge words removed (Rule 14); Latin abbreviations dropped (GR-6).
+
+### Two factual corrections made along the way
+
+1. **Chapter 4** (`daf3c5b`) — `PersistentExceptionTranslationPostProcessor`
+   was a typo for `PersistenceExceptionTranslationPostProcessor`. The
+   correct spelling now appears everywhere the class is named.
+2. **Chapter 8** (`afcddd3`) — a stray space in "class- level" (the
+   bank-4 scenario) was repaired to "class-level".
+
+### Verification
+
+- `check.js --volume` — **PASS, zero warnings** (the pre-existing
+  baseline), structural counts unchanged:
+  `chapters 9 | questions 78 | figures 7 | ascii blocks 4 | snippets 35 |
+  tables 16 | callouts 33 | ids 157`.
+- `check.js --index` — PASS.
+- A throwaway audit script (kept out of the repo) checked the 16-rule
+  subset against every sentence. **Chapter 8 reports zero flags.** The 40
+  items it reports in the front matter and Chapters 1–7 are the deliberate
+  acceptances from those chapter passes: Rule 3.5 technical `-ing` nouns,
+  passives whose agent is unknown or unimportant, TOC and heading titles
+  (titles are not descriptive prose), pronoun openers with a clear
+  antecedent, and the out-of-scope terminal transcript (`pre.diagram`
+  text).
+- A word-level diff against the pre-pass commit, reviewed per chapter:
+  every deletion is a rewording, and every identifier, number, class name,
+  `id` and `href` survives. No fact was added, dropped or inverted.
+
+**No file was created or deleted in the content tree, no heading was
+renamed, no section was rewritten wholesale; structure, facts, ids, hrefs
+and all code unchanged.
