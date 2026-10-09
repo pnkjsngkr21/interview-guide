@@ -16,7 +16,7 @@
 
 <main class="main main--guide" id="main">
 
-<header class="masthead"><p class="masthead__eyebrow">Spring — AOP &amp; PROXYING</p><h1>The Spring Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>9 chapters</li><li>89 questions</li><li>16 diagrams</li></ul></header>
+<header class="masthead"><p class="masthead__eyebrow">Spring — AOP &amp; PROXYING</p><h1>The Spring Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>9 chapters</li><li>89 questions</li><li>10 figures</li><li>6 text blocks</li></ul></header>
 
 <div class="toolbar"><div class="search"><input type="search" data-filter-input placeholder="Filter chapters — press /" aria-label="Filter chapters"><span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span></div><div class="pager"><a class="pager__prev" href="spring-02-bean-lifecycle-scopes-di.html">&larr; BEAN LIFECYCLE, SCOPES &amp; ADVANCED DI</a><a class="pager__next" href="spring-04-transaction-management.html">TRANSACTION MANAGEMENT &rarr;</a></div></div>
 
@@ -26,17 +26,73 @@
 When to Use → When NOT to Use → Scaling &amp; Failure Modes → Interview Traps →
 Production Example → Interview Questions</code></pre><p>Not every chapter uses every slot. The template is a completeness checklist, not a form to fill in.</p><p><strong>Callouts</strong> appear inline and are used consistently:</p><div class="table-wrap"><table><thead><tr><th>Callout</th><th>Means</th></tr></thead><tbody><tr><td><code>INTERVIEW TRAP</code></td><td>the common answer that a senior candidate should catch and correct</td></tr><tr><td><code>TRADE-OFF</code></td><td>a decision with both sides, and the condition that flips the answer</td></tr><tr><td><code>SCALING REALITY CHECK</code></td><td>the specific number where this stops working</td></tr><tr><td><code>PRODUCTION RELEVANCE</code></td><td>why this matters outside an interview</td></tr><tr><td><code>MUST REMEMBER</code></td><td>the one fact to carry forward</td></tr><tr><td><code>PRODUCTION SCENARIO</code></td><td>a five-line incident: problem, investigation, root cause, solution, prevention</td></tr><tr><td><code>STAFF-LEVEL CONSIDERATION</code></td><td>the org or process concern worth raising unprompted</td></tr></tbody></table></div><p>Each chapter ends with <code>Common Mistakes</code>, a set of <code>Interview Questions</code>, a summary callout, and <code>Further Reading</code>.</p><p>Volumes end with an <code>Interview Scenario Bank</code> — production situations, code-behaviour predictions, code-review questions, and design trade-off challenges.</p><div class="table-wrap"><table><thead><tr><th>Volume</th><th>Coverage</th></tr></thead><tbody><tr><td>Volume 1</td><td>Spring Core &amp; the IoC Container — architecture, DI, bean definitions, scanning, the context family, events, property resolution</td></tr><tr><td>Volume 2</td><td>Bean Lifecycle, Scopes &amp; Advanced DI — callbacks, post-processors, scopes, validation, dynamic registration, circular dependencies</td></tr><tr><td>Volume 3 (this book)</td><td>AOP &amp; Proxying — the proxy mechanism, aspects, pointcuts, ordering, pitfalls</td></tr><tr><td>Volume 4</td><td>Transaction Management — the abstraction, <code>@Transactional</code>, propagation, isolation, failure modes, distributed transactions</td></tr><tr><td>Volume 5</td><td>Spring MVC &amp; the Web Layer — DispatcherServlet, handler resolution, data binding, filters, exception handling, async</td></tr><tr><td>Volume 6</td><td>Spring Data JPA &amp; Persistence — Hibernate, repositories, fetch strategies, N+1, the persistence context, tuning</td></tr><tr><td>Volume 7</td><td>Spring Boot &amp; Auto-Configuration — starters, <code>@Conditional</code>, config binding, the executable JAR, Actuator</td></tr><tr><td>Volume 8</td><td>Spring Security — the filter chain, authentication, authorization, JWT, OAuth2/OIDC, hardening</td></tr><tr><td>Volume 9</td><td>Testing &amp; Production Troubleshooting — the test pyramid, Boot test annotations, Testcontainers, JVM and pool tuning</td></tr><tr><td>Volume 10</td><td>WebFlux &amp; Project Reactor — the reactive model, operators, backpressure, context propagation</td></tr><tr><td>Volume 11</td><td>Spring Cloud &amp; Distributed Systems — discovery, gateway, resilience patterns, tracing, Saga, antipatterns</td></tr></tbody></table></div><h3 class="vol__h3" id="table-of-contents-volume-3">Table of Contents — Volume 3</h3><ul><li>Chapter 1 — AOP Concepts &amp; the Vocabulary</li><li>Chapter 2 — Spring AOP Under the Hood</li><li>Chapter 3 — Declaring Aspects</li><li>Chapter 4 — Pointcut Expression Language</li><li>Chapter 5 — <code>@Around</code> &amp; the <code>proceed()</code> Contract</li><li>Chapter 6 — Aspect Ordering</li><li>Chapter 7 — AOP Pitfalls &amp; Why They Exist</li><li>Chapter 8 — Interview Scenario Bank</li></ul><hr><h1 class="vol__h1" id="part-1-aop-and-proxying">Part 1 — AOP &amp; Proxying</h1></section>
 
-<section id="chapter-1-aop-concepts-and-the-vocabulary" data-filter-target><h2 class="vol__h2">Chapter 1 — AOP Concepts &amp; the Vocabulary</h2><h3 class="vol__h3" id="11-the-vocabulary">1.1 The Vocabulary</h3><p>Seven terms, and the interview asks for all of them. The trap is that most candidates can define them and almost none can say which of them Spring AOP actually supports.</p><div class="table-wrap"><table><thead><tr><th>Term</th><th>Definition</th><th>Does Spring AOP support it?</th></tr></thead><tbody><tr><td><strong>Join point</strong></td><td>A point in the execution of a program where advice <em>could</em> be applied</td><td><strong>Partially</strong> — method executions on Spring beans, only. Not field access, not constructor execution, not the execution of code in a <code>new</code>-ed object</td></tr><tr><td><strong>Pointcut</strong></td><td>A <em>selection</em> of join points — the filter that says which calls get advised</td><td>Yes — as a string expression (Chapter 4)</td></tr><tr><td><strong>Advice</strong></td><td>The action taken <em>at</em> a join point</td><td>Yes — five types (Chapter 3)</td></tr><tr><td><strong>Aspect</strong></td><td>The module that pairs a pointcut with advice: &quot;when X, do Y&quot;</td><td>Yes — <code>@Aspect</code> (Chapter 3)</td></tr><tr><td><strong>Weaving</strong></td><td>The mechanism that links aspects with the target — how the advice actually gets into the call path</td><td>Yes, but <strong>only at runtime via a proxy</strong></td></tr><tr><td><strong>Target</strong></td><td>The object being advised</td><td>Yes — the object behind the proxy</td></tr><tr><td><strong>Introduction</strong></td><td>Adding new interfaces (and therefore new methods) to a proxied class</td><td>Yes, in the API; rarely used in practice</td></tr></tbody></table></div><p>The single most important row is <strong>weaving</strong>, and the most commonly wrong claim in Spring interviews is that Spring weaves. It does not weave in the AspectJ sense. It <strong>substitutes a proxy for the bean</strong> and puts the advice in the proxy's method.</p><pre class="diagram"><code>AspectJ (load-time / compile-time weaving)
-─────────────────────────────────────────
-    Aspect bytecode is woven INTO the target class.
-    new OrderService(...)          →  an OrderService, with advice compiled in.
-    Any caller, any call site, is intercepted — including self-invocation.
+<section id="chapter-1-aop-concepts-and-the-vocabulary" data-filter-target><h2 class="vol__h2">Chapter 1 — AOP Concepts &amp; the Vocabulary</h2><h3 class="vol__h3" id="11-the-vocabulary">1.1 The Vocabulary</h3><p>Seven terms, and the interview asks for all of them. The trap is that most candidates can define them and almost none can say which of them Spring AOP actually supports.</p><div class="table-wrap"><table><thead><tr><th>Term</th><th>Definition</th><th>Does Spring AOP support it?</th></tr></thead><tbody><tr><td><strong>Join point</strong></td><td>A point in the execution of a program where advice <em>could</em> be applied</td><td><strong>Partially</strong> — method executions on Spring beans, only. Not field access, not constructor execution, not the execution of code in a <code>new</code>-ed object</td></tr><tr><td><strong>Pointcut</strong></td><td>A <em>selection</em> of join points — the filter that says which calls get advised</td><td>Yes — as a string expression (Chapter 4)</td></tr><tr><td><strong>Advice</strong></td><td>The action taken <em>at</em> a join point</td><td>Yes — five types (Chapter 3)</td></tr><tr><td><strong>Aspect</strong></td><td>The module that pairs a pointcut with advice: &quot;when X, do Y&quot;</td><td>Yes — <code>@Aspect</code> (Chapter 3)</td></tr><tr><td><strong>Weaving</strong></td><td>The mechanism that links aspects with the target — how the advice actually gets into the call path</td><td>Yes, but <strong>only at runtime via a proxy</strong></td></tr><tr><td><strong>Target</strong></td><td>The object being advised</td><td>Yes — the object behind the proxy</td></tr><tr><td><strong>Introduction</strong></td><td>Adding new interfaces (and therefore new methods) to a proxied class</td><td>Yes, in the API; rarely used in practice</td></tr></tbody></table></div><p>The single most important row is <strong>weaving</strong>, and the most commonly wrong claim in Spring interviews is that Spring weaves. It does not weave in the AspectJ sense. It <strong>substitutes a proxy for the bean</strong> and puts the advice in the proxy's method.</p><figure class="figure">
+  <svg viewBox="0 0 900 500" role="img" aria-label="AspectJ weaves aspect bytecode into the target class, so any caller and any call site is intercepted, including self-invocation. Spring AOP uses runtime proxying: the container returns a proxy rather than the target, new OrderService produces no advice at all, and only calls through the proxy are advised.">
+    <defs>
+      <marker id="arw-spring-03-01-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="70" y="40" width="360" height="56" rx="5"/>
+    <text class="label" x="90" y="66">AspectJ</text>
+    <text class="edge-label" x="90" y="88">load-time / compile-time weaving</text>
 
-Spring AOP (runtime proxying)
-─────────────────────────────
-    The container returns a PROXY, not the target.
-    new OrderService(...)          →  an OrderService, no advice at all.
-    new OrderServiceProxy(target)   →  a proxy; only calls THROUGH the proxy are advised.</code></pre><p>That difference is the entire subject of Chapter 7. Everything that frustrates people about Spring AOP — self-invocation, <code>new</code>-ed objects not being advised, <code>private</code> methods being unadvised — is the same fact viewed from a different angle: <strong>the proxy has to be in the call path, and it only is if the caller holds the proxy rather than the target.</strong></p><h3 class="vol__h3" id="12-the-three-implementation-approaches-and-why-spring-chose-one">1.2 The Three Implementation Approaches, and Why Spring Chose One</h3><p>AOP has three historical mechanisms. Understanding why Spring picked the least powerful one explains almost every Spring AOP limitation you will be asked about.</p><div class="table-wrap"><table><thead><tr><th></th><th>Proxy-based (Spring AOP)</th><th>Load-time weaving (AspectJ LTW)</th><th>Compile-time weaving (AspectJ CTW)</th></tr></thead><tbody><tr><td>When advice is applied</td><td>At runtime, when the proxy is created</td><td>At class-load time, by a Java agent</td><td>At compile time, by a compiler plugin</td></tr><tr><td>Build step required</td><td><strong>No</strong></td><td>No (but a JVM agent flag or <code>-javaagent</code>)</td><td><strong>Yes</strong> — a modified <code>javac</code> / AspectJ compiler</td></tr><tr><td>Intercepts self-invocation</td><td><strong>No</strong></td><td>Yes</td><td>Yes</td></tr><tr><td>Intercepts <code>new</code>-ed objects</td><td><strong>No</strong></td><td>Yes</td><td>Yes</td></tr><tr><td>Intercepts <code>private</code>/<code>static</code> methods</td><td><strong>No</strong></td><td>Yes (with limitations)</td><td>Yes (with limitations)</td></tr><tr><td>Sees Spring DI / transactions</td><td><strong>Yes</strong> — it <em>is</em> Spring</td><td>Partially</td><td>Partially</td></tr><tr><td>Cost per call</td><td>A chain walk + reflective dispatch</td><td>Near zero after weaving</td><td>Near zero after weaving</td></tr><tr><td>Change a pointcut</td><td>Recompile nothing; restart</td><td>Restart / re-define</td><td><strong>Full recompile</strong></td></tr><tr><td>Debuggability</td><td><strong>Worse</strong> — stack trace goes through <code>MethodInterceptor.invoke</code></td><td>Good</td><td>Good</td></tr><tr><td>Applicable outside a Spring context</td><td>No</td><td>Yes</td><td>Yes</td></tr></tbody></table></div><p>Why Spring chose proxies:</p><ol><li><strong>No build-time coupling.</strong> The target class is an ordinary class. You do not need a special compiler, an agent, or a <code>ajc</code> invocation, which is why Spring AOP works in every environment where Spring works — including a plain <code>main()</code>, a JUnit test, and a GraalVM native-image build where an agent is a serious problem.</li><li><strong>Opt-in and reversible.</strong> A pointcut change is a config change and a restart. Not a recompile of every module that transitively depends on the target.</li><li><strong>Seamlessness with the container.</strong> The proxy is created by a <code>BeanPostProcessor</code> during context refresh, at exactly the moment the container already has the fully-wired target. AOP is implemented <em>as</em> a container extension, which is why an advised bean and a transactional bean and a <code>new</code>-ed object behave differently with no extra configuration.</li><li><strong>Interfaces-first semantics.</strong> A JDK dynamic proxy is generated from the interface, so the proxy is guaranteed to be type-safe against the contract the rest of the code already depends on.</li></ol><p>The costs follow directly, and they are not incidental — they are the price:</p><div class="table-wrap"><table><thead><tr><th>Cost</th><th>Consequence</th></tr></thead><tbody><tr><td>The proxy must be <em>in</em> the path</td><td>Self-invocation is not advised (Chapter 7)</td></tr><tr><td>Only proxyable members</td><td><code>private</code>, <code>static</code>, <code>final</code> methods are not advised</td></tr><tr><td>JDK proxy exposes only interfaces</td><td><code>(OrderServiceImpl) bean</code> throws <code>ClassCastException</code></td></tr><tr><td>Runtime dispatch</td><td>Every advised call pays a chain walk plus reflection</td></tr><tr><td>The proxy is a different object</td><td>Identity, serialization, <code>equals</code>, stack traces all change</td></tr><tr><td>Pointcuts are strings</td><td>A rename is a silent behaviour change, not a compile error (Chapter 4)</td></tr></tbody></table></div><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&quot;Spring AOP uses AspectJ&quot; is the answer that loses points, and it is wrong in the direction that matters. Spring AOP uses <strong>AspectJ's pointcut expression language and its <code>@Aspect</code> annotation model</strong> on top of a <strong>Spring-implemented proxying mechanism</strong>. The <code>@Aspect</code>, <code>@Before</code> and <code>execution(...)</code> syntax is AspectJ; the interception is Spring's <code>AopProxyFactory</code>. The precise version, and the one to give: <em>Spring borrows AspectJ's language, not its mechanism — which means it inherits AspectJ's expressiveness at the pointcut level and none of its power at the interception level.</em></p><p>The follow-up, which is the real question: &quot;when would you use AspectJ over Spring AOP?&quot; The answer is when you need to advise something Spring AOP cannot reach — a <code>new</code>-ed object, a self-invocation, a <code>private</code> or <code>static</code> method, field access, or a third-party jar you do not control — and you can accept the load-time agent and the loss of Spring DI semantics inside the woven code. That is a real answer in a legacy codebase full of un-adviseable static utility methods. It is rarely the right answer in a greenfield Spring application, where the design fix — extract an interface, inject a collaborator — is usually cheaper than an agent.</p></aside><aside class="callout callout--must"><span class="callout__label">Must remember</span><p>Spring AOP can only intercept <strong>method calls on a Spring-managed bean, arriving through a proxy, on a method that is not <code>private</code>, <code>static</code> or <code>final</code></strong>. If any one of those four conditions fails, the advice does not run — and nothing tells you.</p></aside><h3 class="vol__h3" id="13-when-aop-is-the-wrong-tool">1.3 When AOP Is the Wrong Tool</h3><p>The honest list, because a chapter that only argues <em>for</em> AOP is a chapter that gets you hired and then blamed.</p><p><strong>AOP is wrong when you need to intercept:</strong></p><div class="table-wrap"><table><thead><tr><th>Target</th><th>Why Spring AOP cannot</th><th>What to do instead</th></tr></thead><tbody><tr><td>An object you <code>new</code> yourself</td><td>Nothing creates a proxy for it</td><td>Make it a bean; inject it</td></tr><tr><td>A <code>static</code> method</td><td>Instance proxies cannot intercept statics</td><td>Make it an instance method on a bean</td></tr><tr><td>A <code>private</code> method</td><td>The proxy is a different class; it cannot see private members</td><td>Change visibility to package-private or public, or restructure so the caller is external</td></tr><tr><td>A <code>final</code> method</td><td>CGLIB cannot override it</td><td>Remove <code>final</code>, or move the call</td></tr><tr><td>A <code>final</code> class</td><td>CGLIB cannot subclass it</td><td>Remove <code>final</code>; <code>record</code> and Kotlin <code>data class</code> are the traps</td></tr><tr><td>A method called from inside itself</td><td>The call never leaves the object, so it never reaches the proxy</td><td>Extract to another bean, or inject self via <code>@Lazy</code> (Chapter 7)</td></tr><tr><td>A <code>ThreadLocal</code>-scoped or plain <code>new</code>-ed helper</td><td>Same as above</td><td>Restructure</td></tr><tr><td>Code in a library you do not own</td><td>You cannot add a bean definition to it easily</td><td>AspectJ LTW, or a decorator at your own boundary</td></tr></tbody></table></div><p><strong>AOP is also the wrong tool when the concern is not cross-cutting.</strong> The test is honest and simple: <em>would you want this applied identically to forty unrelated classes, and would you be surprised if any of them opted out?</em> If the answer to the second half is no, the concern belongs in the call site, as an explicit collaborator, because a decorator is visible at the call site and an aspect is not.</p><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off</span><p>The alternative to an aspect is a decorator — a class with the same interface, injected explicitly, that wraps the real implementation. The decorator costs you a constructor parameter, a class, and a line at every call site. The aspect costs you zero call-site changes and gives you a behaviour that no reader of the target class can see. The flip condition: <strong>use the decorator when there are few call sites and the wrapping is part of that call's semantics; use the aspect when the concern is genuinely uniform across dozens of call sites and nobody could reasonably want it applied differently to one of them.</strong> A team that reaches for <code>@Aspect</code> to avoid writing a constructor is trading a compile-time cost for a runtime one — the behaviour is now only discoverable by reading the pointcut.</p></aside><aside class="callout callout--prod"><span class="callout__label">In production</span><p>The failure mode of over-using AOP is a <em>silent behaviour change</em> in a class whose author never read the aspect. A team adds a timing aspect on <code>execution(* ..service..*(..))</code>, and suddenly three services are 40% slower because the aspect opens a <code>Timer</code> and appends to a shared <code>StringBuilder</code> that is not thread-safe. The classes did not change, no PR touched them, no test failed — the aspect did. This is why the next chapter is about the mechanism, and why Chapter 3 spends real time on aspect <em>ownership</em>.</p></aside><h4 class="vol__h4" id="common-mistakes">Common Mistakes</h4><ul><li>Saying Spring AOP &quot;weaves&quot; advice into the class. It does not; it substitutes a proxy. This is the root of every other mistake in the list.</li><li>Believing AOP can advise <code>private</code> or <code>static</code> methods in Spring. It cannot, and this is not a configuration problem — there is no flag.</li><li>Treating an aspect as free. Every advised call pays a chain walk and a reflective dispatch.</li><li>Reaching for <code>@Aspect</code> to avoid a constructor parameter, converting a visible design decision into an invisible one.</li><li>Assuming an aspect applies to &quot;the whole application.&quot; It applies to beans the auto-proxy creator chose to proxy, matched by a pointcut that is a string you probably wrote six months ago.</li><li>Confusing &quot;Spring AOP&quot; with &quot;AspectJ&quot; when the question is whether advice runs on a self-invocation. In Spring AOP it does not. In AspectJ it does.</li></ul><h4 class="vol__h4" id="interview-questions-aop-concepts">Interview Questions — AOP Concepts</h4><article class="qa" id="1-aop-concepts-and-the-vocabulary-1"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-1">Q1</a> Explain AOP's core vocabulary: join point, pointcut, advice, aspect, weaving. <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>A join point is a point in program execution where advice could apply. A pointcut is the <em>selection</em> of join points. Advice is the action taken. An aspect is the pairing of a pointcut with advice. Weaving is the mechanism that links aspects to the target. The senior part is the last column: in Spring AOP the only supported join points are method executions on Spring beans, and the only supported weaving is runtime proxying — so three of AspectJ's capabilities (field access, constructor execution, static-method interception) are unavailable.</p></div></article><article class="qa" id="1-aop-concepts-and-the-vocabulary-2"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-2">Q2</a> Why does Spring use proxy-based AOP rather than AspectJ's weaving? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>Because proxying needs no build step, no compiler plugin and no load-time agent, which makes AOP work in any environment Spring works in — including tests and native images. It is opt-in and reversible at a pointcut change. And it slots into the container naturally, because the proxy is created by a <code>BeanPostProcessor</code> once the target is fully wired. The cost is that the proxy must be in the call path, which is why self-invocation, <code>new</code>-ed objects, <code>private</code> and <code>static</code> methods are all un-adviseable.</p></div></article><article class="qa" id="1-aop-concepts-and-the-vocabulary-3"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-3">Q3</a> A team asks you to advise every call to a static helper class in a third-party jar. What do you tell them? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>Spring AOP cannot do it — instance proxies do not intercept statics, and the jar is not Spring-managed. The options, in order: wrap it in your own Spring bean whose method delegates to the static, and advise the wrapper — cheapest, and correct if the surface is small; use AspectJ load-time weaving if the calls are genuinely unavoidable and you can accept the agent; or, best, argue for removing the static so it can be injected. The staff part is that the third option is usually right and takes one refactor, and that &quot;we need load-time weaving&quot; is almost always a statement that the design is fighting the tool.</p></div></article><article class="qa" id="1-aop-concepts-and-the-vocabulary-4"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-4">Q4</a> Is a decorator ever better than an aspect? When? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>Yes — when the call sites are few and the wrapping is part of that call's own semantics. A decorator costs a constructor parameter and a line at each call site, and buys complete visibility and easy unit testing. An aspect costs nothing at the call site and buys invisibility. The rule of thumb: an aspect should apply something every reader of the target class would <em>expect</em> to apply; a decorator should apply something the specific caller decided. If only some callers want the behaviour, it is a decorator.</p></div></article><article class="qa" id="1-aop-concepts-and-the-vocabulary-5"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-5">Q5</a> What is an &quot;introduction&quot; in AOP, and does Spring AOP support it? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>An introduction lets an aspect add new interfaces — and therefore new method contracts — to the proxied type. Spring AOP supports it through <code>IntroductionAdvisor</code> and <code>IntroductionInterceptor</code>, adding a marker interface to the proxy. It is genuinely supported and almost never used, because the JDK proxy mechanism already makes the interface list flexible while CGLIB subclasses cannot truly add new state. The honest framing: a feature you can name, that you should not reach for, because annotating the class with the interface is clearer.</p></div></article><article class="qa" id="1-aop-concepts-and-the-vocabulary-6"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-6">Q6</a> A codebase has forty <code>@Aspect</code> classes. Is that a smell, and what would you do? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>It depends entirely on whether they are uniform cross-cutting concerns or scattered workarounds. The test: can you name every pointcut in the codebase and the set of methods each one affects? If yes, forty is a lot of infrastructure but a coherent one. If no — and in a typical codebase the answer is no, because the pointcuts are strings — then the aspects have accreted as local solutions to local problems, and each one is a hidden behaviour change in a class nobody reviewed. The remediation is an inventory: for each aspect, list the affected method signatures, and delete or convert to an explicit decorator anything a reader would not predict. Expect roughly a third to survive.</p><aside class="callout callout--summary"><span class="callout__label">Chapter summary</span><p>Spring AOP is proxy-based, not bytecode-weaving. It can only intercept method calls on Spring-managed beans that arrive through a proxy on a method that is not <code>private</code>, <code>static</code> or <code>final</code>. That is why it was chosen — no build step, no agent, opt-in, and it slots into the container — and it is the direct cause of every limitation people rediscover in production. The vocabulary is worth learning precisely so you can say which part of it Spring actually implements. And the honest framing is that AOP is the wrong tool whenever the concern is not genuinely uniform: a decorator is visible at the call site, an aspect is not, and that difference is a design decision rather than a style preference.</p></aside></div></article><h4 class="vol__h4" id="further-reading">Further Reading</h4><ul><li><a href="https://docs.spring.io/spring-framework/reference/core/aop/introduction-defn.html" rel="noopener noreferrer">Spring Framework Reference — AOP Concepts</a> — the official definitions of join point, pointcut, advice, aspect and weaving, with the diagram that separates them.</li><li><a href="https://docs.spring.io/spring-framework/reference/core/aop/introduction-proxies.html" rel="noopener noreferrer">Spring Framework Reference — AOP Proxies</a> — the one page that states plainly which join points Spring AOP supports and why the others are excluded.</li><li><a href="https://docs.spring.io/spring-framework/reference/core/aop/using-aspectj.html" rel="noopener noreferrer">Spring Framework Reference — Using AspectJ with Spring Applications</a> — what you gain and lose by mixing real AspectJ weaving into a Spring application.</li><li><a href="https://www.manning.com/books/spring-in-action-sixth-edition" rel="noopener noreferrer">Spring in Action, 6th edition</a> — book-length treatment with the clearest prose on proxy-vs-weaving trade-offs I have found.</li></ul></section>
+    <rect class="node" x="70" y="116" width="360" height="68" rx="5"/>
+    <text class="edge-label" x="90" y="140">Aspect bytecode is woven INTO</text>
+    <text class="edge-label" x="90" y="158">the target class.</text>
+
+    <rect class="node" x="70" y="204" width="360" height="68" rx="5"/>
+    <text class="edge-label" x="90" y="228">new OrderService(...)</text>
+    <text class="edge-label" x="90" y="246">&#8594; an OrderService, with advice</text>
+    <text class="edge-label" x="90" y="264">compiled in.</text>
+
+    <rect class="node" x="70" y="292" width="360" height="68" rx="5"/>
+    <text class="edge-label" x="90" y="316">Any caller, any call site,</text>
+    <text class="edge-label" x="90" y="334">is intercepted &#8212;</text>
+    <text class="edge-label" x="90" y="352">including self-invocation.</text>
+    <path class="edge" d="M 250 96 L 250 116" marker-end="url(#arw-spring-03-01-a)"/>
+    <path class="edge" d="M 250 184 L 250 204" marker-end="url(#arw-spring-03-01-a)"/>
+    <path class="edge" d="M 250 272 L 250 292" marker-end="url(#arw-spring-03-01-a)"/>
+    <path class="edge" d="M 250 360 L 250 392" marker-end="url(#arw-spring-03-01-a)"/>
+
+    <rect class="node node--accent" x="470" y="40" width="360" height="56" rx="5"/>
+    <text class="label" x="490" y="66">Spring AOP</text>
+    <text class="edge-label" x="490" y="88">runtime proxying</text>
+
+    <rect class="node" x="470" y="116" width="360" height="68" rx="5"/>
+    <text class="edge-label" x="490" y="140">The container returns a PROXY,</text>
+    <text class="edge-label" x="490" y="158">not the target.</text>
+
+    <rect class="node" x="470" y="204" width="360" height="68" rx="5"/>
+    <text class="edge-label" x="490" y="228">new OrderService(...)</text>
+    <text class="edge-label" x="490" y="246">&#8594; an OrderService,</text>
+    <text class="edge-label" x="490" y="264">no advice at all.</text>
+
+    <rect class="node" x="470" y="292" width="360" height="68" rx="5"/>
+    <text class="edge-label" x="490" y="316">new OrderServiceProxy(target)</text>
+    <text class="edge-label" x="490" y="334">&#8594; a proxy; only calls</text>
+    <text class="edge-label" x="490" y="352">THROUGH the proxy are advised.</text>
+    <path class="edge" d="M 650 96 L 650 116" marker-end="url(#arw-spring-03-01-a)"/>
+    <path class="edge" d="M 650 184 L 650 204" marker-end="url(#arw-spring-03-01-a)"/>
+    <path class="edge" d="M 650 272 L 650 292" marker-end="url(#arw-spring-03-01-a)"/>
+    <path class="edge" d="M 650 360 L 650 392" marker-end="url(#arw-spring-03-01-a)"/>
+
+    <rect class="node" x="70" y="392" width="800" height="76" rx="5"/>
+    <text class="edge-label" x="90" y="418">The proxy has to be in the call path, and it only is</text>
+    <text class="edge-label" x="90" y="436">if the caller holds the proxy rather than the target.</text>
+  </svg>
+  <figcaption>
+    <strong>AspectJ weaves advice into the target class, so every
+    call site is intercepted; Spring AOP substitutes a proxy, so
+    only calls through the proxy are advised.</strong>
+    That single difference is the entire subject of Chapter 7:
+    self-invocation, new-ed objects and private methods are the
+    same fact viewed from a different angle. <code>new
+    OrderService(...)</code> never produces an advised object in
+    Spring &mdash; the container is what returns the proxy, and
+    only to the injection point.
+  </figcaption>
+</figure><p>That difference is the entire subject of Chapter 7. Everything that frustrates people about Spring AOP — self-invocation, <code>new</code>-ed objects not being advised, <code>private</code> methods being unadvised — is the same fact viewed from a different angle: <strong>the proxy has to be in the call path, and it only is if the caller holds the proxy rather than the target.</strong></p><h3 class="vol__h3" id="12-the-three-implementation-approaches-and-why-spring-chose-one">1.2 The Three Implementation Approaches, and Why Spring Chose One</h3><p>AOP has three historical mechanisms. Understanding why Spring picked the least powerful one explains almost every Spring AOP limitation you will be asked about.</p><div class="table-wrap"><table><thead><tr><th></th><th>Proxy-based (Spring AOP)</th><th>Load-time weaving (AspectJ LTW)</th><th>Compile-time weaving (AspectJ CTW)</th></tr></thead><tbody><tr><td>When advice is applied</td><td>At runtime, when the proxy is created</td><td>At class-load time, by a Java agent</td><td>At compile time, by a compiler plugin</td></tr><tr><td>Build step required</td><td><strong>No</strong></td><td>No (but a JVM agent flag or <code>-javaagent</code>)</td><td><strong>Yes</strong> — a modified <code>javac</code> / AspectJ compiler</td></tr><tr><td>Intercepts self-invocation</td><td><strong>No</strong></td><td>Yes</td><td>Yes</td></tr><tr><td>Intercepts <code>new</code>-ed objects</td><td><strong>No</strong></td><td>Yes</td><td>Yes</td></tr><tr><td>Intercepts <code>private</code>/<code>static</code> methods</td><td><strong>No</strong></td><td>Yes (with limitations)</td><td>Yes (with limitations)</td></tr><tr><td>Sees Spring DI / transactions</td><td><strong>Yes</strong> — it <em>is</em> Spring</td><td>Partially</td><td>Partially</td></tr><tr><td>Cost per call</td><td>A chain walk + reflective dispatch</td><td>Near zero after weaving</td><td>Near zero after weaving</td></tr><tr><td>Change a pointcut</td><td>Recompile nothing; restart</td><td>Restart / re-define</td><td><strong>Full recompile</strong></td></tr><tr><td>Debuggability</td><td><strong>Worse</strong> — stack trace goes through <code>MethodInterceptor.invoke</code></td><td>Good</td><td>Good</td></tr><tr><td>Applicable outside a Spring context</td><td>No</td><td>Yes</td><td>Yes</td></tr></tbody></table></div><p>Why Spring chose proxies:</p><ol><li><strong>No build-time coupling.</strong> The target class is an ordinary class. You do not need a special compiler, an agent, or a <code>ajc</code> invocation, which is why Spring AOP works in every environment where Spring works — including a plain <code>main()</code>, a JUnit test, and a GraalVM native-image build where an agent is a serious problem.</li><li><strong>Opt-in and reversible.</strong> A pointcut change is a config change and a restart. Not a recompile of every module that transitively depends on the target.</li><li><strong>Seamlessness with the container.</strong> The proxy is created by a <code>BeanPostProcessor</code> during context refresh, at exactly the moment the container already has the fully-wired target. AOP is implemented <em>as</em> a container extension, which is why an advised bean and a transactional bean and a <code>new</code>-ed object behave differently with no extra configuration.</li><li><strong>Interfaces-first semantics.</strong> A JDK dynamic proxy is generated from the interface, so the proxy is guaranteed to be type-safe against the contract the rest of the code already depends on.</li></ol><p>The costs follow directly, and they are not incidental — they are the price:</p><div class="table-wrap"><table><thead><tr><th>Cost</th><th>Consequence</th></tr></thead><tbody><tr><td>The proxy must be <em>in</em> the path</td><td>Self-invocation is not advised (Chapter 7)</td></tr><tr><td>Only proxyable members</td><td><code>private</code>, <code>static</code>, <code>final</code> methods are not advised</td></tr><tr><td>JDK proxy exposes only interfaces</td><td><code>(OrderServiceImpl) bean</code> throws <code>ClassCastException</code></td></tr><tr><td>Runtime dispatch</td><td>Every advised call pays a chain walk plus reflection</td></tr><tr><td>The proxy is a different object</td><td>Identity, serialization, <code>equals</code>, stack traces all change</td></tr><tr><td>Pointcuts are strings</td><td>A rename is a silent behaviour change, not a compile error (Chapter 4)</td></tr></tbody></table></div><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&quot;Spring AOP uses AspectJ&quot; is the answer that loses points, and it is wrong in the direction that matters. Spring AOP uses <strong>AspectJ's pointcut expression language and its <code>@Aspect</code> annotation model</strong> on top of a <strong>Spring-implemented proxying mechanism</strong>. The <code>@Aspect</code>, <code>@Before</code> and <code>execution(...)</code> syntax is AspectJ; the interception is Spring's <code>AopProxyFactory</code>. The precise version, and the one to give: <em>Spring borrows AspectJ's language, not its mechanism — which means it inherits AspectJ's expressiveness at the pointcut level and none of its power at the interception level.</em></p><p>The follow-up, which is the real question: &quot;when would you use AspectJ over Spring AOP?&quot; The answer is when you need to advise something Spring AOP cannot reach — a <code>new</code>-ed object, a self-invocation, a <code>private</code> or <code>static</code> method, field access, or a third-party jar you do not control — and you can accept the load-time agent and the loss of Spring DI semantics inside the woven code. That is a real answer in a legacy codebase full of un-adviseable static utility methods. It is rarely the right answer in a greenfield Spring application, where the design fix — extract an interface, inject a collaborator — is usually cheaper than an agent.</p></aside><aside class="callout callout--must"><span class="callout__label">Must remember</span><p>Spring AOP can only intercept <strong>method calls on a Spring-managed bean, arriving through a proxy, on a method that is not <code>private</code>, <code>static</code> or <code>final</code></strong>. If any one of those four conditions fails, the advice does not run — and nothing tells you.</p></aside><h3 class="vol__h3" id="13-when-aop-is-the-wrong-tool">1.3 When AOP Is the Wrong Tool</h3><p>The honest list, because a chapter that only argues <em>for</em> AOP is a chapter that gets you hired and then blamed.</p><p><strong>AOP is wrong when you need to intercept:</strong></p><div class="table-wrap"><table><thead><tr><th>Target</th><th>Why Spring AOP cannot</th><th>What to do instead</th></tr></thead><tbody><tr><td>An object you <code>new</code> yourself</td><td>Nothing creates a proxy for it</td><td>Make it a bean; inject it</td></tr><tr><td>A <code>static</code> method</td><td>Instance proxies cannot intercept statics</td><td>Make it an instance method on a bean</td></tr><tr><td>A <code>private</code> method</td><td>The proxy is a different class; it cannot see private members</td><td>Change visibility to package-private or public, or restructure so the caller is external</td></tr><tr><td>A <code>final</code> method</td><td>CGLIB cannot override it</td><td>Remove <code>final</code>, or move the call</td></tr><tr><td>A <code>final</code> class</td><td>CGLIB cannot subclass it</td><td>Remove <code>final</code>; <code>record</code> and Kotlin <code>data class</code> are the traps</td></tr><tr><td>A method called from inside itself</td><td>The call never leaves the object, so it never reaches the proxy</td><td>Extract to another bean, or inject self via <code>@Lazy</code> (Chapter 7)</td></tr><tr><td>A <code>ThreadLocal</code>-scoped or plain <code>new</code>-ed helper</td><td>Same as above</td><td>Restructure</td></tr><tr><td>Code in a library you do not own</td><td>You cannot add a bean definition to it easily</td><td>AspectJ LTW, or a decorator at your own boundary</td></tr></tbody></table></div><p><strong>AOP is also the wrong tool when the concern is not cross-cutting.</strong> The test is honest and simple: <em>would you want this applied identically to forty unrelated classes, and would you be surprised if any of them opted out?</em> If the answer to the second half is no, the concern belongs in the call site, as an explicit collaborator, because a decorator is visible at the call site and an aspect is not.</p><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off</span><p>The alternative to an aspect is a decorator — a class with the same interface, injected explicitly, that wraps the real implementation. The decorator costs you a constructor parameter, a class, and a line at every call site. The aspect costs you zero call-site changes and gives you a behaviour that no reader of the target class can see. The flip condition: <strong>use the decorator when there are few call sites and the wrapping is part of that call's semantics; use the aspect when the concern is genuinely uniform across dozens of call sites and nobody could reasonably want it applied differently to one of them.</strong> A team that reaches for <code>@Aspect</code> to avoid writing a constructor is trading a compile-time cost for a runtime one — the behaviour is now only discoverable by reading the pointcut.</p></aside><aside class="callout callout--prod"><span class="callout__label">In production</span><p>The failure mode of over-using AOP is a <em>silent behaviour change</em> in a class whose author never read the aspect. A team adds a timing aspect on <code>execution(* ..service..*(..))</code>, and suddenly three services are 40% slower because the aspect opens a <code>Timer</code> and appends to a shared <code>StringBuilder</code> that is not thread-safe. The classes did not change, no PR touched them, no test failed — the aspect did. This is why the next chapter is about the mechanism, and why Chapter 3 spends real time on aspect <em>ownership</em>.</p></aside><h4 class="vol__h4" id="common-mistakes">Common Mistakes</h4><ul><li>Saying Spring AOP &quot;weaves&quot; advice into the class. It does not; it substitutes a proxy. This is the root of every other mistake in the list.</li><li>Believing AOP can advise <code>private</code> or <code>static</code> methods in Spring. It cannot, and this is not a configuration problem — there is no flag.</li><li>Treating an aspect as free. Every advised call pays a chain walk and a reflective dispatch.</li><li>Reaching for <code>@Aspect</code> to avoid a constructor parameter, converting a visible design decision into an invisible one.</li><li>Assuming an aspect applies to &quot;the whole application.&quot; It applies to beans the auto-proxy creator chose to proxy, matched by a pointcut that is a string you probably wrote six months ago.</li><li>Confusing &quot;Spring AOP&quot; with &quot;AspectJ&quot; when the question is whether advice runs on a self-invocation. In Spring AOP it does not. In AspectJ it does.</li></ul><h4 class="vol__h4" id="interview-questions-aop-concepts">Interview Questions — AOP Concepts</h4><article class="qa" id="1-aop-concepts-and-the-vocabulary-1"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-1">Q1</a> Explain AOP's core vocabulary: join point, pointcut, advice, aspect, weaving. <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>A join point is a point in program execution where advice could apply. A pointcut is the <em>selection</em> of join points. Advice is the action taken. An aspect is the pairing of a pointcut with advice. Weaving is the mechanism that links aspects to the target. The senior part is the last column: in Spring AOP the only supported join points are method executions on Spring beans, and the only supported weaving is runtime proxying — so three of AspectJ's capabilities (field access, constructor execution, static-method interception) are unavailable.</p></div></article><article class="qa" id="1-aop-concepts-and-the-vocabulary-2"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-2">Q2</a> Why does Spring use proxy-based AOP rather than AspectJ's weaving? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>Because proxying needs no build step, no compiler plugin and no load-time agent, which makes AOP work in any environment Spring works in — including tests and native images. It is opt-in and reversible at a pointcut change. And it slots into the container naturally, because the proxy is created by a <code>BeanPostProcessor</code> once the target is fully wired. The cost is that the proxy must be in the call path, which is why self-invocation, <code>new</code>-ed objects, <code>private</code> and <code>static</code> methods are all un-adviseable.</p></div></article><article class="qa" id="1-aop-concepts-and-the-vocabulary-3"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-3">Q3</a> A team asks you to advise every call to a static helper class in a third-party jar. What do you tell them? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>Spring AOP cannot do it — instance proxies do not intercept statics, and the jar is not Spring-managed. The options, in order: wrap it in your own Spring bean whose method delegates to the static, and advise the wrapper — cheapest, and correct if the surface is small; use AspectJ load-time weaving if the calls are genuinely unavoidable and you can accept the agent; or, best, argue for removing the static so it can be injected. The staff part is that the third option is usually right and takes one refactor, and that &quot;we need load-time weaving&quot; is almost always a statement that the design is fighting the tool.</p></div></article><article class="qa" id="1-aop-concepts-and-the-vocabulary-4"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-4">Q4</a> Is a decorator ever better than an aspect? When? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>Yes — when the call sites are few and the wrapping is part of that call's own semantics. A decorator costs a constructor parameter and a line at each call site, and buys complete visibility and easy unit testing. An aspect costs nothing at the call site and buys invisibility. The rule of thumb: an aspect should apply something every reader of the target class would <em>expect</em> to apply; a decorator should apply something the specific caller decided. If only some callers want the behaviour, it is a decorator.</p></div></article><article class="qa" id="1-aop-concepts-and-the-vocabulary-5"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-5">Q5</a> What is an &quot;introduction&quot; in AOP, and does Spring AOP support it? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>An introduction lets an aspect add new interfaces — and therefore new method contracts — to the proxied type. Spring AOP supports it through <code>IntroductionAdvisor</code> and <code>IntroductionInterceptor</code>, adding a marker interface to the proxy. It is genuinely supported and almost never used, because the JDK proxy mechanism already makes the interface list flexible while CGLIB subclasses cannot truly add new state. The honest framing: a feature you can name, that you should not reach for, because annotating the class with the interface is clearer.</p></div></article><article class="qa" id="1-aop-concepts-and-the-vocabulary-6"><p class="qa__q"><a class="qa__num" href="#1-aop-concepts-and-the-vocabulary-6">Q6</a> A codebase has forty <code>@Aspect</code> classes. Is that a smell, and what would you do? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>It depends entirely on whether they are uniform cross-cutting concerns or scattered workarounds. The test: can you name every pointcut in the codebase and the set of methods each one affects? If yes, forty is a lot of infrastructure but a coherent one. If no — and in a typical codebase the answer is no, because the pointcuts are strings — then the aspects have accreted as local solutions to local problems, and each one is a hidden behaviour change in a class nobody reviewed. The remediation is an inventory: for each aspect, list the affected method signatures, and delete or convert to an explicit decorator anything a reader would not predict. Expect roughly a third to survive.</p><aside class="callout callout--summary"><span class="callout__label">Chapter summary</span><p>Spring AOP is proxy-based, not bytecode-weaving. It can only intercept method calls on Spring-managed beans that arrive through a proxy on a method that is not <code>private</code>, <code>static</code> or <code>final</code>. That is why it was chosen — no build step, no agent, opt-in, and it slots into the container — and it is the direct cause of every limitation people rediscover in production. The vocabulary is worth learning precisely so you can say which part of it Spring actually implements. And the honest framing is that AOP is the wrong tool whenever the concern is not genuinely uniform: a decorator is visible at the call site, an aspect is not, and that difference is a design decision rather than a style preference.</p></aside></div></article><h4 class="vol__h4" id="further-reading">Further Reading</h4><ul><li><a href="https://docs.spring.io/spring-framework/reference/core/aop/introduction-defn.html" rel="noopener noreferrer">Spring Framework Reference — AOP Concepts</a> — the official definitions of join point, pointcut, advice, aspect and weaving, with the diagram that separates them.</li><li><a href="https://docs.spring.io/spring-framework/reference/core/aop/introduction-proxies.html" rel="noopener noreferrer">Spring Framework Reference — AOP Proxies</a> — the one page that states plainly which join points Spring AOP supports and why the others are excluded.</li><li><a href="https://docs.spring.io/spring-framework/reference/core/aop/using-aspectj.html" rel="noopener noreferrer">Spring Framework Reference — Using AspectJ with Spring Applications</a> — what you gain and lose by mixing real AspectJ weaving into a Spring application.</li><li><a href="https://www.manning.com/books/spring-in-action-sixth-edition" rel="noopener noreferrer">Spring in Action, 6th edition</a> — book-length treatment with the clearest prose on proxy-vs-weaving trade-offs I have found.</li></ul></section>
 
 <section id="chapter-2-spring-aop-under-the-hood" data-filter-target><h2 class="vol__h2">Chapter 2 — Spring AOP Under the Hood</h2><h3 class="vol__h3" id="21-the-proxy-selection-rule">2.1 The Proxy Selection Rule</h3><p>One rule, stated precisely, and most of the surprises in this chapter follow from it:</p><blockquote class="note"><p><strong>JDK dynamic proxy if the target implements at least one interface. CGLIB subclass proxy otherwise. <code>proxyTargetClass = true</code> forces CGLIB regardless.</strong> That is the <em>Spring Framework</em> default. On <strong>Spring Boot 2.0+</strong>, <code>spring.aop.proxy-target-class</code> defaults to <code>true</code>, so in a Boot application CGLIB is what you get almost every time — see 2.5.</p></blockquote><p>The decision is made by <code>DefaultAopProxyFactory</code>, not by your configuration directly:</p><pre class="snippet" data-lang="java"><code>// DefaultAopProxyFactory.createAopProxy() — the whole decision
 @Override
@@ -63,14 +119,67 @@ public class OrderFacade {
   Error creating bean with name 'orderFacade':
   Factory method threw exception; nested exception is java.lang.ClassCastException:
   class com.sun.proxy.$Proxy42 cannot be cast to class com.acme.OrderServiceImpl
-        ($Proxy42 and OrderServiceImpl are in unnamed module of loader 'app')</code></pre><p>Note what makes this nasty: <strong>the code that breaks did not change.</strong> A teammate added <code>@Transactional</code> to a different class, and a class in a different module stopped starting. The stack trace points at the <em>consumer</em>, not the class that was annotated.</p><aside class="callout callout--must"><span class="callout__label">Must remember</span><p><strong>Program to interfaces.</strong> It is not a style preference here — it is the difference between a bean that can be proxied at all and a bean that cannot. An interface-first design is a precondition for the framework's cross-cutting features to be usable, which makes it a design constraint rather than a convention. The corollary that gets people: with a JDK proxy you <em>cannot</em> cast down to the implementation, and you cannot rely on implementation-specific methods being advised at all — if a method is not on the interface, a JDK proxy will not route it through the chain.</p></aside><h3 class="vol__h3" id="22-advised-advisedsupport-and-targetsource">2.2 <code>Advised</code>, <code>AdvisedSupport</code>, and <code>TargetSource</code></h3><p>Three types that explain how the proxy is configured and what it is standing in for.</p><pre class="diagram"><code>AdvisedSupport                         Advised
-  ├─ targetSource ─────────┐             (implemented by every Spring proxy)
-  ├─ interceptorList (chain)│            getTargetSource()
-  ├─ interfaces / proxyTargetClass       addAdvisor() / removeAdvisor()
-  ├─ frozen flag                          setTargetSource()
-  └─ aopProxyFactory                     getProxiedInterfaces()
-                                        isFrozen() / setFrozen()
-                                        toProxyConfig()</code></pre><p><code>Advised</code> is the interface every Spring AOP proxy implements, which gives you runtime access to the proxy's <em>own</em> configuration. This is genuinely useful, and genuinely a trap, because it means any code holding an advised bean can silently change how it is advised:</p><pre class="snippet" data-lang="java"><code>// Inspect the proxy's configuration at runtime
+        ($Proxy42 and OrderServiceImpl are in unnamed module of loader 'app')</code></pre><p>Note what makes this nasty: <strong>the code that breaks did not change.</strong> A teammate added <code>@Transactional</code> to a different class, and a class in a different module stopped starting. The stack trace points at the <em>consumer</em>, not the class that was annotated.</p><aside class="callout callout--must"><span class="callout__label">Must remember</span><p><strong>Program to interfaces.</strong> It is not a style preference here — it is the difference between a bean that can be proxied at all and a bean that cannot. An interface-first design is a precondition for the framework's cross-cutting features to be usable, which makes it a design constraint rather than a convention. The corollary that gets people: with a JDK proxy you <em>cannot</em> cast down to the implementation, and you cannot rely on implementation-specific methods being advised at all — if a method is not on the interface, a JDK proxy will not route it through the chain.</p></aside><h3 class="vol__h3" id="22-advised-advisedsupport-and-targetsource">2.2 <code>Advised</code>, <code>AdvisedSupport</code>, and <code>TargetSource</code></h3><p>Three types that explain how the proxy is configured and what it is standing in for.</p><figure class="figure">
+  <svg viewBox="0 0 900 520" role="img" aria-label="AdvisedSupport holds the target source, the interceptor chain, the interfaces and proxy-target-class flag, the frozen flag and the AOP proxy factory. Advised, implemented by every Spring proxy, exposes getTargetSource, addAdvisor and removeAdvisor, getProxiedInterfaces, isFrozen and setFrozen, and toProxyConfig. The pair gives runtime access to the proxy's own configuration.">
+    <defs>
+      <marker id="arw-spring-03-02-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="70" y="40" width="360" height="56" rx="5"/>
+    <text class="label" x="90" y="74">AdvisedSupport</text>
+
+    <rect class="node node--accent" x="470" y="40" width="360" height="56" rx="5"/>
+    <text class="label" x="490" y="66">Advised</text>
+    <text class="edge-label" x="490" y="88">implemented by every Spring proxy</text>
+
+    <path class="edge" d="M 430 68 L 470 68" marker-start="url(#arw-spring-03-02-a)" marker-end="url(#arw-spring-03-02-a)"/>
+
+    <rect class="node" x="70" y="116" width="360" height="44" rx="5"/>
+    <text class="label" x="90" y="144">targetSource</text>
+    <rect class="node" x="470" y="116" width="360" height="44" rx="5"/>
+    <text class="label" x="490" y="144">getTargetSource() / setTargetSource()</text>
+    <path class="edge" d="M 430 138 L 470 138" marker-start="url(#arw-spring-03-02-a)" marker-end="url(#arw-spring-03-02-a)"/>
+
+    <rect class="node" x="70" y="180" width="360" height="44" rx="5"/>
+    <text class="label" x="90" y="208">interceptorList (the chain)</text>
+    <rect class="node" x="470" y="180" width="360" height="44" rx="5"/>
+    <text class="label" x="490" y="208">addAdvisor() / removeAdvisor()</text>
+    <path class="edge" d="M 430 202 L 470 202" marker-start="url(#arw-spring-03-02-a)" marker-end="url(#arw-spring-03-02-a)"/>
+
+    <rect class="node" x="70" y="244" width="360" height="44" rx="5"/>
+    <text class="label" x="90" y="272">interfaces / proxyTargetClass</text>
+    <rect class="node" x="470" y="244" width="360" height="44" rx="5"/>
+    <text class="label" x="490" y="272">getProxiedInterfaces()</text>
+    <path class="edge" d="M 430 266 L 470 266" marker-start="url(#arw-spring-03-02-a)" marker-end="url(#arw-spring-03-02-a)"/>
+
+    <rect class="node" x="70" y="308" width="360" height="44" rx="5"/>
+    <text class="label" x="90" y="336">frozen flag</text>
+    <rect class="node" x="470" y="308" width="360" height="44" rx="5"/>
+    <text class="label" x="490" y="336">isFrozen() / setFrozen()</text>
+    <path class="edge" d="M 430 330 L 470 330" marker-start="url(#arw-spring-03-02-a)" marker-end="url(#arw-spring-03-02-a)"/>
+
+    <rect class="node" x="70" y="372" width="360" height="44" rx="5"/>
+    <text class="label" x="90" y="400">aopProxyFactory</text>
+    <rect class="node" x="470" y="372" width="360" height="44" rx="5"/>
+    <text class="label" x="490" y="400">toProxyConfig()</text>
+    <path class="edge" d="M 430 394 L 470 394" marker-start="url(#arw-spring-03-02-a)" marker-end="url(#arw-spring-03-02-a)"/>
+
+    <text class="edge-label fill-warn" x="70" y="452">The trap is the same fact from the other side: any code holding</text>
+    <text class="edge-label fill-warn" x="70" y="470">an advised bean can silently change how that bean is advised.</text>
+  </svg>
+  <figcaption>
+    <strong><code>AdvisedSupport</code> is what configures the
+    proxy; <code>Advised</code> is the interface every Spring
+    proxy implements to expose that configuration at runtime.</strong>
+    Every field on the left has its accessor on the right &mdash;
+    the target source, the interceptor chain, the proxied
+    interfaces, the frozen flag and the proxy factory. The trap is
+    the same fact: any code holding an advised bean can silently
+    change how it is advised, which is why casting to
+    <code>Advised</code> is a production action, not a debug aid.
+  </figcaption>
+</figure><p><code>Advised</code> is the interface every Spring AOP proxy implements, which gives you runtime access to the proxy's <em>own</em> configuration. This is genuinely useful, and genuinely a trap, because it means any code holding an advised bean can silently change how it is advised:</p><pre class="snippet" data-lang="java"><code>// Inspect the proxy's configuration at runtime
 OrderService proxy = (OrderService) ctx.getBean(&quot;orderService&quot;);
 
 if (proxy instanceof Advised advised) {
@@ -86,44 +195,75 @@ if (proxy instanceof Advised advised) {
 }
 // &quot;create&quot; and &quot;cancel&quot; are now advised. Nothing in the source changed.</code></pre><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;HOW DO I FIND OUT WHETHER A BEAN IS PROXIED?&quot;</strong></p>
 <p>The reflexive answer is <code>AopUtils.isAopProxy(bean)</code>, which is right but incomplete — it only tells you a proxy exists, not what it is. The senior answer continues: also check <code>((Advised) bean).getProxiedInterfaces()</code> to see the <em>exposed</em> interface list (which is the class-versus-interface question in a runtime form), and <code>AopProxyUtils.ultimateTargetClass(bean)</code> to get past nested proxies to the real implementation. The genuinely useful form of the question is the operational one: in a stack trace, a frame reading <code>com.sun.proxy.$Proxy42.create(..)</code> means the advice <em>did</em> run; a frame reading <code>OrderServiceImpl.create(..)</code> with the proxy class above it means the advice did <em>not</em> run for that particular call — which is the self-invocation signature from Chapter 7.</p>
-<p>The follow-up that separates a senior from a staff candidate: &quot;should production code ever cast to <code>Advised</code>?&quot; The honest answer is that runtime inspection is a debugging tool and a test-harness tool, not application logic. Production code that mutates advisors through <code>Advised</code> has made behaviour depend on bean initialisation order, and it is unreviewable.</p></blockquote><h3 class="vol__h3" id="23-the-interceptor-chain">2.3 The Interceptor Chain</h3><p>Every advised call walks the same path. This is the code that explains both the correctness rules in Chapter 5 and the performance cost in 2.4.</p><pre class="diagram"><code>caller
-  │
-  ▼
-PROXY.create(..)                     ← JDK: InvocationHandler.invoke()
-  │                                    CGLIB: FastClass / MethodProxy.invoke()
-  ▼
-DynamicAdvisedInterceptor.intercept(invocation)
-  │
-  ▼
-ReflectiveMethodInvocation  ── interceptorIndex = 0
-  │  method: OrderService.create(..)
-  │  target: OrderServiceImpl@1a2b3c
-  │  arguments: [OrderRequest]
-  │
-  ├── proceed()
-  │     │  currentInterceptorIndex++   →  1
-  │     ▼
-  │   interceptor[1]  ── @Before logging
-  │     │
-  │     ├── proceed()
-  │     │     │  currentInterceptorIndex++  →  2
-  │     │     ▼
-  │     │   interceptor[2]  ── the TRANSACTION interceptor
-  │     │     │
-  │     │     ├── proceed()
-  │     │     │     │  currentInterceptorIndex++  →  3
-  │     │     │     ▼
-  │     │     │   interceptor[3]  ── @Around metrics
-  │     │     │     │
-  │     │     │     ├── proceed()
-  │     │     │     │     │  index++ → 3 == size-1  ⇒  THE TARGET
-  │     │     │     │     ▼
-  │     │     │     │   AopUtils.invokeJoinpointUsingReflection(target, method, args)
-  │     │     │     │     │
-  │     │     │     │     │  ══►  OrderServiceImpl.create(..)   ← real code runs HERE
-  │     │     │     │     │          returns an Order
-  │     │     │     │     │  ◄══  return value unwinds back up the chain
-  │     │     │     │     ...</code></pre><p>The unwinding is the other half of the picture, and it is where advice ordering becomes visible: the return value travels back <strong>up</strong> the chain, so the <em>outermost</em> interceptor's post-processing runs <strong>last</strong>.</p><p>The essential source, reduced:</p><pre class="snippet" data-lang="java"><code>public class ReflectiveMethodInvocation implements InvocationTargetExceptionAware {
+<p>The follow-up that separates a senior from a staff candidate: &quot;should production code ever cast to <code>Advised</code>?&quot; The honest answer is that runtime inspection is a debugging tool and a test-harness tool, not application logic. Production code that mutates advisors through <code>Advised</code> has made behaviour depend on bean initialisation order, and it is unreviewable.</p></blockquote><h3 class="vol__h3" id="23-the-interceptor-chain">2.3 The Interceptor Chain</h3><p>Every advised call walks the same path. This is the code that explains both the correctness rules in Chapter 5 and the performance cost in 2.4.</p><figure class="figure">
+  <svg viewBox="0 0 900 824" role="img" aria-label="A caller reaches the proxy, which dispatches to DynamicAdvisedInterceptor intercept and builds a ReflectiveMethodInvocation. Each proceed call advances the interceptor index through the Before logging, transaction and Around metrics interceptors; when the index reaches the end of the chain, the target runs through AopUtils invokeJoinpointUsingReflection, and the return value unwinds back up.">
+    <defs>
+      <marker id="arw-spring-03-03-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="70" y="36" width="800" height="44" rx="5"/>
+    <text class="label" x="90" y="64">caller</text>
+    <path class="edge" d="M 470 80 L 470 100" marker-end="url(#arw-spring-03-03-a)"/>
+
+    <rect class="node" x="70" y="100" width="800" height="76" rx="5"/>
+    <text class="label" x="90" y="126">PROXY.create(..)</text>
+    <text class="edge-label" x="110" y="148">JDK: InvocationHandler.invoke()</text>
+    <text class="edge-label" x="110" y="166">CGLIB: FastClass / MethodProxy.invoke()</text>
+    <path class="edge" d="M 470 176 L 470 196" marker-end="url(#arw-spring-03-03-a)"/>
+
+    <rect class="node" x="70" y="196" width="800" height="44" rx="5"/>
+    <text class="label" x="90" y="224">DynamicAdvisedInterceptor.intercept(invocation)</text>
+    <path class="edge" d="M 470 240 L 470 260" marker-end="url(#arw-spring-03-03-a)"/>
+
+    <rect class="node" x="70" y="260" width="800" height="112" rx="5"/>
+    <text class="label" x="90" y="286">ReflectiveMethodInvocation</text>
+    <text class="edge-label" x="110" y="308">interceptorIndex = 0</text>
+    <text class="edge-label" x="110" y="326">method: OrderService.create(..)</text>
+    <text class="edge-label" x="110" y="344">target: OrderServiceImpl@1a2b3c</text>
+    <text class="edge-label" x="110" y="362">arguments: [OrderRequest]</text>
+    <path class="edge" d="M 470 372 L 470 392" marker-end="url(#arw-spring-03-03-a)"/>
+    <text class="edge-label" x="482" y="388">proceed() &#8212; index 0 &#8594; 1</text>
+
+    <rect class="node" x="70" y="392" width="800" height="44" rx="5"/>
+    <text class="label" x="90" y="420">interceptor[1] &#8212; @Before logging</text>
+    <path class="edge" d="M 470 436 L 470 456" marker-end="url(#arw-spring-03-03-a)"/>
+    <text class="edge-label" x="482" y="452">proceed() &#8212; index 1 &#8594; 2</text>
+
+    <rect class="node" x="70" y="456" width="800" height="44" rx="5"/>
+    <text class="label" x="90" y="484">interceptor[2] &#8212; the TRANSACTION interceptor</text>
+    <path class="edge" d="M 470 500 L 470 520" marker-end="url(#arw-spring-03-03-a)"/>
+    <text class="edge-label" x="482" y="516">proceed() &#8212; index 2 &#8594; 3</text>
+
+    <rect class="node" x="70" y="520" width="800" height="44" rx="5"/>
+    <text class="label" x="90" y="548">interceptor[3] &#8212; @Around metrics</text>
+    <path class="edge" d="M 470 564 L 470 584" marker-end="url(#arw-spring-03-03-a)"/>
+    <text class="edge-label" x="482" y="580">proceed() &#8212; index 3 == size-1 &#8594; the target</text>
+
+    <rect class="node" x="70" y="584" width="800" height="68" rx="5"/>
+    <text class="label" x="90" y="610">AopUtils.invokeJoinpointUsingReflection</text>
+    <text class="edge-label" x="110" y="632">(target, method, args)</text>
+    <path class="edge" d="M 470 652 L 470 672" marker-end="url(#arw-spring-03-03-a)"/>
+
+    <rect class="node node--good" x="70" y="672" width="800" height="68" rx="5"/>
+    <text class="label" x="90" y="698">OrderServiceImpl.create(..)</text>
+    <text class="edge-label" x="110" y="720">real code runs HERE &#8212; returns an Order</text>
+
+    <text class="edge-label" x="70" y="776">the return value unwinds back up the chain &#8212;</text>
+    <text class="edge-label" x="70" y="794">each interceptor's post-processing runs on the way out</text>
+  </svg>
+  <figcaption>
+    <strong>Every advised call walks the same chain: the proxy's
+    <code>intercept()</code> builds a <code>ReflectiveMethodInvocation</code>,
+    and each <code>proceed()</code> advances the interceptor index
+    until it runs off the end of the chain and the target
+    executes.</strong>
+    The return value then unwinds back up, so the outermost
+    interceptor's post-processing runs last &mdash; which is where
+    advice ordering becomes visible, and why the transaction
+    interceptor's position in the chain decides what it can observe.
+  </figcaption>
+</figure><p>The unwinding is the other half of the picture, and it is where advice ordering becomes visible: the return value travels back <strong>up</strong> the chain, so the <em>outermost</em> interceptor's post-processing runs <strong>last</strong>.</p><p>The essential source, reduced:</p><pre class="snippet" data-lang="java"><code>public class ReflectiveMethodInvocation implements InvocationTargetExceptionAware {
 
     private final Object target;                    // the RAW target, never the proxy
     private final Method method;
@@ -278,11 +418,53 @@ public void auditSensitiveCalls(Object result) { /* ... */ }</code></pre><p>This
 @Around(&quot;bean(legacyBillingService) || bean(legacyTaxService) || bean(legacyLedgerService)&quot;)</code></pre><p>It is also the designator that makes pointcuts <em>worse</em>, because bean names are strings too, and worse than type names: renaming a bean is a more common refactoring than renaming a method, and a <code>bean()</code> pointcut that no longer matches is not an error — it is advice that stops running.</p><blockquote class="note"><p><strong>STAFF-LEVEL CONSIDERATION — THE STRING-POINTCUT REFACTORING HAZARD</strong></p>
 <p>This is the single most important thing to understand about pointcuts, and almost nobody raises it in an interview.</p>
 <p><strong>A pointcut is a string, not a symbol.</strong> A method call site is a compile-time reference: rename the method, and the compiler points at every caller. A pointcut reference is a string that the compiler has never seen and will never check. Rename <code>OrderService.create</code> to <code>OrderService.place</code>, and:</p>
-<pre class="diagram"><code>BEFORE   execution(* com.acme.order.OrderService.create(..))
-         ──────────────────────────────────────────────────────►  matches nothing
-         ──────────────────────────────────────────────────────►  NO error
-         ──────────────────────────────────────────────────────►  NO warning
-         ──────────────────────────────────────────────────────►  NO failing test</code></pre>
+<figure class="figure">
+  <svg viewBox="0 0 900 370" role="img" aria-label="A pointcut is a string: execution(* com.acme.order.OrderService.create(..)). Rename the method to place, and the pointcut matches nothing, with no error, no warning and no failing test. The advice stops running, the metric stops being recorded, and the authorisation check stops happening.">
+    <defs>
+      <marker id="arw-spring-03-04-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="70" y="36" width="800" height="76" rx="5"/>
+    <text class="label" x="90" y="62">execution(* com.acme.order.OrderService.create(..))</text>
+    <text class="edge-label" x="90" y="84">the method is renamed to OrderService.place(..)</text>
+    <text class="edge-label" x="90" y="102">the pointcut string is never re-checked</text>
+
+    <path class="edge" d="M 470 112 L 470 132"/>
+    <path class="edge" d="M 138 132 L 762 132"/>
+    <path class="edge" d="M 138 132 L 138 152" marker-end="url(#arw-spring-03-04-a)"/>
+    <path class="edge" d="M 346 132 L 346 152" marker-end="url(#arw-spring-03-04-a)"/>
+    <path class="edge" d="M 554 132 L 554 152" marker-end="url(#arw-spring-03-04-a)"/>
+    <path class="edge" d="M 762 132 L 762 152" marker-end="url(#arw-spring-03-04-a)"/>
+
+    <rect class="node node--bad" x="50" y="152" width="176" height="56" rx="5"/>
+    <text class="label" x="64" y="188">matches nothing</text>
+    <rect class="node node--bad" x="258" y="152" width="176" height="56" rx="5"/>
+    <text class="label" x="272" y="188">NO error</text>
+    <rect class="node node--bad" x="466" y="152" width="176" height="56" rx="5"/>
+    <text class="label" x="480" y="188">NO warning</text>
+    <rect class="node node--bad" x="674" y="152" width="176" height="56" rx="5"/>
+    <text class="label" x="688" y="188">NO failing test</text>
+
+    <rect class="node" x="70" y="240" width="800" height="100" rx="5"/>
+    <text class="edge-label" x="90" y="266">The advice stops running. The metric stops being recorded.</text>
+    <text class="edge-label" x="90" y="284">The authorisation check stops happening &#8212; and @PreAuthorize</text>
+    <text class="edge-label" x="90" y="302">going silent is a security failure, not a performance one.</text>
+    <text class="edge-label" x="90" y="320">The failure is not a crash; it is the absence of a behaviour.</text>
+  </svg>
+  <figcaption>
+    <strong>A pointcut is a string the compiler has never
+    seen and will never check: rename the method, and the
+    pointcut matches nothing &mdash; with no error, no
+    warning and no failing test.</strong>
+    The advice stops running, the metric stops being
+    recorded, and the authorisation check stops happening;
+    <code>@PreAuthorize</code> going silent is a security
+    failure, not a performance one. The failure is not a
+    crash but the absence of a behaviour, which is the
+    hardest class of defect to detect.
+  </figcaption>
+</figure>
 <p>The advice stops running. The metric stops being recorded. The authorisation check stops happening — and <code>@PreAuthorize</code> stopping happening is a <strong>security</strong> failure, not a performance one. The failure is not a crash; it is the <em>absence</em> of a behaviour, which is the hardest class of defect to detect, because the system continues to work perfectly for everyone not affected.</p>
 <p><strong>Why Spring doesn't fix it.</strong> AspectJ's pointcuts are type-safe: a pointcut is a value produced by a method call (<code>execution(OrderService+.create(..))</code>) that the compiler type-checks, and a rename inside the IDE updates every pointcut that mentions it. Spring's pointcuts are strings, because they are resolved by a runtime expression parser (<code>PointcutParser</code>) with no compile-time participation — which is what allows them to reference bean names, which are themselves runtime strings, and to be composed in configuration rather than in code. That is a real trade: Spring gives you pointcuts that can name beans, and takes away refactoring safety. The honest statement is that <strong>Spring's pointcuts are closer to a query language than to a type</strong>, and should be reviewed as one.</p>
 <p><strong>What to do about it, in order of value:</strong></p>
@@ -332,19 +514,75 @@ public Object around(ProceedingJoinPoint pjp) throws Throwable {
     // OBLIGATION 2 — rethrow unless you are deliberately swallowing.
     return result;    // exceptions from proceed() propagate automatically ONLY if
                       // you declare `throws Throwable` and don't catch
-}</code></pre><div class="table-wrap"><table><thead><tr><th>#</th><th>Obligation</th><th>Violation</th><th>Symptom</th></tr></thead><tbody><tr><td>1</td><td>Call <code>proceed()</code> <strong>exactly once</strong></td><td>Never called</td><td>The method silently does nothing. Returns <code>null</code>. The worst bug in AOP</td></tr><tr><td>1</td><td>Call <code>proceed()</code> <strong>exactly once</strong></td><td>Called twice</td><td>The method runs twice — double charge, double email, double insert</td></tr><tr><td>2</td><td>Rethrow exceptions unless deliberately swallowing</td><td>Caught and dropped</td><td>Failures become silent successes. The database write is gone and nobody knows</td></tr><tr><td>3</td><td>Measure around <code>proceed()</code>, not around setup</td><td>Timer started before, stopped early</td><td>Metrics that do not measure the method</td></tr><tr><td>4</td><td>Return type must match</td><td>Returning <code>null</code> for a <code>void</code> method's advice</td><td>NPEs in the caller if the return is dereferenced</td></tr><tr><td>5</td><td>Do not block</td><td>Anything that waits on I/O, a lock, or another thread</td><td>Thread-pool exhaustion under load</td></tr></tbody></table></div><p>Obligation 1 deserves a diagram, because the two failure modes look identical from the outside:</p><pre class="diagram"><code>CORRECT — one proceed()
-  pjp.proceed() ─► target.create(..) ─► returns Order
-  caller receives Order                                    ✔
+}</code></pre><div class="table-wrap"><table><thead><tr><th>#</th><th>Obligation</th><th>Violation</th><th>Symptom</th></tr></thead><tbody><tr><td>1</td><td>Call <code>proceed()</code> <strong>exactly once</strong></td><td>Never called</td><td>The method silently does nothing. Returns <code>null</code>. The worst bug in AOP</td></tr><tr><td>1</td><td>Call <code>proceed()</code> <strong>exactly once</strong></td><td>Called twice</td><td>The method runs twice — double charge, double email, double insert</td></tr><tr><td>2</td><td>Rethrow exceptions unless deliberately swallowing</td><td>Caught and dropped</td><td>Failures become silent successes. The database write is gone and nobody knows</td></tr><tr><td>3</td><td>Measure around <code>proceed()</code>, not around setup</td><td>Timer started before, stopped early</td><td>Metrics that do not measure the method</td></tr><tr><td>4</td><td>Return type must match</td><td>Returning <code>null</code> for a <code>void</code> method's advice</td><td>NPEs in the caller if the return is dereferenced</td></tr><tr><td>5</td><td>Do not block</td><td>Anything that waits on I/O, a lock, or another thread</td><td>Thread-pool exhaustion under load</td></tr></tbody></table></div><p>Obligation 1 deserves a diagram, because the two failure modes look identical from the outside:</p><figure class="figure">
+  <svg viewBox="0 0 900 430" role="img" aria-label="Around advice must call proceed exactly once. With one call, the target runs and the caller receives the returned Order. With zero calls, the method never runs and the caller receives null, silently. With two calls, the method runs twice: the caller receives the second Order while the first was written and leaked.">
+    <defs>
+      <marker id="arw-spring-03-05-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--good" x="70" y="40" width="240" height="68" rx="5"/>
+    <text class="label" x="90" y="66">CORRECT</text>
+    <text class="edge-label" x="90" y="88">one proceed()</text>
+    <path class="edge" d="M 190 108 L 190 128" marker-end="url(#arw-spring-03-05-a)"/>
 
-BUG 1 — zero proceed()                    the method NEVER runs
-  (nothing)
-  caller receives null                      ✘ silent, no exception
+    <rect class="node" x="70" y="128" width="240" height="110" rx="5"/>
+    <text class="edge-label" x="90" y="152">pjp.proceed()</text>
+    <text class="edge-label" x="90" y="170">&#8594; target.create(..)</text>
+    <text class="edge-label" x="90" y="188">&#8594; returns Order</text>
+    <path class="edge" d="M 190 238 L 190 258" marker-end="url(#arw-spring-03-05-a)"/>
 
-BUG 2 — two proceed() calls               the method runs TWICE
-  pjp.proceed() ─► target.create(..) ─► Order #1
-  pjp.proceed() ─► target.create(..) ─► Order #2
-  caller receives Order #2
-                                      ✘ Order #1 was written and leaked</code></pre><p>Bug 2 is the worse of the two, because a charge happened and a row was inserted, and the caller has no way of knowing.</p><h3 class="vol__h3" id="52-obligation-1-in-depth-why-object-result-proceed">5.2 Obligation 1 in Depth — Why <code>Object result = proceed()</code></h3><p>The question &quot;why do I need to assign the result?&quot; has a precise answer. <code>proceed()</code> is a method with a return value. If you call it and discard the result, the target's return value is thrown away and the caller receives whatever <em>you</em> return — which, if you have no <code>return</code> statement, is <code>null</code>.</p><pre class="snippet" data-lang="java"><code>// ✗ The target runs, its return value is discarded, caller gets null
+    <rect class="node node--good" x="70" y="258" width="240" height="92" rx="5"/>
+    <text class="edge-label" x="90" y="290">caller receives Order</text>
+
+    <rect class="node node--bad" x="330" y="40" width="240" height="68" rx="5"/>
+    <text class="label" x="350" y="66">BUG 1</text>
+    <text class="edge-label" x="350" y="88">zero proceed()</text>
+    <path class="edge" d="M 450 108 L 450 128" marker-end="url(#arw-spring-03-05-a)"/>
+
+    <rect class="node node--bad" x="330" y="128" width="240" height="110" rx="5"/>
+    <text class="edge-label" x="350" y="152">(nothing)</text>
+    <text class="edge-label" x="350" y="170">the method NEVER runs</text>
+    <path class="edge" d="M 450 238 L 450 258" marker-end="url(#arw-spring-03-05-a)"/>
+
+    <rect class="node node--bad" x="330" y="258" width="240" height="92" rx="5"/>
+    <text class="edge-label" x="350" y="284">caller receives null</text>
+    <text class="edge-label" x="350" y="302">silent, no exception</text>
+
+    <rect class="node node--bad" x="590" y="40" width="240" height="68" rx="5"/>
+    <text class="label" x="610" y="66">BUG 2</text>
+    <text class="edge-label" x="610" y="88">two proceed() calls</text>
+    <path class="edge" d="M 710 108 L 710 128" marker-end="url(#arw-spring-03-05-a)"/>
+
+    <rect class="node node--bad" x="590" y="128" width="240" height="110" rx="5"/>
+    <text class="edge-label" x="610" y="152">pjp.proceed()</text>
+    <text class="edge-label" x="610" y="170">&#8594; Order #1</text>
+    <text class="edge-label" x="610" y="188">pjp.proceed()</text>
+    <text class="edge-label" x="610" y="206">&#8594; Order #2</text>
+    <path class="edge" d="M 710 238 L 710 258" marker-end="url(#arw-spring-03-05-a)"/>
+
+    <rect class="node node--bad" x="590" y="258" width="240" height="92" rx="5"/>
+    <text class="edge-label" x="610" y="284">caller receives Order #2</text>
+    <text class="edge-label" x="610" y="302">Order #1 was written</text>
+    <text class="edge-label" x="610" y="320">and leaked</text>
+
+    <text class="edge-label fill-bad" x="70" y="382">Bug 2 is the worse of the two &#8212; a charge happened and a row was inserted,</text>
+    <text class="edge-label fill-bad" x="70" y="400">and the caller has no way of knowing.</text>
+  </svg>
+  <figcaption>
+    <strong>One <code>proceed()</code> is the contract:
+    the target runs exactly once and the caller receives its
+    return value. Zero calls mean the method never runs and
+    the caller receives <code>null</code>; two calls mean it
+    runs twice, and the first result is written and
+    leaked.</strong>
+    Bug 2 is the worse of the two, because a charge
+    happened and a row was inserted, and the caller has no
+    way of knowing. The assignment in <code>Object result
+    = proceed()</code> is what makes the single-call case
+    correct rather than merely lucky.
+  </figcaption>
+</figure><p>Bug 2 is the worse of the two, because a charge happened and a row was inserted, and the caller has no way of knowing.</p><h3 class="vol__h3" id="52-obligation-1-in-depth-why-object-result-proceed">5.2 Obligation 1 in Depth — Why <code>Object result = proceed()</code></h3><p>The question &quot;why do I need to assign the result?&quot; has a precise answer. <code>proceed()</code> is a method with a return value. If you call it and discard the result, the target's return value is thrown away and the caller receives whatever <em>you</em> return — which, if you have no <code>return</code> statement, is <code>null</code>.</p><pre class="snippet" data-lang="java"><code>// ✗ The target runs, its return value is discarded, caller gets null
 @Around(&quot;execution(* com.acme..*Service.find*(..))&quot;)
 public void around(ProceedingJoinPoint pjp) throws Throwable {
     pjp.proceed();      // result dropped on the floor
@@ -483,14 +721,69 @@ public Object cached(ProceedingJoinPoint pjp) throws Throwable {
     return fresh;
 }</code></pre><p>The cache aspect is the cleanest illustration of the whole subject: a &quot;forgotten&quot; <code>proceed()</code> here is a feature, a &quot;forgotten&quot; <code>proceed()</code> in a logging aspect is a bug, and the difference between the two is entirely in the reader's head. That is precisely the argument from Chapter 1 — an aspect is invisible, and its correctness depends on an inference no reader of the target class can make.</p><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p><strong><code>@Around</code> is a synchronous interceptor.</strong> It runs on the calling thread and it runs <em>around</em> everything else in the chain, so anything that blocks in an <code>@Around</code> holds the request thread for its full duration. With Tomcat's default 200 threads, an <code>@Around</code> that calls a 500ms downstream service on a path hit at 300 requests/second saturates the pool in under a second and the application stops accepting — not because of a leak, but because the arithmetic is: <code>200 threads ÷ 0.5s per call = 400 calls/second</code> is the ceiling, and any concurrency above that queues forever.</p><p>The rules that follow. <strong>One:</strong> an <code>@Around</code> that makes a network call is a latency decision, and it belongs on a small number of methods, not on <code>*Service.*(..)</code>. <strong>Two:</strong> an <code>@Around</code> on a hot path pays the chain cost on every call, so measure before adding one more. <strong>Three:</strong> in a reactive application (Volume 10) a blocking <code>@Around</code> is worse than wrong — it blocks an event-loop thread and can stall every request multiplexed onto it, so the equivalent advice must be non-blocking. <strong>Four:</strong> an <code>@Around</code> that acquires a lock or a semaphore converts a local delay into a system-wide one, and lock ordering between two aspects that both take locks is a deadlock waiting for the day the call graph changes.</p></aside><h4 class="vol__h4" id="common-mistakes-5">Common Mistakes</h4><ul><li>Forgetting <code>proceed()</code> in a logging or metrics aspect. The method silently does nothing, returns <code>null</code>, and no test catches it.</li><li>Calling <code>proceed()</code> twice for a reason that is not a deliberate retry. Every call to the target is a real-world effect.</li><li>Catching an exception and not rethrowing it. A failed payment becomes a successful order.</li><li>Timing with <code>currentTimeMillis()</code> instead of <code>System.nanoTime()</code>. NTP adjustment produces negative durations.</li><li>Measuring outside a <code>try/finally</code>, so failures are never recorded.</li><li>Logging a line per call on a hot method — 10,000 calls/second is 864 million lines a day.</li><li><code>MDC.put</code> without a matching <code>MDC.remove</code> in a <code>finally</code> on a pooled thread.</li><li>Putting a blocking call inside an <code>@Around</code> on a broad pointcut.</li></ul><h4 class="vol__h4" id="interview-questions-the-proceed-contract">Interview Questions — The <code>proceed()</code> Contract</h4><article class="qa" id="5-around-and-the-proceed-contract-1"><p class="qa__q"><a class="qa__num" href="#5-around-and-the-proceed-contract-1">Q1</a> What are the obligations when writing an <code>@Around</code> advice method? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>Call <code>proceed()</code> exactly once — or deliberately zero times (a cache) or in a bounded loop (a retry). Rethrow any exception unless you are deliberately swallowing it, which means either not catching it or catching and rethrowing. Capture the return value if you need it. Put timing or cleanup in a <code>finally</code> so the exception path is covered. And never block, because <code>@Around</code> runs synchronously on the caller's thread.</p></div></article><article class="qa" id="5-around-and-the-proceed-contract-2"><p class="qa__q"><a class="qa__num" href="#5-around-and-the-proceed-contract-2">Q2</a> A developer writes <code>@Around</code> advice that logs the call but forgets <code>proceed()</code>. What happens at runtime? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>The target method never executes. The caller receives whatever the advice returns, which with no <code>return</code> statement is <code>null</code> for a non-void method. There is no exception, no log line, and no failing test — the method simply stops working, and only the callers that depend on its side effect notice. This is the single most destructive omission in AOP and the first question to ask about any <code>@Around</code> in review.</p></div></article><article class="qa" id="5-around-and-the-proceed-contract-3"><p class="qa__q"><a class="qa__num" href="#5-around-and-the-proceed-contract-3">Q3</a> Why do you need <code>Object result = pjp.proceed()</code> rather than just <code>pjp.proceed()</code>? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p><code>proceed()</code> has a return value — the target method's return value. Discarding it means the caller receives <code>null</code> for a non-void method. If the advice is only logging and has no <code>return</code> statement, the method's result is lost even though the method ran. That is a bug that presents as an NPE somewhere else, usually several frames away.</p></div></article><article class="qa" id="5-around-and-the-proceed-contract-4"><p class="qa__q"><a class="qa__num" href="#5-around-and-the-proceed-contract-4">Q4</a> When is calling <code>proceed()</code> more than once correct? <span class="qa__badge"><code>ADVANCED</code></span></p><div class="qa__a"><p>In a bounded retry loop, where the number of attempts is capped and the exception is rethrown on the final attempt. That is the only legitimate form, and it is legitimate precisely because it is recognisable: a loop, a bound, a whitelist of retryable exceptions, and a rethrow. The same shape appears in a circuit breaker. What is never legitimate is a second <code>proceed()</code> on the same path without a bound, because each one is a real side effect — a charge, an insert, an email.</p></div></article><article class="qa" id="5-around-and-the-proceed-contract-5"><p class="qa__q"><a class="qa__num" href="#5-around-and-the-proceed-contract-5">Q5</a> An <code>@Around</code> aspect on all service methods made p99 latency triple under load. What do you check first? <span class="qa__badge"><code>SCALING REALITY CHECK</code></span></p><div class="qa__a"><p>Whether the advice blocks. The chain cost of a proxy hop is tens of nanoseconds and cannot triple a p99; what can is I/O. Look for a network call, a lock, a <code>Future.get()</code>, or a logging call that flushes — inside the advice body. Then check the pointcut width: an <code>@Around</code> on <code>com.acme..*Service.*(..)</code> that adds 200ms to 40 services is 200ms × every request, and the connection pool exhaustion and thread starvation that follow look like a completely different problem. The arithmetic to hold onto is 200 Tomcat threads ÷ per-call latency = the hard ceiling on throughput.</p></div></article><article class="qa" id="5-around-and-the-proceed-contract-6"><p class="qa__q"><a class="qa__num" href="#5-around-and-the-proceed-contract-6">Q6</a> Your <code>MDC</code>-based trace aspect leaks trace ids between requests. What is the mechanism and the fix? <span class="qa__badge"><code>SCENARIO</code></span></p><div class="qa__a"><p><code>MDC</code> is a <code>ThreadLocal</code> and Tomcat's threads are pooled and reused. If the aspect sets the value and does not remove it in a <code>finally</code>, whichever request next lands on that thread inherits the stale id — and every log line it produces is mislabelled. The pool size (200 by default) and the error rate, not the code path, determine how many requests are affected, which is why it looks intermittent. Fix: <code>MDC.clear()</code> unconditionally in a <code>finally</code>, restoring the inbound value if there was one. The same reasoning applies to any <code>ThreadLocal</code> written in request-scoped code.</p></div></article><article class="qa" id="5-around-and-the-proceed-contract-7"><p class="qa__q"><a class="qa__num" href="#5-around-and-the-proceed-contract-7">Q7</a> Is an <code>@Around</code> caching aspect the right design, or should caching live in the service? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>Both are legitimate and they are not equivalent. The service knows what is cacheable and can be tested directly; the aspect applies uniformly and can be switched off globally for an incident. The aspect's costs are real: a cache key derived from <code>pjp.getArgs()</code> silently breaks on a <code>hashCode</code>/<code>equals</code> that was not designed for it, invalidation becomes implicit and therefore invisible, and a cached value that should have been tenant-scoped leaks across tenants. The staff answer is that caching is a good aspect candidate <em>if and only if</em> the cache is genuinely uniform across the matched methods — otherwise it belongs in the service where the key and the invalidation are visible.</p><aside class="callout callout--summary"><span class="callout__label">Chapter summary</span><p><code>@Around</code> is the only advice that controls whether the target runs, and that makes its contract the most dangerous in the framework: a missing <code>proceed()</code> is a method that silently does nothing, and a duplicated one is a method that runs twice — neither producing an error, a log line, or a failing test. The legitimate deviations (a cache that skips the call, a bounded retry that repeats it) are legitimate only because they are <em>visible</em> as such, which is the whole problem with an invisible advice body. <code>Object result = proceed()</code> is necessary whenever you need the value, exceptions propagate automatically if you declare <code>throws Throwable</code> and do not catch, timing belongs in a <code>finally</code> and must use <code>System.nanoTime()</code>, and — the scaling fact that constrains every decision — <strong><code>@Around</code> is a synchronous interceptor on the caller's thread</strong>, so with Tomcat's 200 threads a 500ms blocking advice caps the application at 400 calls/second.</p></aside></div></article><h4 class="vol__h4" id="further-reading-5">Further Reading</h4><ul><li><a href="https://docs.spring.io/spring-framework/reference/core/aop-api/advice.html" rel="noopener noreferrer">Spring Framework Reference — Advice API in Spring</a> — <code>MethodInterceptor</code>, <code>ProceedingJoinPoint</code>, <code>MethodInvocation.proceed()</code>, and what each advice type can do.</li><li><a href="https://micrometer.io/docs/" rel="noopener noreferrer">Micrometer Documentation</a> — the <code>Timer</code>, <code>LongTaskTimer</code> and percentile APIs, which is where the timing-aspect example belongs in production.</li><li><a href="https://docs.micrometer.io/context-propagation/reference/" rel="noopener noreferrer">Micrometer — Context Propagation</a> — the correct answer to &quot;the MDC did not survive the thread hop&quot;, and the reason the MDC advice needs a companion on the executor.</li><li><a href="https://martinfowler.com/bliki/CircuitBreaker.html" rel="noopener noreferrer">Martin Fowler — Circuit Breaker</a> — the canonical shape for the retry and circuit-breaker <code>@Around</code> bodies, and the failure modes to design for.</li></ul></section>
 
-<section id="chapter-6-aspect-ordering" data-filter-target><h2 class="vol__h2">Chapter 6 — Aspect Ordering</h2><h3 class="vol__h3" id="61-the-rule-and-the-inversion">6.1 The Rule, and the Inversion</h3><blockquote class="note"><p><strong>Lower value = higher precedence = runs first on the way in, and LAST on the way out.</strong></p></blockquote><p><code>@Order</code> follows the same convention as everything else in Spring: <code>Ordered.HIGHEST_PRECEDENCE</code> is <code>Integer.MIN_VALUE</code>, <code>Ordered.LOWEST_PRECEDENCE</code> is <code>Integer.MAX_VALUE</code>, and unannotated aspects sort last, i.e. at <code>LOWEST_PRECEDENCE</code>. The subtlety is that <em>precedence</em> describes entry order, and Spring builds the interceptor chain so that the highest-precedence aspect is <strong>outermost</strong> — which means it is entered first and exited last.</p><pre class="diagram"><code>Aspect A:  @Order(1)      ← LOWER value = HIGHER precedence = OUTERMOST
-Aspect B:  @Order(50)
-Aspect C:  @Order(100)    ← HIGHER value = LOWER precedence = INNERMOST
+<section id="chapter-6-aspect-ordering" data-filter-target><h2 class="vol__h2">Chapter 6 — Aspect Ordering</h2><h3 class="vol__h3" id="61-the-rule-and-the-inversion">6.1 The Rule, and the Inversion</h3><blockquote class="note"><p><strong>Lower value = higher precedence = runs first on the way in, and LAST on the way out.</strong></p></blockquote><p><code>@Order</code> follows the same convention as everything else in Spring: <code>Ordered.HIGHEST_PRECEDENCE</code> is <code>Integer.MIN_VALUE</code>, <code>Ordered.LOWEST_PRECEDENCE</code> is <code>Integer.MAX_VALUE</code>, and unannotated aspects sort last, i.e. at <code>LOWEST_PRECEDENCE</code>. The subtlety is that <em>precedence</em> describes entry order, and Spring builds the interceptor chain so that the highest-precedence aspect is <strong>outermost</strong> — which means it is entered first and exited last.</p><figure class="figure">
+  <svg viewBox="0 0 900 440" role="img" aria-label="Aspect A at Order 1 is outermost: lowest value, highest precedence. Aspect C at Order 100 is innermost. Before advice runs A, then B, then C, then the target; after advice unwinds in reverse, so the outermost aspect runs last.">
+    <defs>
+      <marker id="arw-spring-03-06-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="70" y="36" width="240" height="88" rx="5"/>
+    <text class="label" x="90" y="62">Aspect A: @Order(1)</text>
+    <text class="edge-label" x="90" y="84">LOWER value = HIGHER</text>
+    <text class="edge-label" x="90" y="102">precedence = OUTERMOST</text>
 
-  A.before  ──────►  B.before  ──────►  C.before  ──────►  target
-  A.after   ◄──────  B.after   ◄──────  C.after   ◄──────
-                 ▲                                              ▲
-                 └── unwinding runs the OUTSIDE last ─────────┘</code></pre><p>The confusion this produces is worth naming, because it is the standard interview trap:</p><div class="table-wrap"><table><thead><tr><th></th><th>Entering</th><th>Exiting</th></tr></thead><tbody><tr><td><code>@Order(1)</code> — highest precedence</td><td>Runs <strong>first</strong></td><td>Runs <strong>last</strong></td></tr><tr><td><code>@Order(100)</code> — lowest precedence</td><td>Runs <strong>last</strong></td><td>Runs <strong>first</strong></td></tr></tbody></table></div><p>So if you read <code>@Order</code> as &quot;how important is this&quot;, you have the direction backwards for exit code. A <code>@Before</code> reads naturally; an <code>@After</code>, <code>@AfterThrowing</code> or an <code>@Around</code>'s post-<code>proceed()</code> section does not.</p><p><code>@Order</code> and implementing <code>Ordered</code> are equivalent. Both are read by <code>AnnotationAwareOrderComparator</code> (formerly <code>AspectJAwareOrderComparator</code>), and <code>@Order</code> wins when both are present:</p><pre class="snippet" data-lang="java"><code>@Aspect
+    <rect class="node" x="330" y="36" width="200" height="88" rx="5"/>
+    <text class="label" x="350" y="62">Aspect B: @Order(50)</text>
+
+    <rect class="node" x="550" y="36" width="320" height="88" rx="5"/>
+    <text class="label" x="570" y="62">Aspect C: @Order(100)</text>
+    <text class="edge-label" x="570" y="84">HIGHER value = LOWER precedence</text>
+    <text class="edge-label" x="570" y="102">= INNERMOST</text>
+
+    <rect class="node" x="70" y="148" width="180" height="44" rx="5"/>
+    <text class="label" x="90" y="176">A.before</text>
+    <rect class="node" x="290" y="148" width="180" height="44" rx="5"/>
+    <text class="label" x="310" y="176">B.before</text>
+    <rect class="node" x="510" y="148" width="180" height="44" rx="5"/>
+    <text class="label" x="530" y="176">C.before</text>
+    <rect class="node node--good" x="730" y="148" width="140" height="44" rx="5"/>
+    <text class="label" x="750" y="176">target</text>
+    <path class="edge" d="M 250 170 L 290 170" marker-end="url(#arw-spring-03-06-a)"/>
+    <path class="edge" d="M 470 170 L 510 170" marker-end="url(#arw-spring-03-06-a)"/>
+    <path class="edge" d="M 690 170 L 730 170" marker-end="url(#arw-spring-03-06-a)"/>
+
+    <path class="edge" d="M 800 192 L 800 212 L 600 212 L 600 232" marker-end="url(#arw-spring-03-06-a)"/>
+
+    <rect class="node" x="510" y="232" width="180" height="44" rx="5"/>
+    <text class="label" x="530" y="260">C.after</text>
+    <rect class="node" x="290" y="232" width="180" height="44" rx="5"/>
+    <text class="label" x="310" y="260">B.after</text>
+    <rect class="node" x="70" y="232" width="180" height="44" rx="5"/>
+    <text class="label" x="90" y="260">A.after</text>
+    <path class="edge" d="M 510 254 L 470 254" marker-end="url(#arw-spring-03-06-a)"/>
+    <path class="edge" d="M 290 254 L 250 254" marker-end="url(#arw-spring-03-06-a)"/>
+
+    <rect class="node" x="70" y="300" width="800" height="68" rx="5"/>
+    <text class="label" x="90" y="326">unwinding runs the OUTSIDE last</text>
+    <text class="edge-label" x="90" y="348">A.after runs last on the way out &#8212; highest precedence is entered first and exited last</text>
+
+    <text class="edge-label fill-warn" x="70" y="396">The interview trap: @Order(1) runs first in and last out; @Order(100) runs last in</text>
+    <text class="edge-label fill-warn" x="70" y="414">and first out. Unannotated aspects sort last &#8212; at LOWEST_PRECEDENCE, innermost.</text>
+  </svg>
+  <figcaption>
+    <strong>Lower <code>@Order</code> value means higher
+    precedence, and higher precedence means outermost:
+    entered first on the way in, exited last on the way
+    out.</strong>
+    So <code>@Order(1)</code> wraps <code>@Order(50)</code>,
+    which wraps <code>@Order(100)</code>, and the target sits
+    inside all three. The trap is the inversion &mdash; the
+    aspect that runs first going in is the last one coming
+    out &mdash; and it is the most common source of
+    &quot;my aspect fired in the wrong order&quot; reports.
+  </figcaption>
+</figure><p>The confusion this produces is worth naming, because it is the standard interview trap:</p><div class="table-wrap"><table><thead><tr><th></th><th>Entering</th><th>Exiting</th></tr></thead><tbody><tr><td><code>@Order(1)</code> — highest precedence</td><td>Runs <strong>first</strong></td><td>Runs <strong>last</strong></td></tr><tr><td><code>@Order(100)</code> — lowest precedence</td><td>Runs <strong>last</strong></td><td>Runs <strong>first</strong></td></tr></tbody></table></div><p>So if you read <code>@Order</code> as &quot;how important is this&quot;, you have the direction backwards for exit code. A <code>@Before</code> reads naturally; an <code>@After</code>, <code>@AfterThrowing</code> or an <code>@Around</code>'s post-<code>proceed()</code> section does not.</p><p><code>@Order</code> and implementing <code>Ordered</code> are equivalent. Both are read by <code>AnnotationAwareOrderComparator</code> (formerly <code>AspectJAwareOrderComparator</code>), and <code>@Order</code> wins when both are present:</p><pre class="snippet" data-lang="java"><code>@Aspect
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)      // -2147483638 — effectively first
 public class TracingAspect { }
@@ -498,11 +791,62 @@ public class TracingAspect { }
 @Aspect
 @Component
 @Order(Ordered.LOWEST_PRECEDENCE)            // 2147483647 — effectively last
-public class MetricsAspect { }</code></pre><h3 class="vol__h3" id="62-why-this-is-not-a-tidy-idea">6.2 Why This Is Not a Tidy Idea</h3><p>Look at how the two highest-value cross-cutting concerns are ordered <strong>by default</strong>, and notice that neither chose this deliberately:</p><pre class="diagram"><code>@Transactional          ── @EnableTransactionManagement(order = LOWEST_PRECEDENCE)
-   ⇒ order = Integer.MAX_VALUE  ⇒ INNERMOST  ⇒ a commit happens INSIDE it
+public class MetricsAspect { }</code></pre><h3 class="vol__h3" id="62-why-this-is-not-a-tidy-idea">6.2 Why This Is Not a Tidy Idea</h3><p>Look at how the two highest-value cross-cutting concerns are ordered <strong>by default</strong>, and notice that neither chose this deliberately:</p><figure class="figure">
+  <svg viewBox="0 0 900 380" role="img" aria-label="Transactional is enabled with order LOWEST_PRECEDENCE, which is Integer MAX_VALUE, so it is innermost and a commit happens inside it. PreAuthorize is enabled with no default order, so it too is LOWEST_PRECEDENCE, innermost, and the check runs inside it. Both are innermost by default.">
+    <defs>
+      <marker id="arw-spring-03-07-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="70" y="40" width="360" height="92" rx="5"/>
+    <text class="label" x="90" y="66">@Transactional</text>
+    <text class="edge-label" x="90" y="88">@EnableTransactionManagement</text>
+    <text class="edge-label" x="90" y="106">(order = LOWEST_PRECEDENCE)</text>
+    <path class="edge" d="M 430 86 L 470 86" marker-end="url(#arw-spring-03-07-a)"/>
 
-@PreAuthorize            ── @EnableMethodSecurity, no default order
-   ⇒ LOWEST_PRECEDENCE       ⇒ INNERMOST  ⇒ the check runs INSIDE it</code></pre><p>Both are innermost. That is a defensible default — the transaction wraps the smallest possible amount of business work — but it means the transaction interceptor sits <em>inside</em> every other advice you write unless you deliberately move it out, and the consequences in 6.3 are the direct result.</p><p>To make the transaction outermost — which is what you want if anything outside it must observe the committed outcome — you set its order explicitly, and <strong>lower than everything else</strong>:</p><pre class="snippet" data-lang="java"><code>@Configuration
+    <rect class="node node--warn" x="470" y="40" width="170" height="92" rx="5"/>
+    <text class="label" x="490" y="66">INNERMOST</text>
+    <text class="edge-label" x="490" y="88">order =</text>
+    <text class="edge-label" x="490" y="106">Integer.MAX_VALUE</text>
+    <path class="edge" d="M 640 86 L 680 86" marker-end="url(#arw-spring-03-07-a)"/>
+
+    <rect class="node" x="680" y="40" width="190" height="92" rx="5"/>
+    <text class="edge-label" x="700" y="70">a commit happens</text>
+    <text class="edge-label" x="700" y="88">INSIDE it</text>
+
+    <rect class="node" x="70" y="152" width="360" height="92" rx="5"/>
+    <text class="label" x="90" y="178">@PreAuthorize</text>
+    <text class="edge-label" x="90" y="200">@EnableMethodSecurity</text>
+    <text class="edge-label" x="90" y="218">(no default order)</text>
+    <path class="edge" d="M 430 198 L 470 198" marker-end="url(#arw-spring-03-07-a)"/>
+
+    <rect class="node node--warn" x="470" y="152" width="170" height="92" rx="5"/>
+    <text class="label" x="490" y="178">INNERMOST</text>
+    <text class="edge-label" x="490" y="200">LOWEST_PRECEDENCE</text>
+    <path class="edge" d="M 640 198 L 680 198" marker-end="url(#arw-spring-03-07-a)"/>
+
+    <rect class="node" x="680" y="152" width="190" height="92" rx="5"/>
+    <text class="edge-label" x="700" y="182">the check runs</text>
+    <text class="edge-label" x="700" y="200">INSIDE it</text>
+
+    <rect class="node" x="70" y="264" width="800" height="84" rx="5"/>
+    <text class="edge-label" x="90" y="288">Both are innermost &#8212; a defensible default: the transaction wraps the</text>
+    <text class="edge-label" x="90" y="306">smallest possible amount of business work. But it means the transaction</text>
+    <text class="edge-label" x="90" y="324">interceptor sits inside every other advice you write.</text>
+  </svg>
+  <figcaption>
+    <strong>Neither <code>@Transactional</code> nor
+    <code>@PreAuthorize</code> chose its default deliberately,
+    and both land innermost: the commit happens inside
+    everything else, and the authorisation check runs inside
+    everything else.</strong>
+    That is defensible &mdash; the transaction wraps the
+    smallest possible amount of business work &mdash; but it
+    means the transaction interceptor sits inside every other
+    advice you write unless you deliberately move it out, and
+    the consequences in 6.3 follow directly from it.
+  </figcaption>
+</figure><p>Both are innermost. That is a defensible default — the transaction wraps the smallest possible amount of business work — but it means the transaction interceptor sits <em>inside</em> every other advice you write unless you deliberately move it out, and the consequences in 6.3 are the direct result.</p><p>To make the transaction outermost — which is what you want if anything outside it must observe the committed outcome — you set its order explicitly, and <strong>lower than everything else</strong>:</p><pre class="snippet" data-lang="java"><code>@Configuration
 @EnableTransactionManagement(order = Ordered.HIGHEST_PRECEDENCE)   // outermost
 public class TxConfig { }</code></pre><aside class="callout callout--trap"><span class="callout__label">Interview trap</span><p>&quot;Higher <code>@Order</code> value means higher priority&quot; is the answer that gets this wrong, and people believe it because <code>@Order</code> reads like a ranking where 1 is first and 10 is tenth. The correction, stated once and remembered: <strong><code>Ordered.HIGHEST_PRECEDENCE</code> is <code>Integer.MIN_VALUE</code></strong>, not <code>1</code>. Lower value, higher precedence, outermost position, first on the way in, last on the way out. The version of the question that actually tests understanding is the follow-up: <em>&quot;given <code>@Order(1)</code> on aspect A and <code>@Order(2)</code> on aspect B, which one's <code>@AfterThrowing</code> runs first?&quot;</em> The answer is <strong>B's</strong>, because B is inner and the exception unwinds from the inside out. Candidates who answer A have the direction of the unwind wrong, and that is the mistake that produces the bug in 6.3.</p></aside><h3 class="vol__h3" id="63-what-is-guaranteed-and-what-is-not">6.3 What Is Guaranteed, and What Is Not</h3><p><strong>Guaranteed:</strong></p><ul><li>Aspects with explicit <code>@Order</code> are sorted relative to each other, and the order is <strong>total</strong> among aspects that declare one.</li><li>The highest-precedence aspect is the outermost, so its exit logic runs last.</li><li>Once the chain is built, it is fixed — a <code>Singleton</code> advisor's order does not change at runtime.</li><li><code>Ordered.HIGHEST_PRECEDENCE</code> aspects are outside <code>Ordered.LOWEST_PRECEDENCE</code> aspects, and unannotated aspects are effectively <code>LOWEST_PRECEDENCE</code>.</li></ul><p><strong>NOT guaranteed:</strong></p><ul><li><strong>The relative order of two aspects with the same <code>@Order</code> value.</strong> AspectJ then falls back to its own precedence rules, and the result is not something to design around. If two aspects must be ordered relative to each other, give them different values.</li><li><strong>The order of advisors on the same aspect</strong>, and the order of a framework advisor (<code>@Transactional</code>, <code>@Async</code>, <code>@Cacheable</code>, <code>@Retryable</code>) relative to yours, unless you have set the framework's order explicitly. <code>@Async</code> and <code>@Cacheable</code> both use <code>Ordered.LOWEST_PRECEDENCE</code> by default, which means they are <em>inner</em> relative to any aspect you wrote — and <code>@Async</code>'s position is what determines whether your timing aspect measures the async submission or the eventual completion.</li><li><strong>That an aspect applies at all</strong>, which is the pointcut question (Chapter 4), not the ordering question.</li><li><strong>Order across proxies.</strong> A bean proxied for two unrelated reasons is proxied once with a combined advisor list, and the list is built once. Nothing recomputes it.</li></ul><h3 class="vol__h3" id="64-the-classic-bug-logging-a-commit-that-rolls-back">6.4 The Classic Bug: Logging a Commit That Rolls Back</h3><p>The scenario worth memorising, because it is a genuine incident template and the fix is a single annotation.</p><pre class="snippet" data-lang="java"><code>// Two aspects. Neither author has thought about the other.
 
@@ -528,24 +872,60 @@ class OrderService {
         orders.save(o);
         paymentGateway.charge(o);        // throws → transaction rolls back
     }
-}</code></pre><pre class="diagram"><code>Order arrives
-  │
-  ▼
-AuditAspect            @Order(10)   ── writes &quot;SUCCEEDED&quot; ─────┐
-  │                                                        │
-  ▼                                                        │  ✘ written BEFORE
-TransactionInterceptor  (innermost)                          │    the outcome
-  │                                                        │    is known
-  ▼                                                        │
-OrderServiceImpl.place(..)                                  │
-  │  paymentGateway.charge(..)  →  throws                   │
-  ▼                                                        │
-TransactionInterceptor  ── ROLLBACK ────────────►           │
-  │                                                        │
-  ▼                                                        ▼
-AuditAspect            ── (the &quot;catch&quot; runs, but the
-                          SUCCEEDED line is already
-                          committed to the audit log)</code></pre><p>The audit log now contains a durable, timestamped record that a payment succeeded, for an order that was rolled back. If the audit log is what compliance and reconciliation read, that is not a metrics bug — it is a false record in a system of record, and it will be discovered by a finance team rather than by an engineer.</p><p><strong>The fix is one annotation</strong>, and understanding <em>which</em> value it needs is the whole chapter:</p><pre class="snippet" data-lang="java"><code>@Configuration
+}</code></pre><figure class="figure">
+  <svg viewBox="0 0 900 570" role="img" aria-label="An order arrives at AuditAspect at Order 10, which writes SUCCEEDED before the outcome is known. The call passes through the innermost transaction interceptor into OrderServiceImpl.place, where paymentGateway.charge throws. The transaction interceptor rolls back, and AuditAspect's catch runs, but the SUCCEEDED line is already committed to the audit log.">
+    <defs>
+      <marker id="arw-spring-03-08-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="70" y="36" width="600" height="44" rx="5"/>
+    <text class="label" x="90" y="64">Order arrives</text>
+    <path class="edge" d="M 370 80 L 370 100" marker-end="url(#arw-spring-03-08-a)"/>
+
+    <rect class="node node--warn" x="70" y="100" width="600" height="68" rx="5"/>
+    <text class="label" x="90" y="126">AuditAspect &#8212; @Order(10)</text>
+    <text class="edge-label" x="90" y="148">writes &quot;SUCCEEDED&quot;</text>
+    <path class="edge" d="M 370 168 L 370 192" marker-end="url(#arw-spring-03-08-a)"/>
+
+    <rect class="node" x="70" y="192" width="600" height="44" rx="5"/>
+    <text class="label" x="90" y="220">TransactionInterceptor (innermost)</text>
+    <path class="edge" d="M 370 236 L 370 260" marker-end="url(#arw-spring-03-08-a)"/>
+
+    <rect class="node" x="70" y="260" width="600" height="68" rx="5"/>
+    <text class="label" x="90" y="286">OrderServiceImpl.place(..)</text>
+    <text class="edge-label" x="90" y="308">paymentGateway.charge(..) &#8594; throws</text>
+    <path class="edge" d="M 370 328 L 370 352" marker-end="url(#arw-spring-03-08-a)"/>
+
+    <rect class="node" x="70" y="352" width="600" height="44" rx="5"/>
+    <text class="label" x="90" y="380">TransactionInterceptor &#8212; ROLLBACK</text>
+    <path class="edge" d="M 370 396 L 370 420" marker-end="url(#arw-spring-03-08-a)"/>
+
+    <rect class="node node--bad" x="70" y="420" width="600" height="112" rx="5"/>
+    <text class="label" x="90" y="446">AuditAspect &#8212; the &quot;catch&quot; runs,</text>
+    <text class="edge-label" x="90" y="468">but the SUCCEEDED line is already</text>
+    <text class="edge-label" x="90" y="486">committed to the audit log</text>
+
+    <path class="edge" d="M 670 148 L 712 148 L 712 476 L 670 476" marker-end="url(#arw-spring-03-08-a)"/>
+    <path class="edge" d="M 670 374 L 712 374" marker-end="url(#arw-spring-03-08-a)"/>
+
+    <text class="edge-label fill-bad" x="730" y="222">written BEFORE</text>
+    <text class="edge-label fill-bad" x="730" y="240">the outcome</text>
+    <text class="edge-label fill-bad" x="730" y="258">is known</text>
+  </svg>
+  <figcaption>
+    <strong>An <code>@Order(10)</code> audit aspect writes
+    <code>SUCCEEDED</code> as its advice enters &mdash; before the
+    transaction has run, and therefore before the outcome is
+    known.</strong>
+    When the charge throws, the interceptor rolls back and the
+    aspect's <code>catch</code> still runs, leaving a durable record
+    that a payment succeeded for an order that was rolled back. The
+    fix is one annotation: move the transaction interceptor outside
+    the audit aspect, so <code>SUCCEEDED</code> can only be written
+    after the commit.
+  </figcaption>
+</figure><p>The audit log now contains a durable, timestamped record that a payment succeeded, for an order that was rolled back. If the audit log is what compliance and reconciliation read, that is not a metrics bug — it is a false record in a system of record, and it will be discovered by a finance team rather than by an engineer.</p><p><strong>The fix is one annotation</strong>, and understanding <em>which</em> value it needs is the whole chapter:</p><pre class="snippet" data-lang="java"><code>@Configuration
 @EnableTransactionManagement(order = Ordered.HIGHEST_PRECEDENCE)   // tx becomes OUTERMOST
 public class TxConfig { }</code></pre><pre class="diagram"><code>AuditAspect                  @Order(10)   ── inner
   │
@@ -585,26 +965,67 @@ public class OrderService {
     public void placeBulk(List&lt;Order&gt; orders) {
         orders.forEach(this::place);     // ⚠ also an internal call
     }
-}</code></pre><p>The trace, with the proxy drawn in, is the whole explanation:</p><pre class="diagram"><code>CORRECT PATH — an EXTERNAL caller
+}</code></pre><p>The trace, with the proxy drawn in, is the whole explanation:</p><figure class="figure">
+  <svg viewBox="0 0 900 672" role="img" aria-label="An external caller holds the proxy: OrderController's autowired reference is $Proxy42, so the call passes through intercept, the transaction advisor and BEGIN into OrderServiceImpl.place. Inside the target, this.applyDiscount() is a direct call on the target itself, with no proxy and no advice, while orders.save() is a call on another bean.">
+    <defs>
+      <marker id="arw-spring-03-09-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="70" y="36" width="800" height="68" rx="5"/>
+    <text class="label" x="90" y="62">OrderController</text>
+    <text class="edge-label" x="90" y="84">autowired reference is the PROXY</text>
+    <path class="edge" d="M 470 104 L 470 128" marker-end="url(#arw-spring-03-09-a)"/>
 
-  OrderController
-       │
-       │  autowired reference is the PROXY
-       ▼
-  ┌──────────────┐
-  │ $Proxy42     │
-  │  .place()    │  ──► intercept ──► TRANSACTION ADVISOR  ──► BEGIN
-  └──────────────┘                                          │
-                                                            ▼
-                                                  OrderServiceImpl.place()
-                                                            │
-                                              ┌─────────────┴─────────────┐
-                                              ▼                           ▼
-                                    this.applyDiscount()        orders.save()
-                                    ⚠ DIRECT.  this == the
-                                      target, not the proxy.
-                                      The proxy is bypassed
-                                      entirely.  No advice.</code></pre><p>The precise mechanism: inside <code>place()</code>, the object <code>this</code> is the <strong>target</strong>, not the proxy. The proxy is a different object that delegates to the target; the target has no reference back to it. So <code>this.applyDiscount()</code> is a plain Java method call on a plain object, and there is no proxy anywhere in its path.</p><p>Three consequences, and only the first is commonly known:</p><ol><li><code>@Transactional</code> does not apply. No transaction is opened.</li><li><code>@PreAuthorize</code> does not apply. <strong>The authorisation check does not run.</strong></li><li><code>@Async</code> does not apply. The method runs synchronously on the caller's thread.</li><li><code>@Cacheable</code> does not apply, and neither does <code>@Retryable</code>.</li></ol><pre class="snippet" data-lang="java"><code>@Service
+    <rect class="node node--accent" x="70" y="128" width="800" height="44" rx="5"/>
+    <text class="label" x="90" y="156">$Proxy42 .place()</text>
+    <path class="edge" d="M 470 172 L 470 196" marker-end="url(#arw-spring-03-09-a)"/>
+
+    <rect class="node" x="70" y="196" width="800" height="44" rx="5"/>
+    <text class="label" x="90" y="224">intercept()</text>
+    <path class="edge" d="M 470 240 L 470 264" marker-end="url(#arw-spring-03-09-a)"/>
+
+    <rect class="node" x="70" y="264" width="800" height="44" rx="5"/>
+    <text class="label" x="90" y="292">TRANSACTION ADVISOR</text>
+    <path class="edge" d="M 470 308 L 470 332" marker-end="url(#arw-spring-03-09-a)"/>
+
+    <rect class="node" x="70" y="332" width="800" height="44" rx="5"/>
+    <text class="label" x="90" y="360">BEGIN</text>
+    <path class="edge" d="M 470 376 L 470 400" marker-end="url(#arw-spring-03-09-a)"/>
+
+    <rect class="node" x="70" y="400" width="800" height="44" rx="5"/>
+    <text class="label" x="90" y="428">OrderServiceImpl.place()</text>
+    <path class="edge" d="M 470 444 L 470 464"/>
+    <path class="edge" d="M 190 464 L 710 464"/>
+    <path class="edge" d="M 190 464 L 190 484" marker-end="url(#arw-spring-03-09-a)"/>
+    <path class="edge" d="M 710 464 L 710 484" marker-end="url(#arw-spring-03-09-a)"/>
+
+    <rect class="node node--warn" x="70" y="484" width="240" height="112" rx="5"/>
+    <text class="label" x="90" y="510">this.applyDiscount()</text>
+    <text class="edge-label" x="90" y="532">DIRECT. this == the target,</text>
+    <text class="edge-label" x="90" y="550">not the proxy.</text>
+    <text class="edge-label" x="90" y="568">The proxy is bypassed</text>
+    <text class="edge-label" x="90" y="586">entirely. No advice.</text>
+
+    <rect class="node" x="590" y="484" width="240" height="44" rx="5"/>
+    <text class="label" x="610" y="512">orders.save()</text>
+
+    <text class="edge-label" x="70" y="624">this.applyDiscount() is a plain Java method call on a plain object &#8212;</text>
+    <text class="edge-label" x="70" y="642">there is no proxy anywhere in its path.</text>
+  </svg>
+  <figcaption>
+    <strong>The correct path, from an external caller: the
+    controller's autowired reference is the proxy, so the call
+    passes through <code>intercept</code>, the transaction advisor
+    and <code>BEGIN</code> into the target.</strong>
+    Inside <code>place()</code>, <code>this.applyDiscount()</code>
+    is a plain Java call on a plain object &mdash; <code>this</code>
+    is the target, not the proxy, so the proxy is bypassed entirely
+    and no advice runs, while <code>orders.save()</code>, a call on
+    another bean, behaves normally. That asymmetry is the whole
+    subject of self-invocation.
+  </figcaption>
+</figure><p>The precise mechanism: inside <code>place()</code>, the object <code>this</code> is the <strong>target</strong>, not the proxy. The proxy is a different object that delegates to the target; the target has no reference back to it. So <code>this.applyDiscount()</code> is a plain Java method call on a plain object, and there is no proxy anywhere in its path.</p><p>Three consequences, and only the first is commonly known:</p><ol><li><code>@Transactional</code> does not apply. No transaction is opened.</li><li><code>@PreAuthorize</code> does not apply. <strong>The authorisation check does not run.</strong></li><li><code>@Async</code> does not apply. The method runs synchronously on the caller's thread.</li><li><code>@Cacheable</code> does not apply, and neither does <code>@Retryable</code>.</li></ol><pre class="snippet" data-lang="java"><code>@Service
 public class OrderService {
 
     private final OrderRepository orders;
@@ -710,10 +1131,44 @@ private static class HashCodeInterceptor implements MethodInterceptor, Serializa
 }</code></pre><p>The condition is <code>!equals.equals(method)</code> — <strong>only <code>Object</code>'s <code>equals</code> is delegated to the target.</strong> If the target class <strong>overrides</strong> <code>equals()</code> and that override matches a pointcut, the aspect handles it instead, and now the two <code>equals</code> implementations are different objects. The consequences:</p><div class="table-wrap"><table><thead><tr><th>Situation</th><th>What happens</th></tr></thead><tbody><tr><td>Target does not override <code>equals</code></td><td>Built-in interceptor delegates → proxy equals the target. Correct</td></tr><tr><td>Target overrides <code>equals</code>, no matching advice</td><td>CGLIB's <code>equals</code> is not advised, so the target's <code>equals</code> runs. Correct</td></tr><tr><td>Target overrides <code>equals</code>, <strong>and a pointcut matches it</strong></td><td>The aspect's advice runs instead of the target's <code>equals</code> → the proxy is no longer equal to the target. <strong>Broken</strong></td></tr><tr><td>Proxy used as a <code>HashMap</code> key, target has no <code>equals</code></td><td><code>HashCodeInterceptor</code> delegates, so the proxy hashes as the target. Correct</td></tr><tr><td>Proxy used as a <code>HashSet</code> member, target has no <code>equals</code></td><td>Same. Correct</td></tr><tr><td><code>toString()</code></td><td><strong>Not intercepted at all</strong> — <code>mp.invokeSuper</code> calls the <em>proxy's</em> generated <code>toString</code>, which prints the proxy class name</td></tr></tbody></table></div><p>That last row is a genuine operational annoyance. Under CGLIB, <code>log.info(&quot;{}&quot;, bean)</code> on an advised bean logs something like <code>com.acme.TenantService$$SpringCGLIB$$0@1f2e3d</code> rather than a useful description — which is why log statements in a proxied codebase sometimes show obfuscated class names, and why someone eventually adds a <code>toString()</code> override and is surprised it does not help.</p><p><code>hashCode</code> also has a second-order effect people hit with Spring Security's <code>UsernamePasswordAuthenticationToken</code> and with <code>@Cacheable</code> keys: two invocations that return the &quot;same&quot; logical object return <strong>two different proxies</strong> with different identity hashcodes, so a cache keyed on the object never hits.</p><h3 class="vol__h3" id="75-serialization">7.5 Serialization</h3><p>A proxy is a distinct object, and it carries state that the target does not — a reference back to the target, the <code>TargetSource</code>, and the advisor chain. If the target is serializable and the proxy is not, the write succeeds and the read fails.</p><pre class="diagram"><code>java.io.NotSerializableException: com.acme.report.FiscalReport$$SpringCGLIB$$0
 
 Caused by: an object stored in a session-scoped bean is the PROXY,
-           and the proxy's class was never made Serializable</code></pre><p>The classic production shape is a session-scoped or a <code>@Cacheable</code>d DTO that also happens to be a Spring bean:</p><pre class="diagram"><code>  HTTP request 1                     HTTP request 2 (or a session replay)
-       │                                     │
-       ▼                                     ▼
-  proxy (advised, NOT serializable)  ──serialize──► NotSerializableException</code></pre><p>The fixes, in order of preference:</p><ol><li><strong>Do not put beans in sessions.</strong> Store identifiers, not objects. This is the real answer and it also removes a class of stale-state bugs.</li><li><strong>Make the target <code>Serializable</code> and proxy JDK-style</strong>, so the proxy's interfaces are all <code>Serializable</code> — which is why a JDK proxy is serializable when its target is.</li><li><strong>Register a custom <code>ObjectInputStream</code> / use a serialization proxy</strong> for the specific case where a bean genuinely must cross a boundary.</li></ol><aside class="callout callout--prod"><span class="callout__label">In production</span><p>Serialization is a good example of the general rule for this volume: the proxy decision does not just change <em>where advice runs</em>, it changes the <strong>object identity and lifecycle</strong> of every advised bean. <code>getClass()</code> is different, <code>equals</code> may be different, identity hashcodes are different, the object is not serializable when the target is, and the stack trace has four extra frames. None of that is a bug in your code, and all of it is surprising to someone who has not internalised that &quot;the bean in my hand is not the object you wrote.&quot;</p></aside><h3 class="vol__h3" id="76-proxies-and-generics">7.6 Proxies and Generics</h3><p>Referenced from Volume 1, section 2.3, and Volume 2, Chapter 2: <strong>generics are erased at runtime.</strong> A JDK proxy implements an interface, and the interface's type arguments are not recoverable from the proxy class. The result is a resolution failure that looks like a missing bean:</p><pre class="snippet" data-lang="java"><code>public interface PaymentClient { }
+           and the proxy's class was never made Serializable</code></pre><p>The classic production shape is a session-scoped or a <code>@Cacheable</code>d DTO that also happens to be a Spring bean:</p><figure class="figure">
+  <svg viewBox="0 0 900 200" role="img" aria-label="Two HTTP requests, or a session replay, both reach the same proxy. The proxy is advised and not serializable, so serializing it throws NotSerializableException: the write succeeds and the read fails.">
+    <defs>
+      <marker id="arw-spring-03-10-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="70" y="36" width="320" height="44" rx="5"/>
+    <text class="label" x="90" y="64">HTTP request 1</text>
+    <rect class="node" x="510" y="36" width="320" height="44" rx="5"/>
+    <text class="label" x="530" y="64">HTTP request 2 (or a session replay)</text>
+    <path class="edge" d="M 230 80 L 230 100" marker-end="url(#arw-spring-03-10-a)"/>
+    <path class="edge" d="M 670 80 L 670 100" marker-end="url(#arw-spring-03-10-a)"/>
+
+    <rect class="node node--warn" x="70" y="100" width="320" height="68" rx="5"/>
+    <text class="label" x="90" y="126">the proxy</text>
+    <text class="edge-label" x="90" y="148">advised, NOT serializable</text>
+
+    <rect class="node node--bad" x="510" y="100" width="320" height="68" rx="5"/>
+    <text class="label" x="530" y="126">NotSerializableException</text>
+    <text class="edge-label" x="530" y="148">the write succeeds and the read fails</text>
+
+    <path class="edge" d="M 390 134 L 510 134" marker-end="url(#arw-spring-03-10-a)"/>
+    <text class="edge-label" x="450" y="124" text-anchor="middle">serialize</text>
+  </svg>
+  <figcaption>
+    <strong>A proxy is a distinct object, and it carries state the
+    target does not &mdash; a reference back to the target, the
+    TargetSource and the advisor chain &mdash; so a session-scoped or
+    <code>@Cacheable</code> bean that is a Spring proxy fails on the
+    way out: serializing it throws
+    <code>NotSerializableException</code>.</strong>
+    Both HTTP requests and session replays reach the same
+    non-serializable proxy, and the write succeeds while the read
+    fails. The real fix is to keep beans out of sessions entirely
+    and store identifiers, not objects.
+  </figcaption>
+</figure><p>The fixes, in order of preference:</p><ol><li><strong>Do not put beans in sessions.</strong> Store identifiers, not objects. This is the real answer and it also removes a class of stale-state bugs.</li><li><strong>Make the target <code>Serializable</code> and proxy JDK-style</strong>, so the proxy's interfaces are all <code>Serializable</code> — which is why a JDK proxy is serializable when its target is.</li><li><strong>Register a custom <code>ObjectInputStream</code> / use a serialization proxy</strong> for the specific case where a bean genuinely must cross a boundary.</li></ol><aside class="callout callout--prod"><span class="callout__label">In production</span><p>Serialization is a good example of the general rule for this volume: the proxy decision does not just change <em>where advice runs</em>, it changes the <strong>object identity and lifecycle</strong> of every advised bean. <code>getClass()</code> is different, <code>equals</code> may be different, identity hashcodes are different, the object is not serializable when the target is, and the stack trace has four extra frames. None of that is a bug in your code, and all of it is surprising to someone who has not internalised that &quot;the bean in my hand is not the object you wrote.&quot;</p></aside><h3 class="vol__h3" id="76-proxies-and-generics">7.6 Proxies and Generics</h3><p>Referenced from Volume 1, section 2.3, and Volume 2, Chapter 2: <strong>generics are erased at runtime.</strong> A JDK proxy implements an interface, and the interface's type arguments are not recoverable from the proxy class. The result is a resolution failure that looks like a missing bean:</p><pre class="snippet" data-lang="java"><code>public interface PaymentClient { }
 public class StripeClient implements PaymentClient { }
 
 @Autowired private List&lt;PaymentClient&gt; clients;    // works
