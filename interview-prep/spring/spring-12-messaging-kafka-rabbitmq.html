@@ -16,7 +16,7 @@
 
 <main class="main main--guide" id="main">
 
-<header class="masthead"><p class="masthead__eyebrow">Spring — MESSAGING, KAFKA &amp; RABBITMQ</p><h1>The Spring Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>4 chapters</li><li>24 questions</li><li>5 diagrams</li></ul></header>
+<header class="masthead"><p class="masthead__eyebrow">Spring — MESSAGING, KAFKA &amp; RABBITMQ</p><h1>The Spring Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>4 chapters</li><li>24 questions</li><li>3 figures</li><li>2 text blocks</li></ul></header>
 
 <div class="toolbar"><div class="search"><input type="search" data-filter-input placeholder="Filter chapters — press /" aria-label="Filter chapters"><span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span></div><div class="pager"><a class="pager__prev" href="spring-11-spring-cloud-distributed-systems.html">&larr; SPRING CLOUD &amp; DISTRIBUTED SYSTEMS</a></div></div>
 
@@ -24,30 +24,155 @@
 
 <section id="about-this-guide" data-filter-target><h2 class="vol__h2">About This Guide</h2><p>This is a twelve-volume study guide to the Spring ecosystem, written for engineers who already know Java and are preparing for senior and staff-level backend interviews. It is not a tutorial. Nothing here explains what a class is.</p><p>This volume covers the two messaging models and the Spring APIs on top of them. It exists because <code>KafkaTemplate</code>, <code>@KafkaListener</code> and <code>@RabbitListener</code> were entirely absent from the first eleven volumes, while Volume 11 spent a chapter arguing that a system needs an outbox pattern without ever naming the broker that would carry it. That is now closed.</p><aside class="callout callout--must"><span class="callout__label">Must remember — the versions this volume is written against</span><p><strong>spring-kafka, spring-amqp and spring-rabbit 4.1.1, with Spring Boot 4.1.1.</strong> These are the current GA lines as of this writing; 4.0.x and 3.3.x are maintenance trains. This matters more here than in other volumes because <strong>major API changes landed in the 4.0 line</strong> — error-handler classes were removed, retry classification was reworked, and a producer-side API people had learned does not exist. Anything you remember about spring-kafka from before 3.0 needs checking before you say it in an interview.</p></aside><h3 class="vol__h3" id="how-this-guide-is-structured">How This Guide Is Structured</h3><p>Each chapter is a sequence of numbered sections, then <strong>Common Mistakes</strong>, then <strong>Interview Questions</strong>, then <strong>Further Reading</strong>. The mistakes are the ones that reach production; the questions are the ones you are actually asked. Diagrams are ASCII, and are not code — do not paste them anywhere that expects to compile.</p><h3 class="vol__h3" id="continuing-from-volume-11">Continuing From Volume 11</h3><p>Volume 11 established the distributed-systems reasoning: what a service boundary costs, why partial failure is normal, why the outbox pattern exists, and why every consumer must be idempotent. This volume does not repeat any of it. It assumes you know that a two-service write cannot be atomic and that a message broker is the usual escape hatch, and it covers the APIs. Where the two overlap — the outbox, idempotency, consumer lag — the treatment lives in <strong>Chapter 4</strong> and links back to Volume 11 rather than restating it.</p><h3 class="vol__h3" id="table-of-contents-volume-12">Table of Contents — Volume 12</h3><ul><li><strong>Chapter 1 — The Two Models.</strong> Log versus queue, what a consumer group is, why ordering is a partition property, and the only three delivery semantics that are real.</li><li><strong>Chapter 2 — Spring for Kafka.</strong> <code>@KafkaListener</code>, the seven <code>AckMode</code> values and their default, error handling, exactly-once and its limits, <code>KafkaTemplate</code>, concurrency, serialization.</li><li><strong>Chapter 3 — Spring for RabbitMQ.</strong> The three <code>AcknowledgeMode</code> values, requeue-by-default, prefetch, the dead-letter trap, message conversion, and the <code>simple</code>/<code>direct</code> namespace split.</li><li><strong>Chapter 4 — Choosing and Operating.</strong> Kafka or RabbitMQ, consumer lag, the rebalance storm, idempotency and the outbox, schema evolution.</li><li><strong>Scenario Bank.</strong> Three production narratives that require all of it.</li></ul></section>
 
-<section id="chapter-1-the-two-models" data-filter-target><h2 class="vol__h2">Chapter 1 — The Two Models</h2><p>Before any Spring API, one distinction has to be right, because almost every configuration decision follows from it: <strong>a queue delivers a message to one consumer; a log stores a message until every consumer has read it.</strong> RabbitMQ is the first. Kafka is the second. Everything people get wrong in interviews — why concurrency does not give ordering, why a Rabbit consumer that throws loops forever, why Kafka replays — follows from taking the wrong model into the design.</p><h3 class="vol__h3" id="11-log-versus-queue">1.1 Log Versus Queue</h3><p>A <strong>queue</strong> holds a message and hands it to one consumer, then it is gone. Ten consumers on one queue is work distribution: ten times the throughput, and each message handled once, by exactly one of them. A <strong>log</strong> is an ordered, append-only sequence with a per-partition offset. Each consumer keeps its own position in it and advances independently, so ten consumers on one log is fan-out: every consumer sees every message.</p><pre class="diagram"><code>QUEUE (RabbitMQ) — one consumer per message
+<section id="chapter-1-the-two-models" data-filter-target><h2 class="vol__h2">Chapter 1 — The Two Models</h2><p>Before any Spring API, one distinction has to be right, because almost every configuration decision follows from it: <strong>a queue delivers a message to one consumer; a log stores a message until every consumer has read it.</strong> RabbitMQ is the first. Kafka is the second. Everything people get wrong in interviews — why concurrency does not give ordering, why a Rabbit consumer that throws loops forever, why Kafka replays — follows from taking the wrong model into the design.</p><h3 class="vol__h3" id="11-log-versus-queue">1.1 Log Versus Queue</h3><p>A <strong>queue</strong> holds a message and hands it to one consumer, then it is gone. Ten consumers on one queue is work distribution: ten times the throughput, and each message handled once, by exactly one of them. A <strong>log</strong> is an ordered, append-only sequence with a per-partition offset. Each consumer keeps its own position in it and advances independently, so ten consumers on one log is fan-out: every consumer sees every message.</p>
+<figure class="figure">
+  <svg viewBox="0 0 900 475" role="img" aria-label="Two topologies. A RabbitMQ queue: a producer sends msg1, msg2 and msg3; each message goes to exactly one of three consumers, then is gone. A Kafka log: a producer appends offsets 0 to 7; every consumer reads all eight with its own offset, and one can replay from zero whenever it likes. The log does not delete on read.">
+    <defs>
+      <marker id="arw-spring-12-01-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="edge-label edge-label--strong" x="450" y="34" text-anchor="middle">QUEUE (RabbitMQ) &mdash; one consumer per message</text>
+    <rect class="node" x="40" y="56" width="130" height="52" rx="5"/>
+    <text class="label" x="105" y="86" text-anchor="middle">producer</text>
+    <rect class="node" x="250" y="62" width="80" height="40" rx="4"/>
+    <text class="label" x="290" y="86" text-anchor="middle">msg1</text>
+    <rect class="node" x="350" y="62" width="80" height="40" rx="4"/>
+    <text class="label" x="390" y="86" text-anchor="middle">msg2</text>
+    <rect class="node" x="450" y="62" width="80" height="40" rx="4"/>
+    <text class="label" x="490" y="86" text-anchor="middle">msg3</text>
+    <path class="edge" d="M 170 82 L 250 82" marker-end="url(#arw-spring-12-01-a)"/>
+    <path class="edge" d="M 330 82 L 350 82" marker-end="url(#arw-spring-12-01-a)"/>
+    <path class="edge" d="M 430 82 L 450 82" marker-end="url(#arw-spring-12-01-a)"/>
+    <path class="edge" d="M 530 82 L 575 82" marker-end="url(#arw-spring-12-01-a)"/>
+    <rect class="node" x="620" y="48" width="250" height="44" rx="4"/>
+    <text class="label" x="745" y="64" text-anchor="middle">consumer A</text>
+    <text class="label label--sub" x="745" y="80" text-anchor="middle">gets msg1</text>
+    <rect class="node" x="620" y="100" width="250" height="44" rx="4"/>
+    <text class="label" x="745" y="116" text-anchor="middle">consumer B</text>
+    <text class="label label--sub" x="745" y="132" text-anchor="middle">gets msg2</text>
+    <rect class="node" x="620" y="152" width="250" height="44" rx="4"/>
+    <text class="label" x="745" y="168" text-anchor="middle">consumer C</text>
+    <text class="label label--sub" x="745" y="184" text-anchor="middle">gets msg3</text>
+    <path class="edge" d="M 575 82 L 620 70" marker-end="url(#arw-spring-12-01-a)"/>
+    <path class="edge" d="M 575 82 L 620 122" marker-end="url(#arw-spring-12-01-a)"/>
+    <path class="edge" d="M 575 82 L 620 174" marker-end="url(#arw-spring-12-01-a)"/>
+    <text class="edge-label" x="450" y="216" text-anchor="middle">each message is consumed by exactly one consumer &mdash; then it is gone</text>
+    <text class="edge-label edge-label--strong" x="450" y="252" text-anchor="middle">LOG (Kafka) &mdash; every consumer sees every message</text>
+    <rect class="node" x="40" y="272" width="130" height="52" rx="5"/>
+    <text class="label" x="105" y="302" text-anchor="middle">producer</text>
+    <rect class="node node--accent" x="250" y="264" width="300" height="68" rx="5"/>
+    <text class="label" x="400" y="290" text-anchor="middle">the log</text>
+    <text class="label label--sub" x="400" y="308" text-anchor="middle">0 1 2 3 4 5 6 7 &mdash; append-only</text>
+    <path class="edge" d="M 170 298 L 250 298" marker-end="url(#arw-spring-12-01-a)"/>
+    <path class="edge" d="M 550 298 L 585 298"/>
+    <path class="edge" d="M 585 298 L 620 284" marker-end="url(#arw-spring-12-01-a)"/>
+    <path class="edge" d="M 585 298 L 620 348" marker-end="url(#arw-spring-12-01-a)"/>
+    <path class="edge" d="M 585 298 L 620 412" marker-end="url(#arw-spring-12-01-a)"/>
+    <rect class="node" x="620" y="258" width="250" height="52" rx="4"/>
+    <text class="label" x="745" y="278" text-anchor="middle">consumer A</text>
+    <text class="label label--sub" x="745" y="294" text-anchor="middle">reads all 8 &mdash; offset = 8</text>
+    <rect class="node" x="620" y="322" width="250" height="52" rx="4"/>
+    <text class="label" x="745" y="342" text-anchor="middle">consumer B</text>
+    <text class="label label--sub" x="745" y="358" text-anchor="middle">reads all 8 &mdash; offset = 8</text>
+    <rect class="node" x="620" y="386" width="250" height="52" rx="4"/>
+    <text class="label" x="745" y="406" text-anchor="middle">consumer C</text>
+    <text class="label label--sub" x="745" y="422" text-anchor="middle">replays from 0 whenever it likes</text>
+    <text class="edge-label" x="450" y="458" text-anchor="middle">the log does not delete on read &mdash; retention (time or size) does</text>
+  </svg>
+  <figcaption>
+    <strong>A queue hands each message to exactly one consumer and then deletes it; a log retains every message and lets each consumer keep its own offset.</strong>
+    The two topologies are different primitives, not different configurations. A queue is work distribution: three consumers on one queue each get a third of the messages, and a message is gone once consumed — there is no such thing as replaying a queue. A log is a retained, append-only sequence: every consumer group reads all eight messages at its own pace, keeping its own offset, and any consumer can replay from zero whenever it likes — which is what makes audit logs, event sourcing and read-model rebuilds possible. Deletion is not triggered by reads; retention, whether time or size, does the deleting.
+  </figcaption>
+</figure>
 
-   producer ──▶ [ msg1 ][ msg2 ][ msg3 ] ──▶ consumer A gets msg1
-                   ▲                        consumer B gets msg2
-                   └── exactly one, then gone    consumer C gets msg3
+<p>The operational consequence is the one to say out loud: <strong>Kafka's retention is what makes replay possible</strong>, and that is what gives you the audit log, the rebuild-the-read-model trick, and the ability to introduce a new consumer without disturbing the old ones. A queue has no such thing — once acknowledged, the message is gone, and a consumer that was down missed it. If a question asks why you would replay events rather than snapshot state, this is the whole answer.</p><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off — the question behind every broker choice</span><p>&ldquo;Can a new consumer read history?&rdquo; Kafka: yes, from any retained offset, and it costs nothing because the data is already there. RabbitMQ: no — the messages were consumed and are gone; you would need a second exchange feeding a fresh queue, which means changing the producers. This single property drives most of the &ldquo;why Kafka&rdquo; answers: event sourcing, cache rebuilds, feeding a new downstream, and letting analytics replay without touching production.</p></aside><h3 class="vol__h3" id="12-what-a-consumer-group-actually-is">1.2 What a Consumer Group Actually Is</h3><p>A <strong>consumer group</strong> is a set of consumers that share the work of the partitions they are assigned. The guarantee is one assignment rule, and everything else follows: <strong>each partition is assigned to exactly one consumer in the group at a time.</strong> Two consumers in the same group never process the same partition in parallel. Two consumers in <em>different</em> groups each get all the partitions, independently.</p>
+<figure class="figure">
+  <svg viewBox="0 0 900 770" role="img" aria-label="A topic with three partitions shown three times. Group billing splits the partitions across three consumers, one each. Group analytics independently maps partitions 0 and 2 to consumer A1 and partition 1 to A2 — a full copy. With five consumers and three partitions, the last two sit idle. Each partition is assigned to exactly one consumer in a group.">
+    <defs>
+      <marker id="arw-spring-12-02-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="edge-label edge-label--strong" x="450" y="24" text-anchor="middle">topic: orders &mdash; 3 partitions</text>
+    <rect class="node node--accent" x="355" y="40" width="190" height="44" rx="4"/>
+    <text class="label" x="450" y="56" text-anchor="middle">GROUP</text>
+    <text class="label label--sub" x="450" y="72" text-anchor="middle">&quot;billing&quot;</text>
+    <path class="edge" d="M 425 84 L 305 118" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 450 84 L 450 118" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 475 84 L 595 118" marker-end="url(#arw-spring-12-02-a)"/>
+    <rect class="node" x="260" y="118" width="90" height="38" rx="4"/>
+    <text class="label" x="305" y="142" text-anchor="middle">p0</text>
+    <rect class="node" x="405" y="118" width="90" height="38" rx="4"/>
+    <text class="label" x="450" y="142" text-anchor="middle">p1</text>
+    <rect class="node" x="550" y="118" width="90" height="38" rx="4"/>
+    <text class="label" x="595" y="142" text-anchor="middle">p2</text>
+    <path class="edge" d="M 305 156 L 305 190" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 450 156 L 450 190" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 595 156 L 595 190" marker-end="url(#arw-spring-12-02-a)"/>
+    <rect class="node" x="250" y="190" width="110" height="38" rx="4"/>
+    <text class="label" x="305" y="214" text-anchor="middle">C1</text>
+    <rect class="node" x="395" y="190" width="110" height="38" rx="4"/>
+    <text class="label" x="450" y="214" text-anchor="middle">C2</text>
+    <rect class="node" x="540" y="190" width="110" height="38" rx="4"/>
+    <text class="label" x="595" y="214" text-anchor="middle">C3</text>
+    <text class="edge-label" x="450" y="256" text-anchor="middle">work split &mdash; each partition assigned to exactly one consumer</text>
+    <rect class="node node--accent" x="355" y="288" width="190" height="44" rx="4"/>
+    <text class="label" x="450" y="304" text-anchor="middle">GROUP</text>
+    <text class="label label--sub" x="450" y="320" text-anchor="middle">&quot;analytics&quot;</text>
+    <path class="edge" d="M 425 332 L 305 366" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 450 332 L 450 366" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 475 332 L 595 366" marker-end="url(#arw-spring-12-02-a)"/>
+    <rect class="node" x="260" y="366" width="90" height="38" rx="4"/>
+    <text class="label" x="305" y="390" text-anchor="middle">p0</text>
+    <rect class="node" x="405" y="366" width="90" height="38" rx="4"/>
+    <text class="label" x="450" y="390" text-anchor="middle">p1</text>
+    <rect class="node" x="550" y="366" width="90" height="38" rx="4"/>
+    <text class="label" x="595" y="390" text-anchor="middle">p2</text>
+    <path class="edge" d="M 305 404 L 305 438" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 450 404 L 450 438" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 595 404 L 595 416 L 355 416 L 355 438" marker-end="url(#arw-spring-12-02-a)"/>
+    <rect class="node" x="250" y="438" width="110" height="38" rx="4"/>
+    <text class="label" x="305" y="462" text-anchor="middle">A1</text>
+    <rect class="node" x="395" y="438" width="110" height="38" rx="4"/>
+    <text class="label" x="450" y="462" text-anchor="middle">A2</text>
+    <text class="edge-label" x="450" y="504" text-anchor="middle">a second group &mdash; independent, full copy of every partition</text>
+    <rect class="node node--accent" x="355" y="536" width="190" height="44" rx="4"/>
+    <text class="label" x="450" y="552" text-anchor="middle">GROUP</text>
+    <text class="label label--sub" x="450" y="568" text-anchor="middle">&quot;billing&quot; &mdash; 5 consumers</text>
+    <path class="edge" d="M 425 580 L 305 614" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 450 580 L 450 614" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 475 580 L 595 614" marker-end="url(#arw-spring-12-02-a)"/>
+    <rect class="node" x="260" y="614" width="90" height="38" rx="4"/>
+    <text class="label" x="305" y="638" text-anchor="middle">p0</text>
+    <rect class="node" x="405" y="614" width="90" height="38" rx="4"/>
+    <text class="label" x="450" y="638" text-anchor="middle">p1</text>
+    <rect class="node" x="550" y="614" width="90" height="38" rx="4"/>
+    <text class="label" x="595" y="638" text-anchor="middle">p2</text>
+    <path class="edge" d="M 305 652 L 305 686" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 450 652 L 450 686" marker-end="url(#arw-spring-12-02-a)"/>
+    <path class="edge" d="M 595 652 L 595 686" marker-end="url(#arw-spring-12-02-a)"/>
+    <rect class="node" x="250" y="686" width="110" height="38" rx="4"/>
+    <text class="label" x="305" y="710" text-anchor="middle">C1</text>
+    <rect class="node" x="395" y="686" width="110" height="38" rx="4"/>
+    <text class="label" x="450" y="710" text-anchor="middle">C2</text>
+    <rect class="node" x="540" y="686" width="110" height="38" rx="4"/>
+    <text class="label" x="595" y="710" text-anchor="middle">C3</text>
+    <rect class="node" x="675" y="686" width="100" height="38" rx="4"/>
+    <text class="label" x="725" y="700" text-anchor="middle">C4</text>
+    <text class="label label--sub" x="725" y="714" text-anchor="middle">idle</text>
+    <rect class="node" x="790" y="686" width="100" height="38" rx="4"/>
+    <text class="label" x="840" y="700" text-anchor="middle">C5</text>
+    <text class="label label--sub" x="840" y="714" text-anchor="middle">idle</text>
+    <text class="edge-label" x="450" y="752" text-anchor="middle">surplus consumers receive nothing and sit there</text>
+  </svg>
+  <figcaption>
+    <strong>One assignment rule governs everything: each partition goes to exactly one consumer in a group, so two groups are independent copies and surplus consumers sit idle.</strong>
+    The same topic read three ways. Group <code>billing</code> splits the three partitions across three consumers, one each — and ordering is preserved only within each partition. Group <code>analytics</code> reads independently: partitions 0 and 2 to <code>A1</code>, partition 1 to <code>A2</code>, a full copy of every partition. With five consumers on three partitions, <code>C4</code> and <code>C5</code> receive nothing and sit there — raising <code>concurrency</code> above the partition count does nothing, which is the most common Kafka misconfiguration. Each group keeps its own offsets, so one group replaying does not affect the other.
+  </figcaption>
+</figure>
 
-LOG (Kafka) — every consumer sees every message
-
-   producer ──▶ log: [0][1][2][3][4][5][6][7]
-                  │                      │
-                  ├──── consumer A ──────┤  reads all 8, offset = 8
-                  ├──── consumer B ──────┤  reads all 8, offset = 8
-                  └──── consumer C ──────┘  replays from 0 whenever it likes
-
-   the log does not delete on read — retention (time or size) does</code></pre><p>The operational consequence is the one to say out loud: <strong>Kafka's retention is what makes replay possible</strong>, and that is what gives you the audit log, the rebuild-the-read-model trick, and the ability to introduce a new consumer without disturbing the old ones. A queue has no such thing — once acknowledged, the message is gone, and a consumer that was down missed it. If a question asks why you would replay events rather than snapshot state, this is the whole answer.</p><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off — the question behind every broker choice</span><p>&ldquo;Can a new consumer read history?&rdquo; Kafka: yes, from any retained offset, and it costs nothing because the data is already there. RabbitMQ: no — the messages were consumed and are gone; you would need a second exchange feeding a fresh queue, which means changing the producers. This single property drives most of the &ldquo;why Kafka&rdquo; answers: event sourcing, cache rebuilds, feeding a new downstream, and letting analytics replay without touching production.</p></aside><h3 class="vol__h3" id="12-what-a-consumer-group-actually-is">1.2 What a Consumer Group Actually Is</h3><p>A <strong>consumer group</strong> is a set of consumers that share the work of the partitions they are assigned. The guarantee is one assignment rule, and everything else follows: <strong>each partition is assigned to exactly one consumer in the group at a time.</strong> Two consumers in the same group never process the same partition in parallel. Two consumers in <em>different</em> groups each get all the partitions, independently.</p><pre class="diagram"><code>topic: orders, 3 partitions
-
-GROUP "billing"  ──▶ p0→C1   p1→C2   p2→C3     work split, each partition once
-                     (C1 and C2 never touch p0)
-
-GROUP "analytics" ──▶ p0→A1   p1→A2   p2→A1     independent, full copy
-
-same group, 5 consumers, 3 partitions
-                     ──▶ p0→C1  p1→C2  p2→C3  C4 idle  C5 idle
-                          surplus consumers receive nothing and sit there</code></pre><p>That last line is the answer to the most common Kafka interview question. <strong>Raising <code>concurrency</code> above the partition count does nothing except start idle consumers.</strong> To scale a partition-ordered stream you add partitions, and you accept that ordering is now only guaranteed <em>within</em> each partition. Ordering across the whole topic is gone, permanently, and no amount of consumer tuning restores it.</p><h3 class="vol__h3" id="13-ordering-partitions-and-the-key">1.3 Ordering, Partitions and the Key</h3><p>Kafka guarantees order <strong>within a partition</strong>, and nothing across partitions. So the key you produce with decides which orderings you have. Same key → same partition → ordered. Different keys → different partitions → no relationship between them.</p><pre class="snippet" data-lang="java"><code>// Same orderId always lands on the same partition, so all events
+<p>That last line is the answer to the most common Kafka interview question. <strong>Raising <code>concurrency</code> above the partition count does nothing except start idle consumers.</strong> To scale a partition-ordered stream you add partitions, and you accept that ordering is now only guaranteed <em>within</em> each partition. Ordering across the whole topic is gone, permanently, and no amount of consumer tuning restores it.</p><h3 class="vol__h3" id="13-ordering-partitions-and-the-key">1.3 Ordering, Partitions and the Key</h3><p>Kafka guarantees order <strong>within a partition</strong>, and nothing across partitions. So the key you produce with decides which orderings you have. Same key → same partition → ordered. Different keys → different partitions → no relationship between them.</p><pre class="snippet" data-lang="java"><code>// Same orderId always lands on the same partition, so all events
 // for one order arrive in the order they were produced.
 kafkaTemplate.send("orders",
         new ProducerRecord&lt;&gt;("orders", order.getId(), event));
@@ -149,28 +274,58 @@ where the other belongs is a runtime exception, not a warning.</p>
 <h4 class="vol__h4" id="common-mistakes-2">Common Mistakes</h4><ul><li>Answering <code>idIsGroup</code> as <code>false</code>. It is <code>true</code>; the javadoc's &ldquo;@return false to disable&rdquo; phrasing is the source of the error. Renaming a listener's <code>id</code> silently moves it to a new consumer group and replays from the earliest offset.</li><li>Saying the Kafka ack mode defaults to <code>RECORD</code>. It is <code>BATCH</code>, and Spring Boot does not change that.</li><li>Describing a <code>RetriableException</code> marker or <code>setRetriableExceptions</code>. Neither exists; classification is <code>ExceptionMatcher</code> and you configure what is <em>not</em> retryable.</li><li>Adding Kafka's <code>SerializationException</code> to the fatal list. The default list contains <em>Spring's</em> <code>DeserializationException</code>, which is a different class in a different package.</li><li>Configuring a producer-side error handler on <code>DefaultKafkaProducerFactory</code>. There is no such API; use the <code>CompletableFuture</code> callback or a <code>ProducerListener</code>.</li><li>Leaving the default 9-retry no-delay backoff on an exception you did not expect, since unmatched types are classified retryable.</li><li>Claiming transactions give exactly-once for a database write. The sequence is covered; the cross-system commit gap is not, and the docs say so.</li><li>Raising <code>concurrency</code> past the partition count and concluding the broker is slow.</li><li>Using <code>SeekToCurrentErrorHandler</code>, which was removed in the 3.0 line.</li><li>Reading &ldquo;isolation level&rdquo; as one thing. Kafka's <code>isolation.level</code> decides what a consumer reads and defaults to <code>read_uncommitted</code>; Spring's <code>TransactionDefinition</code> isolation scopes a transaction, and <code>KafkaTransactionManager</code> throws <code>InvalidIsolationLevelException</code> if you set it.</li></ul><h4 class="vol__h4" id="interview-questions-spring-for-kafka">Interview Questions — Spring for Kafka</h4><article class="qa" id="2-spring-for-kafka-1"><p class="qa__q"><a class="qa__num" href="#2-spring-for-kafka-1">Q1</a> What does <code>concurrency</code> on <code>@KafkaListener</code> actually do? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>It sets the number of consumer containers running, each with its own consumer, all in the same consumer group — and because each partition goes to exactly one consumer, records from the same partition are always processed sequentially. So concurrency is consumer-group membership, not intra-partition parallelism, and setting it above the partition count starts idle consumers that receive nothing. To go faster you add partitions, which lowers the ordering guarantee, or you fix a skewed key so the hot partition is not the constraint. The trap in this question is answering with the Boot property description, which calls it a number of threads and invites exactly the wrong model.</p></div></article><article class="qa" id="2-spring-for-kafka-2"><p class="qa__q"><a class="qa__num" href="#2-spring-for-kafka-2">Q2</a> A listener throws on one record. What has already been committed? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>The container commits pending offsets <em>before</em> invoking the error handler, so every record processed before the failure is durably marked done and only the remainder is rewound. The documented example: a poll returning six records with a throw on the fourth commits the first three, then seeks p1 to offset 1 and p2 to offset 0, and the next poll returns the three unprocessed records. The consequence worth stating is that the effective semantics are mixed — at-most-once for what was already processed, at-least-once for the rest — and that a crash immediately after cannot recover the committed ones. This is also the argument for idempotency: the retry path and the crash path both assume you can safely see a record twice.</p></div></article><article class="qa" id="2-spring-for-kafka-3"><p class="qa__q"><a class="qa__num" href="#2-spring-for-kafka-3">Q3</a> When would you use <code>RECORD</code> over the default <code>BATCH</code>? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>When you have made the consumer idempotent and want to minimise replay after a crash. <code>BATCH</code> commits only once the whole poll's records are processed, so a failure replays records that were already handled; <code>RECORD</code> commits per record, so a crash mid-batch replays less. Neither is safe without idempotency — <code>RECORD</code> just makes the duplicate window smaller. If the consumer is not idempotent, the safer default is <code>BATCH</code>, because fewer duplicates reach it, and the correct answer is that the ack mode is a knob for tuning replay volume, not a delivery guarantee.</p></div></article><article class="qa" id="2-spring-for-kafka-4"><p class="qa__q"><a class="qa__num" href="#2-spring-for-kafka-4">Q4</a> How do you make a database write and a Kafka publish atomic? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>You usually cannot, and the honest answer is the outbox rather than a transaction manager. <code>KafkaTransactionManager</code> gives exactly-once over a read → process → write sequence, but that covers Kafka writes; the database commit and the Kafka commit are two separate commits with a gap, and the documentation says that if the second fails after the first has committed, the application must take remedial action to compensate. The outbox avoids the gap by writing the message to a table inside the same database transaction as the business change, then relaying it asynchronously. You trade the two-phase gap for a relay process and consumer-side deduplication. Chained transaction managers are the deprecated version of the same idea.</p></div></article><article class="qa" id="2-spring-for-kafka-5"><p class="qa__q"><a class="qa__num" href="#2-spring-for-kafka-5">Q5</a> How do you configure retries and a dead-letter topic? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>Two objects composed, not chosen between: a <code>DefaultErrorHandler</code> holding the retry policy, constructed with a <code>DeadLetterPublishingRecoverer</code> as its recoverer and a <code>BackOff</code>. Set it via <code>setCommonErrorHandler</code> on the container factory. Two defaults to correct first — the default backoff is 9 retries with no delay, and unmatched exception types are classified retryable, so a <code>NullPointerException</code> is retried nine times before it reaches the recoverer. And the fatal list contains Spring's <code>DeserializationException</code>, not Kafka's, so a parse failure is genuinely terminal while an unexpected runtime exception is not. Set the common handler explicitly rather than inheriting either default.</p></div></article><article class="qa" id="2-spring-for-kafka-7"><p class="qa__q"><a class="qa__num" href="#2-spring-for-kafka-7">Q7</a> Where do you configure <code>read_committed</code>, and what happens if you do not? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>Not on a spring-kafka API &mdash; there is no <code>ConsumerFactory</code> setter and no <code>@KafkaListener</code> attribute; the only two mentions of it in the 4.1.1 source are a javadoc comment and an exception. Under Boot it is the property <code>spring.kafka.consumer.isolation-level</code>, mapped onto <code>ConsumerConfig.ISOLATION_LEVEL_CONFIG</code>, and it <strong>defaults to <code>read_uncommitted</code></strong>. That default is the trap: it reads aborted transactional records, so enabling EOS on the producer and forgetting the consumer leaves rolled-back writes visible. The costs of turning it on are latency (the fetch waits for the transaction outcome) and post-restart errors while the producer epoch is re-established. Separately, do not confuse it with <code>TransactionDefinition</code>&rsquo;s isolation levels &mdash; <code>KafkaTransactionManager</code> rejects those outright with &ldquo;Apache Kafka does not support an isolation level concept&rdquo;, and it means it.</p></div></article><article class="qa" id="2-spring-for-kafka-6"><p class="qa__q"><a class="qa__num" href="#2-spring-for-kafka-6">Q6</a> How does a send to Kafka fail, and how do you find out? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>There is no producer-side error handler to configure — no <code>setErrorHandler</code> on <code>DefaultKafkaProducerFactory</code> and no producer <code>DefaultErrorHandler</code>; verified absent in 4.1.1. Failure arrives on the <code>CompletableFuture</code> returned by <code>send()</code>, which has returned a <code>CompletableFuture</code> since the 3.0 line and a <code>ListenableFuture</code> before it, so the callback idiom changed with the major version. The second mechanism is a <code>ProducerListener</code>, where Boot installs a <code>LoggingProducerListener</code> that logs errors by default. The practical gap is that a fire-and-forget send with no callback and no producer listener can fail with only a log line — so the answer to &ldquo;how would you know&rdquo; is that you attached one of the two.</p></div></article><h4 class="vol__h4" id="further-reading-2">Further Reading</h4><ul><li><a href="https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html" rel="noopener noreferrer">Spring for Apache Kafka — Annotation Error Handling</a> — the error-handler composition, the fatal exception list, and the committed-offsets-before-the-handler rule.</li><li><a href="https://docs.spring.io/spring-kafka/reference/kafka/exactly-once.html" rel="noopener noreferrer">Spring for Apache Kafka — Exactly Once Semantics</a> — the sequence qualifier, quoted in §2.5.</li><li><a href="https://docs.spring.io/spring-boot/reference/messaging/spring-kafka.html" rel="noopener noreferrer">Spring Boot &mdash; Spring for Apache Kafka</a> &mdash; <code>spring.kafka.consumer.isolation-level</code> and its <code>read_uncommitted</code> default.</li>
       <li><a href="https://docs.spring.io/spring-kafka/reference/kafka/transactions.html" rel="noopener noreferrer">Spring for Apache Kafka — Transactions</a> — the commit-ordering gap and the &ldquo;remedial action&rdquo; requirement.</li><li><a href="https://docs.spring.io/spring-kafka/reference/kafka/receiving-messages/listener-annotation.html" rel="noopener noreferrer">Spring for Apache Kafka — The Listener Annotation</a> — <code>id</code>, <code>idIsGroup</code> and <code>groupId</code> precedence.</li></ul></section>
 
-<section id="chapter-3-spring-for-rabbitmq" data-filter-target><h2 class="vol__h2">Chapter 3 — Spring for RabbitMQ</h2><p>Everything here is verified against <strong>spring-amqp and spring-rabbit 4.1.1</strong>. RabbitMQ's model is the queue from §1.1, and the API reflects it: fewer knobs, and the defaults assume you have thought about failure.</p><h3 class="vol__h3" id="31-acknowledge-mode-three-values">3.1 <code>AcknowledgeMode</code>: Three Values, and One of Them Is Not Kafka's</h3><p><code>SimpleMessageListenerContainer.acknowledgeMode</code> takes exactly three values, and this list has not changed since 2.3.0:</p><table><thead><tr><th>Value</th><th>What it means</th></tr></thead><tbody><tr><td><code>AUTO</code></td><td><strong>The default.</strong> The container acks when the listener returns normally, and nacks when it throws</td></tr><tr><td><code>MANUAL</code></td><td>The listener acks explicitly, via the <code>Channel</code> and delivery tag. Also nacks on exception unless marked</td></tr><tr><td><code>NONE</code></td><td>No acknowledgement at all. The broker redelivers on channel or connection close</td></tr></tbody></table><aside class="callout callout--trap"><span class="callout__label">Interview trap — there is no <code>MANUAL_IMMEDIATE</code> in RabbitMQ</span><p><code>MANUAL_IMMEDIATE</code> is a spring-kafka concept. Carrying it across is the single most common cross-contamination between the two APIs, because the names are otherwise identical and the semantics are not comparable at all. Kafka's manual modes control <em>when the offset is committed</em> against a log; RabbitMQ's manual mode controls <em>whether the broker is told</em> at all, and the commit does not exist. Three values, one default, and a mode whose counterpart on the other side has no meaning here.</p></aside><p>The comparison worth carrying in your head, because it explains why the defaults differ:</p><table><thead><tr><th></th><th>Kafka</th><th>RabbitMQ</th></tr></thead><tbody><tr><td>Unit of progress</td><td>Partition offset</td><td>Individual delivery</td></tr><tr><td>Default on</td><td><code>BATCH</code> commit, <code>SEEK</code> on failure</td><td><code>AUTO</code> ack, <strong>requeue</strong> on failure</td></tr><tr><td>Failure action</td><td>Retry via error handler, then DLT</td><td>Return to the queue, immediately, forever</td></tr><tr><td>Retry control</td><td>Explicit, via <code>BackOff</code></td><td>Implicit — a <em>redelivery</em> loop</td></tr></tbody></table><h3 class="vol__h3" id="32-what-happens-when-a-listener-throws">3.2 What Happens When a Listener Throws</h3><p>Here is the trap the whole chapter is built around. <code>defaultRequeueRejected</code> defaults to <strong><code>true</code></strong>, and it is a Boot property default. A listener that throws therefore causes the message to be <strong>returned to the queue and redelivered</strong> — immediately, with no delay, no attempt limit and no backoff. If the exception is deterministic, which it usually is, you get a tight loop that hammers the broker and never makes progress.</p><pre class="diagram"><code>listener throws SQLException
-   │
-   ▼
-basic.nack(deliveryTag, requeue=true)          ← defaultRequeueRejected=true
-   │
-   ▼
-message returns to the head of the queue
-   │
-   ▼
-next delivery → same exception → nack → ...
-   └─▶ tight loop, hot CPU, no progress, queue never drains
+<section id="chapter-3-spring-for-rabbitmq" data-filter-target><h2 class="vol__h2">Chapter 3 — Spring for RabbitMQ</h2><p>Everything here is verified against <strong>spring-amqp and spring-rabbit 4.1.1</strong>. RabbitMQ's model is the queue from §1.1, and the API reflects it: fewer knobs, and the defaults assume you have thought about failure.</p><h3 class="vol__h3" id="31-acknowledge-mode-three-values">3.1 <code>AcknowledgeMode</code>: Three Values, and One of Them Is Not Kafka's</h3><p><code>SimpleMessageListenerContainer.acknowledgeMode</code> takes exactly three values, and this list has not changed since 2.3.0:</p><table><thead><tr><th>Value</th><th>What it means</th></tr></thead><tbody><tr><td><code>AUTO</code></td><td><strong>The default.</strong> The container acks when the listener returns normally, and nacks when it throws</td></tr><tr><td><code>MANUAL</code></td><td>The listener acks explicitly, via the <code>Channel</code> and delivery tag. Also nacks on exception unless marked</td></tr><tr><td><code>NONE</code></td><td>No acknowledgement at all. The broker redelivers on channel or connection close</td></tr></tbody></table><aside class="callout callout--trap"><span class="callout__label">Interview trap — there is no <code>MANUAL_IMMEDIATE</code> in RabbitMQ</span><p><code>MANUAL_IMMEDIATE</code> is a spring-kafka concept. Carrying it across is the single most common cross-contamination between the two APIs, because the names are otherwise identical and the semantics are not comparable at all. Kafka's manual modes control <em>when the offset is committed</em> against a log; RabbitMQ's manual mode controls <em>whether the broker is told</em> at all, and the commit does not exist. Three values, one default, and a mode whose counterpart on the other side has no meaning here.</p></aside><p>The comparison worth carrying in your head, because it explains why the defaults differ:</p><table><thead><tr><th></th><th>Kafka</th><th>RabbitMQ</th></tr></thead><tbody><tr><td>Unit of progress</td><td>Partition offset</td><td>Individual delivery</td></tr><tr><td>Default on</td><td><code>BATCH</code> commit, <code>SEEK</code> on failure</td><td><code>AUTO</code> ack, <strong>requeue</strong> on failure</td></tr><tr><td>Failure action</td><td>Retry via error handler, then DLT</td><td>Return to the queue, immediately, forever</td></tr><tr><td>Retry control</td><td>Explicit, via <code>BackOff</code></td><td>Implicit — a <em>redelivery</em> loop</td></tr></tbody></table><h3 class="vol__h3" id="32-what-happens-when-a-listener-throws">3.2 What Happens When a Listener Throws</h3><p>Here is the trap the whole chapter is built around. <code>defaultRequeueRejected</code> defaults to <strong><code>true</code></strong>, and it is a Boot property default. A listener that throws therefore causes the message to be <strong>returned to the queue and redelivered</strong> — immediately, with no delay, no attempt limit and no backoff. If the exception is deterministic, which it usually is, you get a tight loop that hammers the broker and never makes progress.</p>
+<figure class="figure">
+  <svg viewBox="0 0 900 435" role="img" aria-label="With the default, a listener throws, the container nacks with requeue true, the message returns to the head of the queue, and the next delivery throws again &mdash; a loop with hot CPU and no progress. With default-requeue-rejected false, the nack carries requeue false: a queue with a dead-letter exchange routes the message to it, a queue without drops it.">
+    <defs>
+      <marker id="arw-spring-12-03-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="edge-label edge-label--strong" x="230" y="30" text-anchor="middle">with the default</text>
+    <text class="edge-label edge-label--strong" x="670" y="30" text-anchor="middle">with default-requeue-rejected = false</text>
+    <rect class="node" x="40" y="56" width="380" height="52" rx="4"/>
+    <text class="label" x="230" y="79" text-anchor="middle">listener throws</text>
+    <text class="label label--sub" x="230" y="96" text-anchor="middle">SQLException &mdash; any deterministic exception</text>
+    <path class="edge" d="M 230 108 L 230 136" marker-end="url(#arw-spring-12-03-a)"/>
+    <rect class="node node--warn" x="40" y="136" width="380" height="52" rx="4"/>
+    <text class="label" x="230" y="159" text-anchor="middle">basic.nack(requeue = true)</text>
+    <text class="label label--sub" x="230" y="176" text-anchor="middle">defaultRequeueRejected = true</text>
+    <path class="edge" d="M 230 188 L 230 216" marker-end="url(#arw-spring-12-03-a)"/>
+    <rect class="node" x="40" y="216" width="380" height="52" rx="4"/>
+    <text class="label" x="230" y="239" text-anchor="middle">message returns to the</text>
+    <text class="label label--sub" x="230" y="256" text-anchor="middle">head of the queue</text>
+    <path class="edge" d="M 230 268 L 230 296" marker-end="url(#arw-spring-12-03-a)"/>
+    <rect class="node node--bad" x="40" y="296" width="380" height="52" rx="4"/>
+    <text class="label" x="230" y="319" text-anchor="middle">next delivery, same</text>
+    <text class="label label--sub" x="230" y="336" text-anchor="middle">exception &mdash; nack again</text>
+    <path class="edge edge--return" d="M 40 322 L 22 322 L 22 162 L 40 162" marker-end="url(#arw-spring-12-03-a)"/>
+    <text class="edge-label" x="230" y="378" text-anchor="middle">the loop: hot CPU, no progress, the queue never drains</text>
+    <rect class="node node--good" x="480" y="56" width="380" height="52" rx="4"/>
+    <text class="label" x="670" y="79" text-anchor="middle">default-requeue-rejected</text>
+    <text class="label label--sub" x="670" y="96" text-anchor="middle">= false</text>
+    <path class="edge" d="M 670 108 L 670 136" marker-end="url(#arw-spring-12-03-a)"/>
+    <rect class="node" x="480" y="136" width="380" height="52" rx="4"/>
+    <text class="label" x="670" y="159" text-anchor="middle">basic.nack(requeue = false)</text>
+    <text class="label label--sub" x="670" y="176" text-anchor="middle">or basic.reject</text>
+    <path class="edge" d="M 670 188 L 670 224"/>
+    <path class="edge" d="M 670 224 L 570 224 L 570 268" marker-end="url(#arw-spring-12-03-a)"/>
+    <path class="edge" d="M 670 224 L 770 224 L 770 268" marker-end="url(#arw-spring-12-03-a)"/>
+    <rect class="node node--good" x="480" y="268" width="180" height="76" rx="4"/>
+    <text class="label" x="570" y="300" text-anchor="middle">queue has a DLX</text>
+    <text class="label label--sub" x="570" y="318" text-anchor="middle">message is routed to it</text>
+    <rect class="node node--bad" x="680" y="268" width="180" height="76" rx="4"/>
+    <text class="label" x="770" y="300" text-anchor="middle">queue has no DLX</text>
+    <text class="label label--sub" x="770" y="318" text-anchor="middle">message is DROPPED</text>
+    <text class="edge-label" x="450" y="410" text-anchor="middle">the DLX is configured on the queue, by the broker &mdash; Spring's recoverer bypasses the broker entirely</text>
+  </svg>
+  <figcaption>
+    <strong>With the default, a throwing listener nacks with <code>requeue=true</code> and the message returns to the head of the queue — a tight loop with no delay, no limit and no backoff.</strong>
+    The exception is usually deterministic, so the same message is redelivered forever: hot CPU, no progress, a queue that never drains. Setting <code>default-requeue-rejected=false</code> makes the container nack with <code>requeue=false</code> (or <code>basic.reject</code>), and then the broker decides: a queue with a dead-letter exchange routes the message to it, a queue with none drops it. The DLX is configured on the queue, by the broker — Spring's <code>RepublishMessageRecoverer</code> bypasses the broker entirely (§3.4) — so the two properties have to be set together, and setting only one of them fails quietly.
+  </figcaption>
+</figure>
 
-set default-requeue-rejected=false instead:
-   │
-   ▼
-basic.nack(deliveryTag, requeue=false)  or  basic.reject
-   │
-   ├─▶ queue has a dead-letter exchange  ──▶ message routed to it
-   └─▶ queue has no DLX                     ──▶ message DROPPED
-
-the DLX is configured on the QUEUE, by the broker.
-Spring's recoverer bypasses the broker entirely (§3.4).</code></pre><p>This is why almost every production RabbitMQ service ends up with a <code>RepublishMessageRecoverer</code> or a <code>RejectAndDontRequeueRecoverer</code> and a dead-letter exchange, and why &ldquo;our queue was at 100% and CPU was pinned&rdquo; is a familiar incident. The two properties have to be set together, and setting only one of them fails quietly.</p><h3 class="vol__h3" id="33-concurrency-and-prefetch">3.3 Concurrency and Prefetch</h3><p>RabbitMQ's prefetch is the number of unacknowledged messages the broker will hand a consumer at once, and it defaults to <strong>250 per consumer</strong> in the Spring container. Multiply it by your consumer count and that is the maximum a client can be holding — a real constraint, because a 250-message buffer means the broker has already delivered work it cannot reclaim, and a consumer restart replays all of it.</p><pre class="snippet" data-lang="properties"><code>spring.rabbitmq.listener.simple.concurrency=10
+<p>This is why almost every production RabbitMQ service ends up with a <code>RepublishMessageRecoverer</code> or a <code>RejectAndDontRequeueRecoverer</code> and a dead-letter exchange, and why &ldquo;our queue was at 100% and CPU was pinned&rdquo; is a familiar incident. The two properties have to be set together, and setting only one of them fails quietly.</p><h3 class="vol__h3" id="33-concurrency-and-prefetch">3.3 Concurrency and Prefetch</h3><p>RabbitMQ's prefetch is the number of unacknowledged messages the broker will hand a consumer at once, and it defaults to <strong>250 per consumer</strong> in the Spring container. Multiply it by your consumer count and that is the maximum a client can be holding — a real constraint, because a 250-message buffer means the broker has already delivered work it cannot reclaim, and a consumer restart replays all of it.</p><pre class="snippet" data-lang="properties"><code>spring.rabbitmq.listener.simple.concurrency=10
 spring.rabbitmq.listener.simple.max-concurrency=20
 spring.rabbitmq.listener.simple.prefetch=10
 spring.rabbitmq.listener.simple.default-requeue-rejected=false
