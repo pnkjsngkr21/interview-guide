@@ -16,7 +16,7 @@
 
 <main class="main main--guide" id="main">
 
-<header class="masthead"><p class="masthead__eyebrow">Database — SQL — QUERIES, JOINS, CTES &amp; WINDOW FUNCTIONS</p><h1>The Database Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>10 chapters</li><li>32 questions</li><li>49 diagrams</li></ul></header>
+<header class="masthead"><p class="masthead__eyebrow">Database — SQL — QUERIES, JOINS, CTES &amp; WINDOW FUNCTIONS</p><h1>The Database Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>10 chapters</li><li>32 questions</li><li>1 figure</li><li>48 text blocks</li></ul></header>
 
 <div class="toolbar"><div class="search"><input type="search" data-filter-input placeholder="Filter chapters — press /" aria-label="Filter chapters"><span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span></div><div class="pager"><a class="pager__prev" href="database-02-sql-ddl-dml-constraints.html">&larr; SQL — DDL, DML &amp; CONSTRAINTS</a><a class="pager__next" href="database-04-indexes-query-planning-execution.html">INDEXES, QUERY PLANNING &amp; EXECUTION &rarr;</a></div></div>
 
@@ -81,25 +81,77 @@ id   ord  sku     qty  price         108    3   2024-07-09  PENDING      NULL
   SUM over June  (101,102,103,104,105)                = 313.00
   SUM over July  (106,107,108=NULL,109)               = 127.50
   COUNT(order_items)                                 =  10
-  COUNT(DISTINCT sku in order_items)                  =   5  (BOOK PEN DESK LAMP CABLE)</code></pre><aside class="callout callout--must"><span class="callout__label">Must remember</span><p>SQL questions are row-set questions, and you cannot reason about a row set you have not written down. When you review a query, do not ask &quot;is this correct&quot; — ask &quot;how many rows does this produce, and can I enumerate them&quot;. A candidate who can enumerate the rows of a five-table join from memory is demonstrating something no <code>EXPLAIN</code> output can.</p></aside><h3 class="vol__h3" id="12-the-eight-clauses-and-the-logical-pipeline">1.2 The Eight Clauses and the Logical Pipeline</h3><p>The single most consequential fact about SQL is that it is <em>declarative</em>: you name a result, and the engine chooses a route. A consequence people miss is that the clauses are not evaluated in the order you type them, and the order they are evaluated in is fixed by the standard, not by your text.</p><pre class="diagram"><code>  what you type                      what the engine builds
-  ─────────────                      ─────────────────────
-  SELECT  a, b, c                    ┌─────────────────────────────────────┐
-  FROM    t1 JOIN t2 ON ...          │ 7. LIMIT / FETCH FIRST n ROWS       │
-  WHERE   ...                     ┐  ├─────────────────────────────────────┤
-  GROUP BY a                    │  │ 6. ORDER BY ...                     │
-  HAVING  count(*) &gt; 1          │  │  ├─────────────────────────────────────┤
-  SELECT  a, sum(b)              │  │ 5. SELECT list (expressions,        │
-  FROM    t1 JOIN t2 ON ...      │  │    aliases minted here)             │
-  WHERE   ...                    │  │  ├─────────────────────────────────────┤
-  GROUP BY a                    ▼  │ 4. HAVING (filters whole groups)    │
-  HAVING  count(*) &gt; 1              │  ├─────────────────────────────────────┤
-  ORDER BY 2                   │  │ 3. GROUP BY (collapse to groups)    │
-  LIMIT    10                   │  ▼  ├─────────────────────────────────────┤
-                                 │ 2. WHERE (filters individual rows)   │
-                                 ▼  ├─────────────────────────────────────┤
-                                   │ 1. FROM (produces the bag, incl.     │
-                                   │     joins, subqueries, set ops)      │
-                                   └─────────────────────────────────────┘</code></pre><p><code>DISTINCT</code> sits between the <code>SELECT</code> list and <code>ORDER BY</code> in the standard's ordering, which is why <code>SELECT DISTINCT</code> forces a global uniqueness requirement on the entire output row <em>before</em> anything is ordered.</p><p>Three consequences fall straight out of the picture, and they are the backbone of the next eight chapters.</p><ol><li><strong><code>WHERE</code> sees rows, <code>HAVING</code> sees groups.</strong> A predicate in <code>WHERE</code> is applied before grouping, so it cannot reference an aggregate — there is no group yet. A predicate in <code>HAVING</code> is applied after grouping, so it <em>can</em> reference an aggregate and an aliased expression, and cannot reference a column that was neither grouped nor aggregated.</li><li><strong>Aliases do not exist until step 5.</strong> Anything named in steps 1–4 must be a real column or a fully re-derivable expression. This is not a parser quirk; it is a direct consequence of the pipeline, and the <code>SELECT</code>-alias-in-<code>WHERE</code> error is the engine telling you so.</li><li><strong>Anything that needs to see the final rows goes late.</strong> <code>ORDER BY</code> and <code>LIMIT</code> are steps 6 and 7, which is the <em>only</em> reason a window function can be filtered at all — you cannot do it in <code>WHERE</code> (step 2) or <code>HAVING</code> (step 4), so you wrap the query and filter the outer result.</li></ol><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;WHY CAN'T I USE A <code>SELECT</code> ALIAS IN <code>WHERE</code>?&quot;</strong></p>
+  COUNT(DISTINCT sku in order_items)                  =   5  (BOOK PEN DESK LAMP CABLE)</code></pre><aside class="callout callout--must"><span class="callout__label">Must remember</span><p>SQL questions are row-set questions, and you cannot reason about a row set you have not written down. When you review a query, do not ask &quot;is this correct&quot; — ask &quot;how many rows does this produce, and can I enumerate them&quot;. A candidate who can enumerate the rows of a five-table join from memory is demonstrating something no <code>EXPLAIN</code> output can.</p></aside><h3 class="vol__h3" id="12-the-eight-clauses-and-the-logical-pipeline">1.2 The Eight Clauses and the Logical Pipeline</h3><p>The single most consequential fact about SQL is that it is <em>declarative</em>: you name a result, and the engine chooses a route. A consequence people miss is that the clauses are not evaluated in the order you type them, and the order they are evaluated in is fixed by the standard, not by your text.</p><figure class="figure">
+  <svg viewBox="0 0 900 800" role="img" aria-label="The engine evaluates the clauses of a query in one fixed order, FROM first and LIMIT last, the reverse of the order they are typed. FROM builds the row bag, WHERE filters rows, GROUP BY collapses them to groups, HAVING filters groups, the SELECT list mints expressions and aliases, then ORDER BY sorts and LIMIT truncates.">
+    <defs>
+      <marker id="arw-database-03-01-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="label" x="175" y="54" text-anchor="middle">WHAT YOU TYPE</text>
+    <text class="label" x="615" y="54" text-anchor="middle">WHAT THE ENGINE EVALUATES</text>
+    <rect class="node" x="60" y="84" width="230" height="46" rx="5"/>
+    <text class="label" x="175" y="105" text-anchor="middle">SELECT</text>
+    <text class="edge-label" x="175" y="123" text-anchor="middle">step 5</text>
+    <rect class="node" x="60" y="191" width="230" height="46" rx="5"/>
+    <text class="label" x="175" y="212" text-anchor="middle">FROM</text>
+    <text class="edge-label" x="175" y="230" text-anchor="middle">step 1</text>
+    <rect class="node" x="60" y="298" width="230" height="46" rx="5"/>
+    <text class="label" x="175" y="319" text-anchor="middle">WHERE</text>
+    <text class="edge-label" x="175" y="337" text-anchor="middle">step 2</text>
+    <rect class="node" x="60" y="405" width="230" height="46" rx="5"/>
+    <text class="label" x="175" y="426" text-anchor="middle">GROUP BY</text>
+    <text class="edge-label" x="175" y="444" text-anchor="middle">step 3</text>
+    <rect class="node" x="60" y="512" width="230" height="46" rx="5"/>
+    <text class="label" x="175" y="533" text-anchor="middle">HAVING</text>
+    <text class="edge-label" x="175" y="551" text-anchor="middle">step 4</text>
+    <rect class="node" x="60" y="619" width="230" height="46" rx="5"/>
+    <text class="label" x="175" y="640" text-anchor="middle">ORDER BY</text>
+    <text class="edge-label" x="175" y="658" text-anchor="middle">step 6</text>
+    <rect class="node" x="60" y="726" width="230" height="46" rx="5"/>
+    <text class="label" x="175" y="747" text-anchor="middle">LIMIT</text>
+    <text class="edge-label" x="175" y="765" text-anchor="middle">step 7</text>
+    <rect class="node node--accent" x="390" y="84" width="450" height="72" rx="5"/>
+    <text class="label" x="410" y="111">1. FROM</text>
+    <text class="edge-label" x="410" y="131">produces the bag:</text>
+    <text class="edge-label" x="410" y="148">joins, subqueries, set ops</text>
+    <path class="edge" d="M 615 156 L 615 188" marker-end="url(#arw-database-03-01-a)"/>
+    <text class="edge-label" x="630" y="176">the row bag</text>
+    <rect class="node node--accent" x="390" y="188" width="450" height="72" rx="5"/>
+    <text class="label" x="410" y="215">2. WHERE</text>
+    <text class="edge-label" x="410" y="235">filters individual rows</text>
+    <path class="edge" d="M 615 260 L 615 292" marker-end="url(#arw-database-03-01-a)"/>
+    <text class="edge-label" x="630" y="280">surviving rows</text>
+    <rect class="node node--accent" x="390" y="292" width="450" height="72" rx="5"/>
+    <text class="label" x="410" y="319">3. GROUP BY</text>
+    <text class="edge-label" x="410" y="339">collapses rows to groups</text>
+    <path class="edge" d="M 615 364 L 615 396" marker-end="url(#arw-database-03-01-a)"/>
+    <text class="edge-label" x="630" y="384">one row per group</text>
+    <rect class="node node--accent" x="390" y="396" width="450" height="72" rx="5"/>
+    <text class="label" x="410" y="423">4. HAVING</text>
+    <text class="edge-label" x="410" y="443">filters whole groups,</text>
+    <text class="edge-label" x="410" y="460">can reference aggregates</text>
+    <path class="edge" d="M 615 468 L 615 500" marker-end="url(#arw-database-03-01-a)"/>
+    <text class="edge-label" x="630" y="488">groups that pass</text>
+    <rect class="node node--accent" x="390" y="500" width="450" height="72" rx="5"/>
+    <text class="label" x="410" y="527">5. SELECT list</text>
+    <text class="edge-label" x="410" y="547">expressions and aliases</text>
+    <text class="edge-label" x="410" y="564">minted here</text>
+    <path class="edge" d="M 615 572 L 615 596" marker-end="url(#arw-database-03-01-a)"/>
+    <text class="edge-label" x="630" y="588">output rows</text>
+    <rect class="node node--accent" x="390" y="596" width="450" height="72" rx="5"/>
+    <text class="label" x="410" y="623">6. ORDER BY</text>
+    <text class="edge-label" x="410" y="643">sorts the finished rows</text>
+    <path class="edge" d="M 615 668 L 615 700" marker-end="url(#arw-database-03-01-a)"/>
+    <text class="edge-label" x="630" y="688">ordered rows</text>
+    <rect class="node node--accent" x="390" y="700" width="450" height="72" rx="5"/>
+    <text class="label" x="410" y="727">7. LIMIT / FETCH FIRST</text>
+    <text class="edge-label" x="410" y="747">truncates to n rows</text>
+  </svg>
+  <figcaption>
+    <strong>The engine evaluates the clauses in a fixed order that runs FROM first and LIMIT last &mdash; the reverse of the order you type them.</strong> Three steps carry the consequences that follow: <code>WHERE</code> (step 2) sees individual rows while <code>HAVING</code> (step 4) sees whole groups, and the <code>SELECT</code> list (step 5) is where expressions are computed and aliases minted, which is why a <code>WHERE</code> clause cannot name one.
+  </figcaption>
+</figure><p><code>DISTINCT</code> sits between the <code>SELECT</code> list and <code>ORDER BY</code> in the standard's ordering, which is why <code>SELECT DISTINCT</code> forces a global uniqueness requirement on the entire output row <em>before</em> anything is ordered.</p><p>Three consequences fall straight out of the picture, and they are the backbone of the next eight chapters.</p><ol><li><strong><code>WHERE</code> sees rows, <code>HAVING</code> sees groups.</strong> A predicate in <code>WHERE</code> is applied before grouping, so it cannot reference an aggregate — there is no group yet. A predicate in <code>HAVING</code> is applied after grouping, so it <em>can</em> reference an aggregate and an aliased expression, and cannot reference a column that was neither grouped nor aggregated.</li><li><strong>Aliases do not exist until step 5.</strong> Anything named in steps 1–4 must be a real column or a fully re-derivable expression. This is not a parser quirk; it is a direct consequence of the pipeline, and the <code>SELECT</code>-alias-in-<code>WHERE</code> error is the engine telling you so.</li><li><strong>Anything that needs to see the final rows goes late.</strong> <code>ORDER BY</code> and <code>LIMIT</code> are steps 6 and 7, which is the <em>only</em> reason a window function can be filtered at all — you cannot do it in <code>WHERE</code> (step 2) or <code>HAVING</code> (step 4), so you wrap the query and filter the outer result.</li></ol><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;WHY CAN'T I USE A <code>SELECT</code> ALIAS IN <code>WHERE</code>?&quot;</strong></p>
 <p>The common answer is &quot;because SQL is not a programming language&quot; or &quot;it's a syntax rule&quot;. Both are true and neither explains anything. The real reason is the pipeline: at the moment <code>WHERE</code> runs, the engine has produced a bag of rows from <code>FROM</code> and is about to filter them. <strong>The alias you want does not exist yet</strong> — aliases are minted at step 5, three steps later, and naming them earlier would mean inventing a name for a value the engine has not computed.</p>
 <pre class="snippet" data-lang="sql"><code>SELECT qty * price AS line_total
 FROM   order_items
