@@ -16,7 +16,7 @@
 
 <main class="main main--guide" id="main">
 
-<header class="masthead"><p class="masthead__eyebrow">Database — POSTGRESQL</p><h1>The Database Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>11 chapters</li><li>99 questions</li><li>16 diagrams</li></ul></header>
+<header class="masthead"><p class="masthead__eyebrow">Database — POSTGRESQL</p><h1>The Database Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>11 chapters</li><li>99 questions</li><li>9 figures</li><li>7 text blocks</li></ul></header>
 
 <div class="toolbar"><div class="search"><input type="search" data-filter-input placeholder="Filter chapters — press /" aria-label="Filter chapters"><span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span></div><div class="pager"><a class="pager__prev" href="database-06-schema-design-partitioning-scaling.html">&larr; SCHEMA DESIGN, PARTITIONING &amp; SCALING</a><a class="pager__next" href="database-08-mysql.html">MYSQL &rarr;</a></div></div>
 
@@ -59,34 +59,91 @@ Answer as a flush-left wrapped paragraph.
 - [Title](url) — description</code></pre><p>Not every chapter uses every slot. The callouts are the ones that appear at all, and this is the legend:</p><div class="table-wrap"><table><thead><tr><th>Callout</th><th>Means</th></tr></thead><tbody><tr><td><code>INTERVIEW TRAP</code></td><td>the common answer that a senior candidate should catch and correct</td></tr><tr><td><code>TRADE-OFF</code></td><td>a decision with both sides, and the condition that flips the answer</td></tr><tr><td><code>SCALING REALITY CHECK</code></td><td>the specific number where this stops working</td></tr><tr><td><code>PRODUCTION RELEVANCE</code></td><td>why this matters outside an interview</td></tr><tr><td><code>MUST REMEMBER</code></td><td>the one fact to carry forward</td></tr><tr><td><code>PRODUCTION SCENARIO</code></td><td>a five-line incident: problem, investigation, root cause, solution, prevention</td></tr><tr><td><code>STAFF-LEVEL CONSIDERATION</code></td><td>the org or process concern worth raising unprompted</td></tr></tbody></table></div><p>Each chapter ends with <code>Common Mistakes</code> — the things that are wrong often enough to be worth naming — and with <code>Further Reading</code>, which points at the primary source rather than a tutorial. Volumes end with an <code>Interview Scenario Bank</code> whose questions are weighted toward design trade-offs, and the bank stops when a question would repeat one already asked, so coverage of a concept is not the same thing as coverage of a concept's easy version.</p><p>One volume-specific note before you start. PostgreSQL's behaviour is versioned, and several of the things candidates are most confidently wrong about changed in a specific release. Non-recursive CTEs were inlined by default in version 12. <code>hash_mem_multiplier</code> arrived in</p><ol><li>Virtual generated columns arrived in 18. Enum values became usable in the transaction that added them in 12. Where this volume states a behaviour, it states the version, and where it is not certain of the current state it says to check the documentation rather than guessing. That is not hedging; an interview answer that names the version is a stronger answer than one that does not.</li></ol><h3 class="vol__h3" id="continuing-from-volume-6">Continuing From Volume 6</h3><div class="table-wrap"><table><thead><tr><th>Volume</th><th>Coverage</th></tr></thead><tbody><tr><td>Volume 1</td><td>Fundamentals &amp; the Relational Model — storage engine vs query engine, pages and slotted pages, heaps, the relational model, keys, normalisation, the algebra, the shape of the scaling problem</td></tr><tr><td>Volume 2</td><td>SQL — DDL, DML &amp; Constraints — schema evolution under <code>ACCESS EXCLUSIVE</code>, numeric precision, what each constraint costs, <code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code>/<code>TRUNCATE</code> write paths, three-valued logic</td></tr><tr><td>Volume 3</td><td>SQL — Queries, Joins, CTEs &amp; Window Functions — join semantics and how <code>WHERE</code> silently makes an outer join inner, set operations, <code>WITH</code>, window frames, <code>DISTINCT ON</code>, <code>LATERAL</code></td></tr><tr><td>Volume 4</td><td>Indexes, Query Planning &amp; Execution — B+ trees, page splits, leftmost prefix, index types, <code>EXPLAIN</code> and statistics, join algorithms, cost estimation</td></tr><tr><td>Volume 5</td><td>Transactions, Isolation Levels &amp; Concurrency — ACID, the anomalies, the four levels and what each actually prevents, MVCC theory, lock escalation, deadlocks, two-phase commit</td></tr><tr><td>Volume 6 (this book)</td><td>Schema Design, Partitioning &amp; Scaling — grain, normalisation, key choice, indexing strategy, partitioning and its operational cost, denormalisation done on purpose, schema evolution at scale</td></tr><tr><td>Volume 7 (this book)</td><td>PostgreSQL — process model, storage, MVCC in practice, types and JSONB, SQL feature depth, indexes, query planning, isolation and locking, autovacuum and operations</td></tr><tr><td>Volume 8</td><td>MySQL — InnoDB clustered indexes, next-key locking, the undo log as the read path, purge, replication</td></tr><tr><td>Volume 9</td><td>Redis &amp; Caching Strategies — cache-aside, stampede, penetration, eviction, persistence, replication</td></tr><tr><td>Volume 10</td><td>NoSQL &amp; Distributed Stores — Cassandra, DynamoDB, MongoDB; partitioning, consistency, CAP as a database question</td></tr><tr><td>Volume 11</td><td>S3, Elasticsearch &amp; the Database Interview Bank — object storage semantics, inverted indexes, the consolidated bank</td></tr></tbody></table></div><h3 class="vol__h3" id="table-of-contents-volume-7">Table of Contents — Volume 7</h3><ul><li>Chapter 1 — Architecture &amp; the Process Model</li><li>Chapter 2 — Storage: Pages, Heap Files &amp; TOAST</li><li>Chapter 3 — MVCC in Practice</li><li>Chapter 4 — Types, Extensions &amp; JSONB</li><li>Chapter 5 — SQL Feature Depth</li><li>Chapter 6 — Indexes &amp; Indexing</li><li>Chapter 7 — Query Planning</li><li>Chapter 8 — Transactions, Isolation &amp; Locking</li><li>Chapter 9 — Autovacuum, Bloat &amp; the Operational Surface</li><li>Chapter 10 — Interview Scenario Bank</li></ul><hr><h1 class="vol__h1" id="part-1-postgresql">Part 1 — PostgreSQL</h1></section>
 
 <section id="chapter-1-architecture-and-the-process-model" data-filter-target><h2 class="vol__h2">Chapter 1 — Architecture &amp; the Process Model</h2><p>The first thing to get right about PostgreSQL is what it <em>is</em> at the operating system level, because almost every operational question about it — connection limits, memory sizing, why the database will not start, why a query killed one other query — is answered by the process model and by nothing else. The mental model most people carry is &quot;a server process handles requests&quot;, and it is wrong in a specific, consequential way.</p><h3 class="vol__h3" id="11-the-wrong-mental-model">1.1 The Wrong Mental Model</h3><p>The intuitive picture is a service: a listening socket, a thread pool, and a shared heap where queries run. PostgreSQL is not that. It is a <strong>process manager with a set of independent operating system processes</strong>, and the unit of concurrency is the process, not the thread. When a client connects, the postmaster <code>fork()</code>s a new backend process. That backend handles that one connection for its entire lifetime, then exits when the client disconnects. There is no pool, no thread sharing, and no work stealing — a backend that goes away takes its memory with it.</p><p>This is a deliberate design, not an accident of implementation. Separate processes mean a backend crash takes down one connection rather than the server, that a runaway query's memory is bounded by the OS rather than by the server's willingness to admit it is misbehaving, and that many of the internal operations — a <code>VACUUM</code>, a <code>REINDEX</code>, a parallel query worker — can run in parallel with almost no locking between them. The price is paid in three places: process creation cost, per-process memory overhead, and the absence of in-process parallelism inside a single query unless you opt into parallel workers explicitly.</p><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;HOW MANY CONNECTIONS CAN POSTGRESQL HANDLE?&quot;</strong></p>
-<p>The reflexive answer is &quot;hundreds, or a thousand — it's lightweight and fully concurrent.&quot; That answer is wrong, and wrong in the way that matters operationally, because the number that binds is not the connection count but the <em>memory</em> multiplication behind it. One connection is one process with a multi-megabyte private baseline, and every query that backend runs can allocate <code>work_mem</code> per plan node per parallel worker on top of that. The correct answer has three parts: <code>max_connections</code> (default <strong>100</strong>) is a hard ceiling that the postmaster enforces by refusing connections, it is not a performance target, and the real capacity question is <code>max_connections × per-connection baseline + concurrent memory per query</code> measured against <code>shared_buffers</code> and the machine's RAM. On a 16 GB instance, 100 connections is already a large number. On a 256 GB instance with big <code>shared_buffers</code>, a few hundred is defensible. The number that does not move is the one that matters: PostgreSQL does not get more efficient per connection as you add them, and past the cache-warm point the marginal connection costs more than it returns.</p></blockquote><h3 class="vol__h3" id="12-the-postmaster-and-its-children">1.2 The Postmaster and Its Children</h3><p>At startup the postmaster reads the configuration, recovers or initialises the data directory, and then becomes a supervisor. It owns the shared memory segment, the lock manager, the buffer pool, and the listening sockets. It does not execute queries. Its children do.</p><pre class="diagram"><code>                    ┌──────────────────────────────────┐
-                    │          postmaster              │
-                    │  owns: shared memory, lock mgr,  │
-                    │        buffer pool, sockets,     │
-                    │        WAL, signal handling      │
-                    └───────────────┬──────────────────┘
-                                    │  fork() per event
-        ┌───────────────┬───────────┼───────────┬────────────────┐
-        │               │           │           │                │
-        ▼               ▼           ▼           ▼                ▼
-  ┌──────────┐   ┌──────────┐ ┌─────────┐ ┌──────────┐  ┌────────────┐
-  │ backend  │   │ backend  │ │ autovac │ │ checkpointer│ │ walwriter  │
-  │ pid 4101 │   │ pid 4102 │ │ launcher│ │           │  │            │
-  │ conn →   │   │ conn →   │ │         │ │ fsyncs   │  │ ships WAL  │
-  │ 10.0.0.5 │   │ 10.0.0.9 │ │ spawns  │ │ at       │  │ to standbys│
-  └──────────┘   └──────────┘ │ workers │ │ checkpoint│  └────────────┘
-                            └────┬────┘ └──────────┘
-                                 │ fork()
-                    ┌────────────┼────────────┬───────────────┐
-                    ▼            ▼            ▼               ▼
-              ┌──────────┐ ┌──────────┐ ┌───────────┐  ┌────────────┐
-              │ vacuum   │ │ vacuum   │ │ parallel  │  │ logical    │
-              │ worker 1 │ │ worker 2 │ │ worker    │  │ replication│
-              │          │ │          │ │ (per query│  │ / bgworker │
-              └──────────┘ └──────────┘ └───────────┘  └────────────┘
+<p>The reflexive answer is &quot;hundreds, or a thousand — it's lightweight and fully concurrent.&quot; That answer is wrong, and wrong in the way that matters operationally, because the number that binds is not the connection count but the <em>memory</em> multiplication behind it. One connection is one process with a multi-megabyte private baseline, and every query that backend runs can allocate <code>work_mem</code> per plan node per parallel worker on top of that. The correct answer has three parts: <code>max_connections</code> (default <strong>100</strong>) is a hard ceiling that the postmaster enforces by refusing connections, it is not a performance target, and the real capacity question is <code>max_connections × per-connection baseline + concurrent memory per query</code> measured against <code>shared_buffers</code> and the machine's RAM. On a 16 GB instance, 100 connections is already a large number. On a 256 GB instance with big <code>shared_buffers</code>, a few hundred is defensible. The number that does not move is the one that matters: PostgreSQL does not get more efficient per connection as you add them, and past the cache-warm point the marginal connection costs more than it returns.</p></blockquote><h3 class="vol__h3" id="12-the-postmaster-and-its-children">1.2 The Postmaster and Its Children</h3><p>At startup the postmaster reads the configuration, recovers or initialises the data directory, and then becomes a supervisor. It owns the shared memory segment, the lock manager, the buffer pool, and the listening sockets. It does not execute queries. Its children do.</p><figure class="figure">
+  <svg viewBox="0 0 900 490" role="img" aria-label="The postmaster tree. The postmaster owns the shared memory, the lock manager, the buffer pool, the sockets, the WAL and signal handling. It forks a backend per connection — one process per connection — plus fixed-count workers: the autovacuum launcher, which forks vacuum and parallel workers, the checkpointer and the walwriter.">
+    <defs>
+      <marker id="arw-database-07-01-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="300" y="28" width="300" height="76" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="52" text-anchor="middle">postmaster</text>
+    <text class="edge-label" x="450" y="68" text-anchor="middle">owns: shared memory, lock mgr,</text>
+    <text class="edge-label" x="450" y="82" text-anchor="middle">buffer pool, sockets, WAL,</text>
+    <text class="edge-label" x="450" y="96" text-anchor="middle">signal handling</text>
 
-  ONE PROCESS PER CONNECTION.  THE REST ARE FIXED-COUNT WORKERS THAT PULL FROM
-  SHARED, PRE-COUNTED SLOTS — NOT ONE PER CLIENT.</code></pre><p>Two design consequences follow directly from this picture and both are worth stating out loud in an interview.</p><p><strong>Backends are not pooled and not shared.</strong> A backend exists for exactly one connection. When the connection drops, the process exits. This is why a service that opens a new database connection per HTTP request — a common and entirely reasonable-looking pattern in a stateless service — will drive the postmaster's fork rate hard enough to matter. Fork is not free; on Linux with a large <code>shared_buffers</code> segment, the page table copy is the dominant cost, and a fork storm degrades <em>every</em> connection's latency, not just the new ones. The tell is a rising connection count made of very short-lived sessions, visible in <code>pg_stat_database.numbackends</code> moving without a matching change in application load.</p><p><strong>Fixed-count workers come from a pre-allocated pool.</strong> <code>max_worker_processes</code> is the total number of background worker slots the cluster has, and autovacuum workers, logical replication workers, parallel query workers, and extension background workers all draw from it. <code>autovacuum_max_workers</code> (default <strong>3</strong>) is a sub-cap. <code>max_wal_senders</code> (default <strong>10</strong>) is a sub-cap on the replication side. When the pool is exhausted the symptom is subtle: a parallel query gets fewer workers than configured — the plan shows a <code>Gather</code> with fewer children, not an error — and autovacuum falls further behind schedule, silently. The arithmetic that catches teams out is that 3 autovacuum + 2 logical replication + 8 parallel workers exceeds a <code>max_worker_processes</code> of 8, and the setting does not complain.</p><h3 class="vol__h3" id="13-memory-per-connection">1.3 Memory Per Connection</h3><p>This is the calculation that decides whether a connection count is safe, and it is worth being able to do in your head.</p><p>A backend's private memory falls into three buckets.</p><p><strong>The fixed baseline.</strong> Every backend gets private memory it holds for its whole life: a private portion of the buffer pool's local buffers, a <code>BackendData</code> structure, per-backend state for locks, the client connection buffers, and the memory PostgreSQL allocates for things like the <code>pg_stat</code> hash tables' local portions. The commonly cited figure is roughly <strong>2–5 MB per connection</strong> for this baseline, and the real cost is usually higher than people assume because it is per <em>backend</em>, not per query, and it is resident whether or not the connection is running anything.</p><p><strong>Shared memory, which is not per connection.</strong> The buffer pool (<code>shared_buffers</code>, default <strong>128 MB</strong>), the lock manager's shared arrays, and the <code>pg_stat</code> shared structures are shared across all backends. Every backend maps the same pages. This is the part that makes PostgreSQL's memory efficiency reasonable at moderate connection counts: 100 backends do not cost 100 times the buffer pool. It is also the part that makes the <em>total</em> hard to reason about, because a large <code>shared_buffers</code> is a large fixed cost on a machine where you wanted the memory for connections.</p><p><strong>Per-query working memory, which is unbounded and is the actual danger.</strong> <code>work_mem</code> is a per-<em>node</em> limit, not per query and not per connection. A plan with a hash join, a sort, a materialise, and a bitmap heap scan can allocate <code>work_mem</code> at each of those nodes, and hash operations are further scaled by <code>hash_mem_multiplier</code> (default <strong>2.0</strong>, PostgreSQL 16+). Every parallel worker runs its own copy of the subtree with its own allocations. So the honest formula is:</p><pre class="diagram"><code>  peak RAM  ≈  shared_buffers
+    <path class="edge" d="M 450 104 L 450 128" marker-end="url(#arw-database-07-01-a)"/>
+    <text class="edge-label" x="470" y="120" text-anchor="start">fork() per event</text>
+    <path class="edge" d="M 120 128 L 780 128" stroke-width="0.8"/>
+
+    <path class="edge" d="M 120 128 L 120 150" marker-end="url(#arw-database-07-01-a)"/>
+    <rect class="node" x="45" y="150" width="150" height="80" rx="4"/>
+    <text class="edge-label edge-label--strong" x="120" y="168" text-anchor="middle">backend</text>
+    <text class="edge-label" x="120" y="184" text-anchor="middle">pid 4101</text>
+    <text class="edge-label" x="120" y="200" text-anchor="middle">conn → 10.0.0.5</text>
+
+    <path class="edge" d="M 285 128 L 285 150" marker-end="url(#arw-database-07-01-a)"/>
+    <rect class="node" x="210" y="150" width="150" height="80" rx="4"/>
+    <text class="edge-label edge-label--strong" x="285" y="168" text-anchor="middle">backend</text>
+    <text class="edge-label" x="285" y="184" text-anchor="middle">pid 4102</text>
+    <text class="edge-label" x="285" y="200" text-anchor="middle">conn → 10.0.0.9</text>
+
+    <path class="edge" d="M 450 128 L 450 150" marker-end="url(#arw-database-07-01-a)"/>
+    <rect class="node" x="375" y="150" width="150" height="80" rx="4"/>
+    <text class="edge-label edge-label--strong" x="450" y="168" text-anchor="middle">autovacuum</text>
+    <text class="edge-label" x="450" y="184" text-anchor="middle">launcher</text>
+    <text class="edge-label" x="450" y="200" text-anchor="middle">spawns workers</text>
+
+    <path class="edge" d="M 615 128 L 615 150" marker-end="url(#arw-database-07-01-a)"/>
+    <rect class="node" x="540" y="150" width="150" height="80" rx="4"/>
+    <text class="edge-label edge-label--strong" x="615" y="168" text-anchor="middle">checkpointer</text>
+    <text class="edge-label" x="615" y="184" text-anchor="middle">fsyncs at</text>
+    <text class="edge-label" x="615" y="200" text-anchor="middle">checkpoint</text>
+
+    <path class="edge" d="M 780 128 L 780 150" marker-end="url(#arw-database-07-01-a)"/>
+    <rect class="node" x="705" y="150" width="150" height="80" rx="4"/>
+    <text class="edge-label edge-label--strong" x="780" y="168" text-anchor="middle">walwriter</text>
+    <text class="edge-label" x="780" y="184" text-anchor="middle">ships WAL to</text>
+    <text class="edge-label" x="780" y="200" text-anchor="middle">standbys</text>
+
+    <path class="edge" d="M 450 230 L 450 258" stroke-width="0.8"/>
+    <text class="edge-label" x="470" y="250" text-anchor="start">fork()</text>
+    <path class="edge" d="M 203 270 L 698 270" stroke-width="0.8"/>
+    <path class="edge" d="M 450 258 L 450 270" stroke-width="0.8"/>
+
+    <path class="edge" d="M 203 270 L 203 288" marker-end="url(#arw-database-07-01-a)"/>
+    <rect class="node" x="128" y="288" width="150" height="64" rx="4"/>
+    <text class="edge-label edge-label--strong" x="203" y="308" text-anchor="middle">vacuum</text>
+    <text class="edge-label" x="203" y="324" text-anchor="middle">worker 1</text>
+    <path class="edge" d="M 368 270 L 368 288" marker-end="url(#arw-database-07-01-a)"/>
+    <rect class="node" x="293" y="288" width="150" height="64" rx="4"/>
+    <text class="edge-label edge-label--strong" x="368" y="308" text-anchor="middle">vacuum</text>
+    <text class="edge-label" x="368" y="324" text-anchor="middle">worker 2</text>
+    <path class="edge" d="M 533 270 L 533 288" marker-end="url(#arw-database-07-01-a)"/>
+    <rect class="node" x="458" y="288" width="150" height="64" rx="4"/>
+    <text class="edge-label edge-label--strong" x="533" y="308" text-anchor="middle">parallel</text>
+    <text class="edge-label" x="533" y="324" text-anchor="middle">worker (per query)</text>
+    <path class="edge" d="M 698 270 L 698 288" marker-end="url(#arw-database-07-01-a)"/>
+    <rect class="node" x="623" y="288" width="150" height="64" rx="4"/>
+    <text class="edge-label edge-label--strong" x="698" y="308" text-anchor="middle">logical</text>
+    <text class="edge-label" x="698" y="324" text-anchor="middle">replication / bgworker</text>
+
+    <rect class="node node--accent" x="45" y="390" width="810" height="76" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="416" text-anchor="middle">ONE PROCESS PER CONNECTION.</text>
+    <text class="edge-label" x="450" y="434" text-anchor="middle">the rest are fixed-count workers that pull from</text>
+    <text class="edge-label" x="450" y="450" text-anchor="middle">shared, pre-counted slots — not one per client.</text>
+  </svg>
+  <figcaption>
+    <strong>The postmaster owns the shared state and forks one backend per connection; everything else is a fixed-count worker.</strong>
+    Backends are not pooled and not shared — a backend exists for
+    exactly one connection and exits when the connection drops, which
+    is why a service that opens a new connection per HTTP request
+    drives the postmaster's fork rate hard enough to matter. The
+    autovacuum launcher forks its own vacuum, parallel and logical
+    replication workers; the checkpointer and the walwriter are fixed
+    single processes.
+  </figcaption>
+</figure><p>Two design consequences follow directly from this picture and both are worth stating out loud in an interview.</p><p><strong>Backends are not pooled and not shared.</strong> A backend exists for exactly one connection. When the connection drops, the process exits. This is why a service that opens a new database connection per HTTP request — a common and entirely reasonable-looking pattern in a stateless service — will drive the postmaster's fork rate hard enough to matter. Fork is not free; on Linux with a large <code>shared_buffers</code> segment, the page table copy is the dominant cost, and a fork storm degrades <em>every</em> connection's latency, not just the new ones. The tell is a rising connection count made of very short-lived sessions, visible in <code>pg_stat_database.numbackends</code> moving without a matching change in application load.</p><p><strong>Fixed-count workers come from a pre-allocated pool.</strong> <code>max_worker_processes</code> is the total number of background worker slots the cluster has, and autovacuum workers, logical replication workers, parallel query workers, and extension background workers all draw from it. <code>autovacuum_max_workers</code> (default <strong>3</strong>) is a sub-cap. <code>max_wal_senders</code> (default <strong>10</strong>) is a sub-cap on the replication side. When the pool is exhausted the symptom is subtle: a parallel query gets fewer workers than configured — the plan shows a <code>Gather</code> with fewer children, not an error — and autovacuum falls further behind schedule, silently. The arithmetic that catches teams out is that 3 autovacuum + 2 logical replication + 8 parallel workers exceeds a <code>max_worker_processes</code> of 8, and the setting does not complain.</p><h3 class="vol__h3" id="13-memory-per-connection">1.3 Memory Per Connection</h3><p>This is the calculation that decides whether a connection count is safe, and it is worth being able to do in your head.</p><p>A backend's private memory falls into three buckets.</p><p><strong>The fixed baseline.</strong> Every backend gets private memory it holds for its whole life: a private portion of the buffer pool's local buffers, a <code>BackendData</code> structure, per-backend state for locks, the client connection buffers, and the memory PostgreSQL allocates for things like the <code>pg_stat</code> hash tables' local portions. The commonly cited figure is roughly <strong>2–5 MB per connection</strong> for this baseline, and the real cost is usually higher than people assume because it is per <em>backend</em>, not per query, and it is resident whether or not the connection is running anything.</p><p><strong>Shared memory, which is not per connection.</strong> The buffer pool (<code>shared_buffers</code>, default <strong>128 MB</strong>), the lock manager's shared arrays, and the <code>pg_stat</code> shared structures are shared across all backends. Every backend maps the same pages. This is the part that makes PostgreSQL's memory efficiency reasonable at moderate connection counts: 100 backends do not cost 100 times the buffer pool. It is also the part that makes the <em>total</em> hard to reason about, because a large <code>shared_buffers</code> is a large fixed cost on a machine where you wanted the memory for connections.</p><p><strong>Per-query working memory, which is unbounded and is the actual danger.</strong> <code>work_mem</code> is a per-<em>node</em> limit, not per query and not per connection. A plan with a hash join, a sort, a materialise, and a bitmap heap scan can allocate <code>work_mem</code> at each of those nodes, and hash operations are further scaled by <code>hash_mem_multiplier</code> (default <strong>2.0</strong>, PostgreSQL 16+). Every parallel worker runs its own copy of the subtree with its own allocations. So the honest formula is:</p><pre class="diagram"><code>  peak RAM  ≈  shared_buffers
              + max_connections  ×  per-connection baseline        (~2-5 MB)
              + (queries running concurrently)
                × (nodes in the plan)
@@ -94,58 +151,155 @@ Answer as a flush-left wrapped paragraph.
                × (1 + parallel workers per query)</code></pre><p>The consequence is arithmetic, not opinion. Set <code>work_mem</code> to 64 MB, run a five-node plan with four parallel workers on 20 concurrent connections, and you have authorised roughly 25 GB of transient allocation on a machine that may not have it. PostgreSQL's answer to memory pressure is not an out-of-memory error — it is that the kernel's OOM killer chooses the largest-RSS process, which is the backend running the biggest sort, which is an innocent query. The resulting symptom — a random pattern of failed queries with no traceable cause and no error at the time of the kill beyond a log line about a signal — is one of the most confusing incidents you can be handed.</p><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p><code>work_mem</code> defaults to <strong>4 MB</strong> and that default is correct for the overwhelming majority of queries. It is a <em>per-node</em> limit, so a five-node plan is authorised five times it; it is multiplied again by the number of parallel workers, each of which allocates its own; and it is multiplied again by every concurrent query on that connection. Raising it globally to &quot;a value that makes my worst query fast&quot; is a decision that scales with connection count and query concurrency, neither of which the person setting the GUC is looking at. The safe pattern is to leave the global default alone and raise it per statement with <code>SET LOCAL work_mem = '256MB'</code> inside the one transaction that has been measured to need it.</p></aside><h3 class="vol__h3" id="14-three-failure-modes-of-the-process-model">1.4 Three Failure Modes of the Process Model</h3><p><strong>Connection exhaustion.</strong> <code>max_connections</code> reached. The postmaster logs a <code>FATAL: sorry, too many clients already</code> and drops the connection. Nothing in the database is wrong; the allocation is. The diagnostic is <code>pg_stat_activity</code> grouped by <code>application_name</code> and client address, cross-referenced with <code>pg_stat_database.numbackends</code>, and the question to ask is always about <em>lifetime</em> rather than <em>count</em> — are these few long-lived connections, or many short-lived ones? The second kind is a fork-rate problem with a different fix.</p><p><strong>A runaway query eating the machine.</strong> Because a backend is a separate process, one bad query's memory is bounded by the OS and can be killed independently — which is a genuine advantage over a threaded server where one runaway query can starve everything. But the default <code>work_mem</code> makes &quot;runaway&quot; mean &quot;a query that legitimately needs a lot of memory and gets it&quot;, and <code>statement_timeout</code> (default <strong>0</strong>, off) is the setting that converts an outage into an error message. Setting a <code>statement_timeout</code> is one of the cheapest reliability improvements available on any PostgreSQL installation, and its absence is the reason a bad deploy can take down a healthy database.</p><p><strong>The postmaster cannot allocate <code>shared_buffers</code>.</strong> If the machine does not have enough contiguous memory for the configured shared segment, the postmaster exits at startup with a message about <code>could not resize shared memory segment</code> or <code>insufficient shared memory</code>. The failure is loud and immediate, which makes it the friendliest of the three. The cause is nearly always <code>shared_buffers</code> set as a fraction of RAM that does not leave room for the OS and the rest of the machine, on a host where something else already has a large mapping.</p><h3 class="vol__h3" id="15-pgbouncer-and-the-transactionsession-distinction">1.5 PgBouncer and the Transaction/Session Distinction</h3><p>Because each PostgreSQL connection is a process, and process creation is not free, the standard answer to a high connection count is a connection pooler in front. PgBouncer is the one almost everyone uses, and its three modes are not variants of the same thing — they have different correctness properties, and choosing the wrong one is a source of bugs that do not announce themselves.</p><p><strong>Session mode</strong> is a pass-through. The client holds one server connection for the life of the client connection, and the pooler multiplexes only the <em>client</em> side. This preserves every PostgreSQL feature, because the server genuinely sees one session per client for its whole life. The cost is that the number of server connections still equals the number of client connections, so session mode fixes nothing about the count — it only adds a layer. It is useful when you need <code>LISTEN</code>/<code>NOTIFY</code>, session-level advisory locks, or <code>SET</code> across statements, and it is the honest answer when you cannot change the application.</p><p><strong>Transaction mode</strong> is the one that solves the problem. The server connection is held only for the duration of a transaction and then returned to the pool, so a thousand client connections can share a few dozen server connections. The cost is precise and severe: any state that is scoped to the <em>session</em> rather than the <em>transaction</em> is now shared between unrelated clients or lost between them. Concretely, in transaction mode:</p><ul><li><code>SET</code> without <code>LOCAL</code> persists on the server connection and leaks to the next client that gets it. In a schema-per-tenant design this is a cross-tenant data leak with no error. The fix is <code>SET LOCAL</code> inside an explicit transaction, always.</li><li><code>LISTEN</code>/<code>NOTIFY</code> does not work, because the listening session ends when the transaction commits.</li><li>Session-level advisory locks (<code>pg_advisory_lock</code>) leak in the same way as <code>SET</code> and are worse, because a leaked lock is invisible. <code>pg_advisory_xact_lock</code> is safe.</li><li><code>WITH HOLD</code> cursors and multi-statement sequences that assume the same backend can be interrupted between statements, so a sequence of statements outside an explicit transaction may be served by different backends.</li><li>Named prepared statements need care: PgBouncer's <code>max_prepared_statements</code> setting exists precisely because protocol-level prepared statements were historically not safe under multiplexing, and the default has been a limitation rather than a feature.</li></ul><p><strong>Statement mode</strong> is almost never what you want. It discards transaction state entirely and only works for autocommit single-statement traffic; implicit transactions, multi-statement functions, and anything relying on server-side state are all outside it.</p><blockquote class="note"><p><strong>TRADE-OFF — TRANSACTION MODE IS THE DEFAULT ANSWER, AND ITS BREAKAGE IS QUIET</strong></p>
 <p>Transaction mode is the right default because it is the only one that actually reduces the server connection count, and on any real deployment the connection count is the binding constraint. What makes it a decision rather than an obvious choice is that its failure modes are silent. A leaked <code>SET</code> produces wrong query results with no error. A leaked session advisory lock produces a job that never runs again. A <code>LISTEN</code> that does not receive its notification produces a missing update. None of these announce themselves, and all of them are introduced by a change that looked like pure infrastructure. The flip condition: if the application genuinely needs session state, transaction mode is wrong and the answer is session mode with a properly sized server-side pool, or application changes that make session state unnecessary. The check that catches it in review is a grep for <code>SET </code> outside a transaction block.</p></blockquote><h3 class="vol__h3" id="16-the-background-workers">1.6 The Background Workers</h3><div class="table-wrap"><table><thead><tr><th>Worker</th><th>Configured by</th><th>What it does</th><th>When it matters</th></tr></thead><tbody><tr><td>Checkpointer</td><td><code>checkpoint_timeout</code>, <code>max_wal_size</code></td><td>Writes dirty buffers to disk at a checkpoint</td><td>A checkpoint that takes too long stalls the checkpointer and then every writer</td></tr><tr><td>WAL writer</td><td>—</td><td>Streams WAL out of <code>pg_wal</code></td><td><code>pg_wal</code> growth means it is not keeping up</td></tr><tr><td>WAL sender</td><td><code>max_wal_senders</code>, <code>max_replication_slots</code></td><td>Streams WAL to standbys and slots</td><td>Slot lag is a disk-space problem, not just a replication problem</td></tr><tr><td>Autovacuum launcher</td><td><code>autovacuum_naptime</code> (60s)</td><td>Decides which tables need work</td><td>Chapter 9</td></tr><tr><td>Autovacuum worker</td><td><code>autovacuum_max_workers</code> (3)</td><td>Actually vacuums and analyzes</td><td>The pool is 3, shared across the whole cluster</td></tr><tr><td>Parallel query worker</td><td><code>max_parallel_workers_per_gather</code></td><td>One subtree of a query</td><td>Fewer workers than expected is silent</td></tr><tr><td>Logical replication / custom</td><td><code>max_worker_processes</code>, <code>max_logical_replication_workers</code></td><td>Apply workers, extension workers</td><td>Exhaustion shows up as autovacuum falling behind</td></tr><tr><td>Archiver</td><td><code>archive_mode</code>, <code>archive_command</code></td><td>Ships WAL to archive storage</td><td>A failing <code>archive_command</code> fills <code>pg_wal</code> and then stops writes</td></tr></tbody></table></div><p>The table is worth memorising not as a list but as a set of failure couplings. The one that catches experienced people: <code>max_worker_processes</code> is shared, and autovacuum is the consumer whose shortfall is silent and cumulative. A cluster that adds logical replication for a new analytics feed can, purely by consuming worker slots, slow vacuum down enough to accumulate dead tuples on a table that has nothing to do with replication.</p><h4 class="vol__h4" id="common-mistakes">Common Mistakes</h4><ul><li>Believing PostgreSQL multiplexes connections internally, and sizing <code>max_connections</code> as if it were a thread pool</li><li>Raising <code>max_connections</code> to solve a connection problem without doing the memory multiplication, and getting an OOM kill instead of a clean refusal</li><li>Setting <code>work_mem</code> globally on the reasoning that &quot;this is how much a sort needs&quot;, when it is a per-node, per-worker, per-concurrent-query limit</li><li>Running transaction-mode pooling without auditing for session-scoped state — <code>SET</code>, <code>LISTEN</code>, session advisory locks, and protocol-level prepared statements</li><li>Treating a short-lived connection churn problem as a connection count problem, and missing the fork-rate bottleneck entirely</li><li>Running with <code>statement_timeout</code> at 0 on a production instance, so one bad query is an outage rather than an error</li><li>Planning <code>max_worker_processes</code> by summing the per-subsystem defaults without noticing they draw from one pool</li></ul><h4 class="vol__h4" id="interview-questions-process-model-and-connections">Interview Questions — Process Model &amp; Connections</h4><article class="qa" id="1-architecture-and-the-process-model-1"><p class="qa__q"><a class="qa__num" href="#1-architecture-and-the-process-model-1">Q1</a> What actually happens when a client connects to PostgreSQL? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>The postmaster accepts the connection and <code>fork()</code>s a new backend process to handle it; that backend lives for exactly as long as the client connection and then exits. The postmaster retains only shared resources — the shared memory segment holding the buffer pool and the lock manager arrays, the listening sockets, and the supervision of its fixed-count background workers. So the unit of concurrency is the operating system process, not a thread, and there is no internal pool: a backend that goes away releases its memory back to the OS. That is why the design is worth naming as deliberate — a backend crash costs one connection instead of the server, a runaway query's memory is bounded by the OS rather than by the server's willingness to admit it is misbehaving, and <code>VACUUM</code>, <code>REINDEX</code> and parallel query workers can run concurrently with almost no cross-locking. The costs are process creation (the page-table copy dominates on a large <code>shared_buffers</code>), a per-process baseline of a few megabytes, and no in-process parallelism unless parallel workers are requested.</p></div></article><article class="qa" id="1-architecture-and-the-process-model-2"><p class="qa__q"><a class="qa__num" href="#1-architecture-and-the-process-model-2">Q2</a> A service opens a new database connection per HTTP request. What breaks, and what is the first thing to measure? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>Not the connection count — the fork rate. If the pool is large enough to absorb the concurrency, the server never hits <code>max_connections</code>, and the symptom is latency that scales badly with load even though every individual query is fast. The cost of a <code>fork()</code> in a process with a large shared memory segment is dominated by copying page tables, and interleaving many of those with normal query traffic degrades the whole instance. The first thing to measure is connection <em>lifetime</em> rather than count: <code>SELECT count(*), min(backend_start), max(backend_start) FROM pg_stat_activity</code> over a series of samples, or <code>numbackends</code> in <code>pg_stat_database</code> watched over time. A sawtooth at a high frequency is churn; a flat line at a high value is a genuine count problem. The fix is a client-side pool — HikariCP, <code>pgbouncer</code> in transaction mode, or both — and the design lesson is that the number to manage is connections per unit of work, not total connections.</p></div></article><article class="qa" id="1-architecture-and-the-process-model-3"><p class="qa__q"><a class="qa__num" href="#1-architecture-and-the-process-model-3">Q3</a> You need to raise <code>max_connections</code> from 100 to 500. What else has to change? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>The memory, and specifically the part nobody calculates. Five hundred backends at a few megabytes of private baseline each is a couple of gigabytes before a single query runs, and that is only the fixed cost. The dangerous term is the transient one: <code>work_mem</code> is a per-node limit, multiplied by the nodes in a plan, multiplied by the parallel workers, and multiplied by every concurrent query — so 500 connections makes the <em>worst-case</em> transient allocation dramatically larger, and the failure mode is not a clean error but the OOM killer choosing the largest backend, which is an innocent query, with no cause visible in the database. So the changes are: do the arithmetic against actual RAM rather than against <code>shared_buffers</code>; leave <code>shared_buffers</code> at a value that leaves headroom for the connections; keep <code>work_mem</code> at its default so the per-query term stays bounded; put PgBouncer in front so the server-side count is small and the client-side count is not; and set a <code>statement_timeout</code> so a single query cannot authorise a large transient allocation. And the framing that belongs in the answer: 500 connections is achievable on a large instance, but it is a capacity decision made on the basis of arithmetic, not a configuration edit. If the pressure is on the connection count, the first question is which service is opening them and whether transaction-mode pooling solves it — that answer is usually yes and usually cheaper.</p></div></article><article class="qa" id="1-architecture-and-the-process-model-4"><p class="qa__q"><a class="qa__num" href="#1-architecture-and-the-process-model-4">Q4</a> Why can a query get fewer parallel workers than <code>max_parallel_workers_per_gather</code> says, without any error? <span class="qa__badge"><code>ADVANCED</code></span></p><div class="qa__a"><p>Because parallel workers, autovacuum workers, logical replication workers and extension background workers all draw from one shared pool sized by <code>max_worker_processes</code>. When the pool is contended, a query asking for N workers can be granted fewer, and the planner's <code>Gather</code> node simply has fewer children than the GUC suggests. There is no error, because from the query's point of view a <code>Gather</code> with two children is a perfectly valid plan — it is just a different, slower plan than the one that was intended. The same contention shows up on the autovacuum side as workers that cannot start promptly, which is the more dangerous half because it is silent and cumulative: dead tuples accumulate. The diagnostic is to enumerate what is actually consuming the pool — replication senders and receivers, logical replication workers, <code>pg_cron</code>, custom extension workers, plus the <code>VACUUM</code> and <code>ANALYZE</code> you launch by hand — and sum them. Then set <code>max_worker_processes</code> above that total with headroom. The follow-up worth volunteering is that the <em>count</em> of workers is not the real limit anyway: each parallel worker multiplies <code>work_mem</code>, so eight workers on a five-node plan authorise forty times <code>work_mem</code> for one query, and the worker count and the memory setting have to be planned together.</p></div></article><h4 class="vol__h4" id="further-reading">Further Reading</h4><ul><li><a href="https://www.postgresql.org/docs/current/server-start.html" rel="noopener noreferrer">PostgreSQL — Server Start-Up and Shutdown</a> — what the postmaster does at startup, what each background process is, and the shared memory it allocates.</li><li><a href="https://www.postgresql.org/docs/current/runtime-config-connection.html" rel="noopener noreferrer">PostgreSQL — Connection Management</a> — <code>max_connections</code>, <code>superuser_reserved_connections</code>, <code>idle_in_transaction_session_timeout</code>, and the connection-level settings that behave differently under pooling.</li><li><a href="https://www.postgresql.org/docs/current/monitoring-stats.html" rel="noopener noreferrer">PostgreSQL — <code>pg_stat_activity</code></a> — <code>backend_xmin</code>, <code>wait_event_type</code>, <code>state</code>, and the other columns the process model makes meaningful.</li><li><a href="https://www.postgresql.org/docs/current/sql-createextension.html" rel="noopener noreferrer">PostgreSQL — <code>CREATE EXTENSION</code> and Extension Support</a> — trusted versus untrusted extensions, and what a background worker contributed by an extension costs from the shared pool.</li></ul><aside class="callout callout--summary"><span class="callout__label">Chapter summary</span><p>PostgreSQL is a process manager, not a threaded service: one <code>fork()</code>ed backend per connection, alive for that connection's whole life, with a fixed-count pool of background workers drawing from a shared <code>max_worker_processes</code> budget. <code>max_connections</code> (default 100) is a hard refusal ceiling rather than a target, and the real capacity number is the multiplication — <code>max_connections × per-connection baseline + concurrent queries × plan nodes × work_mem × parallel workers</code> — which is why the OOM killer, not a clean error, is the failure to design against. PgBouncer in transaction mode is the default answer because it is the only mode that reduces the server-side count, and its failure modes are silent: a leaked <code>SET</code> is a cross-tenant data leak, a leaked session advisory lock is a job that never runs again, and <code>LISTEN</code>/<code>NOTIFY</code> simply does not arrive. The traps worth naming: a connection <em>churn</em> problem looks nothing like a connection <em>count</em> problem, and worker-pool exhaustion degrades autovacuum silently long before it degrades anything else.</p></aside></section>
 
-<section id="chapter-2-storage-pages-heap-files-and-toast" data-filter-target><h2 class="vol__h2">Chapter 2 — Storage: Pages, Heap Files &amp; TOAST</h2><p>Volume 1 Chapter 2 established the physical model: pages, the slotted page, heap files, row locators, and the free space map. This chapter is the PostgreSQL-specific version of the same ground, and it is worth re-reading Volume 1 alongside it, because the layout here has specific numbers attached to it and those numbers explain an entire class of surprising behaviour. The one-line version: a PostgreSQL page is 8 kB, it is <em>slotted</em>, tuples are never moved, and a row that was once large stays expensive forever.</p><h3 class="vol__h3" id="21-the-page">2.1 The Page</h3><p><code>BLCKSZ</code> is 8192 bytes and is compiled in; you cannot configure it. Every table, index, and TOAST relation is a file made of these pages, and the first 24 bytes of every page are a fixed header.</p><pre class="diagram"><code>  ONE POSTGRESQL PAGE — 8192 bytes
-  ════════════════════════════════════════════════════════════════════════════
-  offset 0                                                                  8192
-  ┌────────────────────────────────────────────────────────────────────────┐
-  │ PageHeaderData — 24 bytes, always present                              │
-  │ pd_lsn          8   │ xlog position of the last change to this page    │
-  │ pd_checksum     2   │ page checksum, 0 when checksums are disabled     │
-  │ pd_flags        2   │ has free content, is a visibility-map page, ...   │
-  │ pd_lower        2   │ offset of the FIRST line pointer  ← grows up      │
-  │ pd_upper        2   │ offset of the END of line pointers← grows down    │
-  │ pd_special      2   │ offset of the special space (always 8192)        │
-  │ pd_pagesize_version 2 │ page size + layout version                      │
-  │ pd_prune_xid    4   │ oldest xid that may have marked this page dead   │
-  ├────────────────────────────────────────────────────────────────────────┤
-  │                         F R E E   S P A C E                           │
-  │   tuples live here, growing UPWARD from pd_lower, and they are the     │
-  │   only thing in the page that ever changes size                         │
-  ├────────────────────────────────────────────────────────────────────────┤
-  │ Line pointers — ItemIdData, 4 bytes each, growing DOWN from pd_upper   │
-  │ ┌──────┬──────┬──────┬──────┬──────┬ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐│
-  │ │ item0│ item1│ item2│ item3│ item4│          (unused)                 ││
-  │ └──────┴──────┴──────┴──────┴──────┴ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘│
-  │   each points to where its tuple actually is, and is NEVER MOVED       │
-  ├────────────────────────────────────────────────────────────────────────┤
-  │ T U P L E S — HeapTupleHeaderData + null bitmap + column data          │
-  │ ┌──────────────────────────────────────────────────────────────────┐   │
-  │ │ t_xmin 4 │ t_xmax 4 │ t_cid 4 │ t_ctid 6 │ t_infomask 2 │ t_hoff 2│ + │
-  │ │ null bitmap (variable)                                          │   │
-  │ │ column data, in attribute order, each aligned to its own type    │   │
-  │ └──────────────────────────────────────────────────────────────────┘   │
-  │ ┌──────────────────────────────────────────────────────────────────┐   │
-  │ │ FREE SPACE — orphaned tuples, left behind by UPDATE, never reused │   │
-  │ │ until VACUUM marks them available to the FSM                      │   │
-  │ └──────────────────────────────────────────────────────────────────┘   │
-  ├────────────────────────────────────────────────────────────────────────┤
-  │ pd_special → 8192: special space. ZERO bytes for a heap page. It is    │
-  │ 8 bytes for an index page (the metapage) and 24 for a visibility map.  │
-  └────────────────────────────────────────────────────────────────────────┘
-  ════════════════════════════════════════════════════════════════════════════</code></pre><p>Three features of this layout do most of the explaining work, and all three are things candidates get wrong in interviews.</p><p><strong>Tuples are identified by <code>ctid</code>, which is a location, not an identity.</strong> A <code>ctid</code> is a <code>(block number, offset within block)</code> pair, and it identifies <em>where a row version is right now</em>. It is not a primary key, it is not stable, and it changes whenever the row is updated and the new version does not fit on the same page. Using <code>ctid</code> as a row identifier is a category error, and using it as a <em>correlation</em> identifier inside a single statement is legitimate and occasionally useful.</p><p><strong>Updates never move a tuple.</strong> An <code>UPDATE</code> marks the old version dead and appends a new version — on the same page if it fits (that is a HOT update, Chapter 3), otherwise on another page, which is a non-HOT update. Either way the old bytes stay put. This is why a row that was once 3 MB keeps costing you: the page it lived on was shaped around it, the neighbouring tuples were pushed elsewhere or to other pages, and when the value shrank the space became a hole that nothing reclaims. The steady-state cost of a row is a function of the largest the row ever was.</p><p><strong>The free space map is how space comes back without a rewrite.</strong> <code>VACUUM</code> does not compact a heap. It walks the page, identifies space in ranges that is free, and records 20-byte <code>PageFreeSpaceMap</code> records in a separate fork. Subsequent inserts reuse that space. The user's original format does not come back; only the space becomes usable again. This is the distinction behind the most common bloat misunderstanding, and Chapter 9 returns to it.</p><h3 class="vol__h3" id="22-line-pointers-and-the-lock-fast-path">2.2 Line Pointers and the Lock Fast Path</h3><p>The slot array deserves more attention than it usually gets, because PostgreSQL uses it for something clever. A line pointer is 4 bytes normally, but when a tuple is <em>locked</em> and not deleted, the line pointer expands to 8 bytes to hold a transaction id directly.</p><pre class="diagram"><code>  UNLOCKED line pointer (4 bytes)          LOCKED line pointer (8 bytes)
-  ┌──────────────┬──────────────┐          ┌──────────────┬──────────────┬─────────────┐
-  │ lp_off:15    │ lp_flags:2   │          │ lp_off:15    │ lp_flags:2   │ lp_lock:31  │
-  │ lp_len:15    │ (unused pad) │          │ lp_len:15    │             │ xid (31b)   │
-  └──────────────┴──────────────┘          └──────────────┴──────────────┴─────────────┘
-    bit 15 is unused, the other 15 hold the offset and length of the tuple
+<section id="chapter-2-storage-pages-heap-files-and-toast" data-filter-target><h2 class="vol__h2">Chapter 2 — Storage: Pages, Heap Files &amp; TOAST</h2><p>Volume 1 Chapter 2 established the physical model: pages, the slotted page, heap files, row locators, and the free space map. This chapter is the PostgreSQL-specific version of the same ground, and it is worth re-reading Volume 1 alongside it, because the layout here has specific numbers attached to it and those numbers explain an entire class of surprising behaviour. The one-line version: a PostgreSQL page is 8 kB, it is <em>slotted</em>, tuples are never moved, and a row that was once large stays expensive forever.</p><h3 class="vol__h3" id="21-the-page">2.1 The Page</h3><p><code>BLCKSZ</code> is 8192 bytes and is compiled in; you cannot configure it. Every table, index, and TOAST relation is a file made of these pages, and the first 24 bytes of every page are a fixed header.</p><figure class="figure">
+  <svg viewBox="0 0 900 650" role="img" aria-label="One PostgreSQL page, 8192 bytes. A fixed 24-byte header holds the LSN, the checksum, and the pd_lower and pd_upper offsets. Tuples grow upward from pd_lower; 4-byte line pointers grow downward from pd_upper and are never moved; the free space between is the only part that changes size.">
+    <defs>
+      <marker id="arw-database-07-02-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="label" x="450" y="26" text-anchor="middle">ONE POSTGRESQL PAGE — 8192 bytes</text>
 
-  WHY: locking a row means writing a transaction id somewhere. Doing it in the 4-byte
-  line pointer is a single already-dirtied page write with no tuple modification.
-  Doing it in the tuple header would dirty the tuple and defeat the HOT-update
-  fast path. The cost is that the slot array — which lives at the TOP of the page —
-  must be rewritten, so a page can run out of line-pointer space before it runs out
-  of tuple space. That is why you see &quot;no space to copy TOAST&quot; and odd errors on
-  pages with an unusually large number of very narrow rows.</code></pre><h3 class="vol__h3" id="23-relation-forks-and-the-visibility-map">2.3 Relation Forks and the Visibility Map</h3><p>A table is not one file. It is up to four, distinguished by an OID suffix in the relation filename, and each answers a different question:</p><div class="table-wrap"><table><thead><tr><th>Fork</th><th>Suffix</th><th>Contents</th><th>Written by</th></tr></thead><tbody><tr><td>Main</td><td><code>16384</code></td><td>The heap pages themselves</td><td>Inserts, updates</td></tr><tr><td>Free space map</td><td><code>_fsm</code></td><td>Where free space exists, in page-sized ranges</td><td><code>VACUUM</code></td></tr><tr><td>Visibility map</td><td><code>_vm</code></td><td>Two bits per page: <code>ALL_VISIBLE</code>, <code>ALL_FROZEN</code></td><td><code>VACUUM</code></td></tr><tr><td>Init</td><td><code>_init</code></td><td>The unlogged relation's initial page</td><td>Only for <code>UNLOGGED</code> tables</td></tr></tbody></table></div><p>The visibility map is the one with consequences outside of vacuum. <code>ALL_VISIBLE</code> means every tuple on that page is visible to every snapshot that could still exist — no concurrent transaction could need an older version. When an index-only scan finds that every page in its range is <code>ALL_VISIBLE</code>, it can return rows without touching the heap at all, and the plan reports <code>Heap Fetches: 0</code>. The moment any row on that page is updated, the bit is cleared, and every index-only scan over that range starts fetching. This is why <code>Heap Fetches</code> appearing in a plan is a vacuum signal, not a plan problem, and why Chapter 9's starvation failure has a query-performance symptom on top of its disk symptom.</p><p>A page that is both <code>ALL_VISIBLE</code> and <code>ALL_FROZEN</code> additionally has no tuples whose <code>xmin</code> still needs checking against the horizon, which is what lets the freeze scan move forward.</p><h3 class="vol__h3" id="24-toast">2.4 TOAST</h3><p>A tuple must fit in a page, roughly. If it does not, it is <em>toasted</em>: the oversized attributes are compressed, and if still too large, moved out of line into a separate TOAST relation that is paired with the heap by the toast table's <code>chunk_id</code>.</p><p>The thresholds, which people quote imprecisely:</p><ul><li><code>TOAST_TUPLE_THRESHOLD</code> — about <strong>2000 bytes</strong> below which PostgreSQL does not even try. So a row under roughly 2 kB is never toasted, whatever its shape.</li><li><code>TOAST_TUPLE_TARGET</code> — about <strong>2000 bytes</strong> of data it aims to leave <em>after</em> moving attributes out, to leave room for future updates on the same page.</li><li>The trigger is therefore roughly &quot;row over ~2 kB&quot;, but the exact behaviour depends on per-column storage settings and alignment, so the operational number to measure is <code>pg_column_size</code> rather than the constant.</li></ul><p>Compression is attempted first, because a large <code>text</code> of natural language often compresses by 3-4x and stays inline. PGLZ is the default; LZ4 was added in PostgreSQL 14 and Zstandard is also available, both usually faster at a modest ratio cost. Verify the current list against the docs for your version rather than assuming.</p><p>The per-column storage mode is the control that matters, and it is underused:</p><div class="table-wrap"><table><thead><tr><th>Mode</th><th>Compress?</th><th>Move out of line?</th><th>Use for</th></tr></thead><tbody><tr><td><code>PLAIN</code></td><td>no</td><td>no</td><td>Never toast; a too-large value is an <strong>error</strong> at insert</td></tr><tr><td><code>EXTENDED</code></td><td>yes</td><td>yes</td><td>The default — compress, then relocate if still large</td></tr><tr><td><code>EXTERNAL</code></td><td>no</td><td>yes</td><td>Already-compressed payloads: skip the wasted CPU pass</td></tr><tr><td><code>MAIN</code></td><td>yes</td><td>no</td><td>Long text you always read with the rest of the row</td></tr></tbody></table></div><pre class="snippet" data-lang="sql"><code>-- what is actually stored, per row
+    <rect class="node node--accent" x="120" y="40" width="660" height="160" rx="4"/>
+    <text class="edge-label edge-label--strong" x="450" y="64" text-anchor="middle">PageHeaderData — 24 bytes, always present</text>
+
+    <text class="edge-label" x="150" y="88" text-anchor="start">pd_lsn 8 — xlog position of the</text>
+    <text class="edge-label" x="150" y="103" text-anchor="start">last change to this page</text>
+    <text class="edge-label" x="150" y="118" text-anchor="start">pd_checksum 2 — page checksum,</text>
+    <text class="edge-label" x="150" y="133" text-anchor="start">0 when checksums are disabled</text>
+    <text class="edge-label" x="150" y="148" text-anchor="start">pd_flags 2 — has free content,</text>
+    <text class="edge-label" x="150" y="163" text-anchor="start">is a visibility-map page, ...</text>
+    <text class="edge-label" x="150" y="178" text-anchor="start">pd_pagesize_version 2 — page size</text>
+    <text class="edge-label" x="150" y="193" text-anchor="start">+ layout version</text>
+
+    <text class="edge-label" x="460" y="88" text-anchor="start">pd_lower 2 — offset of the FIRST</text>
+    <text class="edge-label" x="460" y="103" text-anchor="start">line pointer — grows up</text>
+    <text class="edge-label" x="460" y="118" text-anchor="start">pd_upper 2 — offset of the END</text>
+    <text class="edge-label" x="460" y="133" text-anchor="start">of the line pointers — grows down</text>
+    <text class="edge-label" x="460" y="148" text-anchor="start">pd_special 2 — offset of the</text>
+    <text class="edge-label" x="460" y="163" text-anchor="start">special space (always 8192)</text>
+    <text class="edge-label" x="460" y="178" text-anchor="start">pd_prune_xid 4 — oldest xid that</text>
+    <text class="edge-label" x="460" y="193" text-anchor="start">may have marked this page dead</text>
+
+    <rect class="node" x="120" y="200" width="660" height="320" rx="4"/>
+
+    <rect class="node" x="250" y="212" width="80" height="22" rx="3"/>
+    <text class="edge-label" x="290" y="227" text-anchor="middle">item0</text>
+    <rect class="node" x="340" y="212" width="80" height="22" rx="3"/>
+    <text class="edge-label" x="380" y="227" text-anchor="middle">item1</text>
+    <rect class="node" x="430" y="212" width="80" height="22" rx="3"/>
+    <text class="edge-label" x="470" y="227" text-anchor="middle">item2</text>
+    <rect class="node" x="520" y="212" width="80" height="22" rx="3"/>
+    <text class="edge-label" x="560" y="227" text-anchor="middle">item3</text>
+    <rect class="node" x="610" y="212" width="80" height="22" rx="3"/>
+    <text class="edge-label" x="650" y="227" text-anchor="middle">item4</text>
+    <text class="edge-label" x="720" y="227" text-anchor="middle">(unused)</text>
+
+    <path class="edge" d="M 470 234 L 470 272" marker-end="url(#arw-database-07-02-a)"/>
+    <text class="edge-label" x="440" y="258" text-anchor="end">line pointers — ItemIdData, 4 bytes each</text>
+
+    <text class="edge-label edge-label--strong" x="470" y="320" text-anchor="middle">FREE SPACE</text>
+    <text class="edge-label" x="470" y="340" text-anchor="middle">tuples live here, growing UPWARD from pd_lower,</text>
+    <text class="edge-label" x="470" y="356" text-anchor="middle">the only thing in the page that ever changes size</text>
+
+    <path class="edge" d="M 140 500 L 140 410" marker-end="url(#arw-database-07-02-a)"/>
+    <text class="edge-label" x="150" y="424" text-anchor="start">tuples grow</text>
+    <text class="edge-label" x="150" y="438" text-anchor="start">UPWARD from</text>
+    <text class="edge-label" x="150" y="452" text-anchor="start">pd_lower</text>
+
+    <rect class="node" x="250" y="420" width="440" height="26" rx="3"/>
+    <text class="edge-label" x="470" y="437" text-anchor="middle">tuple</text>
+    <rect class="node" x="250" y="450" width="440" height="26" rx="3"/>
+    <text class="edge-label" x="470" y="467" text-anchor="middle">tuple</text>
+    <rect class="node node--good" x="250" y="480" width="440" height="26" rx="3"/>
+    <text class="edge-label" x="470" y="497" text-anchor="middle">tuple — HeapTupleHeaderData + null bitmap + data</text>
+
+    <rect class="node node--warn" x="120" y="520" width="660" height="60" rx="4"/>
+    <text class="edge-label edge-label--strong" x="450" y="542" text-anchor="middle">pd_special → 8192: special space</text>
+    <text class="edge-label" x="450" y="558" text-anchor="middle">ZERO bytes for a heap page; 8 for an index</text>
+    <text class="edge-label" x="450" y="572" text-anchor="middle">page (the metapage), 24 for a visibility map</text>
+
+    <text class="edge-label" x="450" y="610" text-anchor="middle">orphaned tuples are left behind by UPDATE, never reused until</text>
+    <text class="edge-label" x="450" y="626" text-anchor="middle">VACUUM marks them available to the free-space map.</text>
+  </svg>
+  <figcaption>
+    <strong>Tuples grow upward from pd_lower and line pointers grow downward from pd_upper, and the free space between them is the only thing that changes size.</strong>
+    The first 24 bytes are a fixed header. Each 4-byte line pointer
+    names where its tuple actually is and is never moved; an UPDATE
+    appends a new tuple and leaves the old one as orphaned space that
+    VACUUM must reclaim. The special space at offset 8192 is zero
+    bytes on a heap page, 8 on an index metapage, 24 on a visibility
+    map.
+  </figcaption>
+</figure><p>Three features of this layout do most of the explaining work, and all three are things candidates get wrong in interviews.</p><p><strong>Tuples are identified by <code>ctid</code>, which is a location, not an identity.</strong> A <code>ctid</code> is a <code>(block number, offset within block)</code> pair, and it identifies <em>where a row version is right now</em>. It is not a primary key, it is not stable, and it changes whenever the row is updated and the new version does not fit on the same page. Using <code>ctid</code> as a row identifier is a category error, and using it as a <em>correlation</em> identifier inside a single statement is legitimate and occasionally useful.</p><p><strong>Updates never move a tuple.</strong> An <code>UPDATE</code> marks the old version dead and appends a new version — on the same page if it fits (that is a HOT update, Chapter 3), otherwise on another page, which is a non-HOT update. Either way the old bytes stay put. This is why a row that was once 3 MB keeps costing you: the page it lived on was shaped around it, the neighbouring tuples were pushed elsewhere or to other pages, and when the value shrank the space became a hole that nothing reclaims. The steady-state cost of a row is a function of the largest the row ever was.</p><p><strong>The free space map is how space comes back without a rewrite.</strong> <code>VACUUM</code> does not compact a heap. It walks the page, identifies space in ranges that is free, and records 20-byte <code>PageFreeSpaceMap</code> records in a separate fork. Subsequent inserts reuse that space. The user's original format does not come back; only the space becomes usable again. This is the distinction behind the most common bloat misunderstanding, and Chapter 9 returns to it.</p><h3 class="vol__h3" id="22-line-pointers-and-the-lock-fast-path">2.2 Line Pointers and the Lock Fast Path</h3><p>The slot array deserves more attention than it usually gets, because PostgreSQL uses it for something clever. A line pointer is 4 bytes normally, but when a tuple is <em>locked</em> and not deleted, the line pointer expands to 8 bytes to hold a transaction id directly.</p><figure class="figure">
+  <svg viewBox="0 0 900 460" role="img" aria-label="The line pointer. Unlocked it is 4 bytes: lp_off 15 bits, lp_flags 2, lp_len 15, with bit 15 unused. Locked, when a tuple is locked but not deleted, it expands to 8 bytes and adds lp_lock and a 31-bit transaction id, so the lock is one write to an already-dirtied page with no tuple modification.">
+    <defs>
+      <marker id="arw-database-07-03-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="label" x="450" y="26" text-anchor="middle">THE LINE POINTER — 4 BYTES, OR 8 WHEN A TUPLE IS LOCKED</text>
+
+    <rect class="node" x="40" y="44" width="340" height="214" rx="5"/>
+    <text class="edge-label edge-label--strong" x="210" y="70" text-anchor="middle">UNLOCKED — 4 BYTES</text>
+    <rect class="node" x="55" y="84" width="150" height="62" rx="3"/>
+    <text class="edge-label" x="130" y="120" text-anchor="middle">lp_off:15</text>
+    <rect class="node" x="225" y="84" width="150" height="62" rx="3"/>
+    <text class="edge-label" x="300" y="120" text-anchor="middle">lp_flags:2</text>
+    <rect class="node" x="55" y="156" width="150" height="62" rx="3"/>
+    <text class="edge-label" x="130" y="192" text-anchor="middle">lp_len:15</text>
+    <rect class="node" x="225" y="156" width="150" height="62" rx="3"/>
+    <text class="edge-label" x="300" y="192" text-anchor="middle">(unused pad)</text>
+    <text class="edge-label" x="210" y="236" text-anchor="middle">bit 15 is unused; the other 15 hold</text>
+    <text class="edge-label" x="210" y="252" text-anchor="middle">the offset and length of the tuple</text>
+
+    <path class="edge" d="M 380 150 L 520 150" marker-end="url(#arw-database-07-03-a)"/>
+    <text class="edge-label" x="450" y="138" text-anchor="middle">tuple locked,</text>
+    <text class="edge-label" x="450" y="166" text-anchor="middle">not deleted</text>
+
+    <rect class="node" x="520" y="44" width="340" height="214" rx="5"/>
+    <text class="edge-label edge-label--strong" x="690" y="70" text-anchor="middle">LOCKED — 8 BYTES</text>
+    <rect class="node" x="535" y="84" width="100" height="62" rx="3"/>
+    <text class="edge-label" x="585" y="120" text-anchor="middle">lp_off:15</text>
+    <rect class="node" x="645" y="84" width="100" height="62" rx="3"/>
+    <text class="edge-label" x="695" y="120" text-anchor="middle">lp_flags:2</text>
+    <rect class="node node--accent" x="755" y="84" width="100" height="62" rx="3"/>
+    <text class="edge-label" x="805" y="120" text-anchor="middle">lp_lock:31</text>
+    <rect class="node" x="535" y="156" width="100" height="62" rx="3"/>
+    <text class="edge-label" x="585" y="192" text-anchor="middle">lp_len:15</text>
+    <rect class="node" x="645" y="156" width="100" height="62" rx="3"/>
+    <rect class="node node--accent" x="755" y="156" width="100" height="62" rx="3"/>
+    <text class="edge-label" x="805" y="192" text-anchor="middle">xid (31b)</text>
+    <text class="edge-label" x="690" y="236" text-anchor="middle">the lock bit and the transaction id</text>
+    <text class="edge-label" x="690" y="252" text-anchor="middle">live in the two added cells</text>
+
+    <rect class="node node--good" x="40" y="282" width="820" height="88" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="304" text-anchor="middle">WHY THE LOCK GOES IN THE LINE POINTER</text>
+    <text class="edge-label" x="450" y="322" text-anchor="middle">locking a row means writing a transaction id somewhere — in the 4-byte</text>
+    <text class="edge-label" x="450" y="338" text-anchor="middle">line pointer it is a single already-dirtied page write with no tuple</text>
+    <text class="edge-label" x="450" y="354" text-anchor="middle">modification; in the tuple header it would dirty the tuple and defeat</text>
+    <text class="edge-label" x="450" y="370" text-anchor="middle">the HOT-update fast path.</text>
+
+    <rect class="node node--warn" x="40" y="386" width="820" height="72" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="408" text-anchor="middle">THE COST — THE SLOT ARRAY LIVES AT THE TOP OF THE PAGE</text>
+    <text class="edge-label" x="450" y="426" text-anchor="middle">it must be rewritten, so a page can run out of line-pointer space before</text>
+    <text class="edge-label" x="450" y="442" text-anchor="middle">it runs out of tuple space — the &quot;no space to copy TOAST&quot; errors on</text>
+    <text class="edge-label" x="450" y="458" text-anchor="middle">pages with an unusually large number of very narrow rows.</text>
+  </svg>
+  <figcaption>
+    <strong>A locked, undeleted tuple's line pointer expands from 4 to 8 bytes to hold the locking transaction id directly.</strong>
+    Unlocked, the pointer is lp_off:15, lp_flags:2 and
+    lp_len:15, with bit 15 unused. Locked, it gains lp_lock
+    and a 31-bit xid, so the lock is a single write to an
+    already-dirtied page with no tuple modification — which
+    is what keeps the HOT-update fast path intact. The cost
+    is that the slot array, at the top of the page, must be
+    rewritten: a page can run out of line-pointer space
+    before it runs out of tuple space, the "no space to copy
+    TOAST" errors on pages with an unusually large number of
+    very narrow rows.
+  </figcaption>
+</figure><h3 class="vol__h3" id="23-relation-forks-and-the-visibility-map">2.3 Relation Forks and the Visibility Map</h3><p>A table is not one file. It is up to four, distinguished by an OID suffix in the relation filename, and each answers a different question:</p><div class="table-wrap"><table><thead><tr><th>Fork</th><th>Suffix</th><th>Contents</th><th>Written by</th></tr></thead><tbody><tr><td>Main</td><td><code>16384</code></td><td>The heap pages themselves</td><td>Inserts, updates</td></tr><tr><td>Free space map</td><td><code>_fsm</code></td><td>Where free space exists, in page-sized ranges</td><td><code>VACUUM</code></td></tr><tr><td>Visibility map</td><td><code>_vm</code></td><td>Two bits per page: <code>ALL_VISIBLE</code>, <code>ALL_FROZEN</code></td><td><code>VACUUM</code></td></tr><tr><td>Init</td><td><code>_init</code></td><td>The unlogged relation's initial page</td><td>Only for <code>UNLOGGED</code> tables</td></tr></tbody></table></div><p>The visibility map is the one with consequences outside of vacuum. <code>ALL_VISIBLE</code> means every tuple on that page is visible to every snapshot that could still exist — no concurrent transaction could need an older version. When an index-only scan finds that every page in its range is <code>ALL_VISIBLE</code>, it can return rows without touching the heap at all, and the plan reports <code>Heap Fetches: 0</code>. The moment any row on that page is updated, the bit is cleared, and every index-only scan over that range starts fetching. This is why <code>Heap Fetches</code> appearing in a plan is a vacuum signal, not a plan problem, and why Chapter 9's starvation failure has a query-performance symptom on top of its disk symptom.</p><p>A page that is both <code>ALL_VISIBLE</code> and <code>ALL_FROZEN</code> additionally has no tuples whose <code>xmin</code> still needs checking against the horizon, which is what lets the freeze scan move forward.</p><h3 class="vol__h3" id="24-toast">2.4 TOAST</h3><p>A tuple must fit in a page, roughly. If it does not, it is <em>toasted</em>: the oversized attributes are compressed, and if still too large, moved out of line into a separate TOAST relation that is paired with the heap by the toast table's <code>chunk_id</code>.</p><p>The thresholds, which people quote imprecisely:</p><ul><li><code>TOAST_TUPLE_THRESHOLD</code> — about <strong>2000 bytes</strong> below which PostgreSQL does not even try. So a row under roughly 2 kB is never toasted, whatever its shape.</li><li><code>TOAST_TUPLE_TARGET</code> — about <strong>2000 bytes</strong> of data it aims to leave <em>after</em> moving attributes out, to leave room for future updates on the same page.</li><li>The trigger is therefore roughly &quot;row over ~2 kB&quot;, but the exact behaviour depends on per-column storage settings and alignment, so the operational number to measure is <code>pg_column_size</code> rather than the constant.</li></ul><p>Compression is attempted first, because a large <code>text</code> of natural language often compresses by 3-4x and stays inline. PGLZ is the default; LZ4 was added in PostgreSQL 14 and Zstandard is also available, both usually faster at a modest ratio cost. Verify the current list against the docs for your version rather than assuming.</p><p>The per-column storage mode is the control that matters, and it is underused:</p><div class="table-wrap"><table><thead><tr><th>Mode</th><th>Compress?</th><th>Move out of line?</th><th>Use for</th></tr></thead><tbody><tr><td><code>PLAIN</code></td><td>no</td><td>no</td><td>Never toast; a too-large value is an <strong>error</strong> at insert</td></tr><tr><td><code>EXTENDED</code></td><td>yes</td><td>yes</td><td>The default — compress, then relocate if still large</td></tr><tr><td><code>EXTERNAL</code></td><td>no</td><td>yes</td><td>Already-compressed payloads: skip the wasted CPU pass</td></tr><tr><td><code>MAIN</code></td><td>yes</td><td>no</td><td>Long text you always read with the rest of the row</td></tr></tbody></table></div><pre class="snippet" data-lang="sql"><code>-- what is actually stored, per row
 SELECT id,
        pg_column_size(id)          AS id_bytes,
        pg_column_size(body)        AS body_inline,
@@ -205,37 +359,75 @@ SELECT * FROM pgstattuple('documents_pkey');</code></pre><blockquote class="note
   O(rows) per COMMIT. Instead the commit is recorded once, in shared memory
   (PROC_CLOG), and the infomask bits are set LAZILY, the next time a page
   carrying those tuples is read or written. A hint bit. Its cost is a possible
-  one-off write to a shared page the first time any backend touches it.</code></pre><p>That lazy <code>xmin</code> commit hint is worth knowing for a practical reason: it is a <em>contention</em> point. A very hot row or a very hot page is repeatedly re-marked by different backends, and that is part of why update-heavy workloads on a small table show lock waits in <code>pg_locks</code> that nobody can explain.</p><h3 class="vol__h3" id="32-the-version-chain">3.2 The Version Chain</h3><p>An <code>UPDATE</code> does not modify a row. It writes a new row version, and the old version's <code>t_ctid</code> is redirected to point at it. Chains form, and a read that lands on the wrong end of a chain has to walk it.</p><pre class="diagram"><code>  ROW 42 — five versions deep, all on ONE page (a HOT update chain)
+  one-off write to a shared page the first time any backend touches it.</code></pre><p>That lazy <code>xmin</code> commit hint is worth knowing for a practical reason: it is a <em>contention</em> point. A very hot row or a very hot page is repeatedly re-marked by different backends, and that is part of why update-heavy workloads on a small table show lock waits in <code>pg_locks</code> that nobody can explain.</p><h3 class="vol__h3" id="32-the-version-chain">3.2 The Version Chain</h3><p>An <code>UPDATE</code> does not modify a row. It writes a new row version, and the old version's <code>t_ctid</code> is redirected to point at it. Chains form, and a read that lands on the wrong end of a chain has to walk it.</p><figure class="figure">
+  <svg viewBox="0 0 900 660" role="img" aria-label="Row 42, four versions deep on one page. v1 has xmin 100 and xmax 105, v2 has xmin 105 and xmax 110, v3 has xmin 110 and xmax 118, v4 has xmin 118 and no xmax and is live. t_ctid chains v1 to v2 to v3 to v4. A reader whose snapshot validates xmin 100 but not xmax 105 walks all four versions — four page reads for one logical row, walked in memory once the page is pinned.">
+    <defs>
+      <marker id="arw-database-07-04-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="label" x="450" y="26" text-anchor="middle">ROW 42 — FOUR VERSIONS DEEP, ALL ON ONE PAGE (A HOT UPDATE CHAIN)</text>
 
-  ┌──────────────────────────┐  ctid (0,14)
-  │ v1  xmin=100            │──▶ t_ctid ──┐
-  │     xmax=105            │            │
-  │     status='new'        │            │  dead: superseded
-  └──────────────────────────┘            │
-                                          ▼
-                              ┌──────────────────────────┐  ctid (0,15)
-                              │ v2  xmin=105            │──▶ t_ctid ──┐
-                              │     xmax=110            │            │
-                              │     status='new'        │            │
-                              └──────────────────────────┘            │
-                                                                   ▼
-                                                   ┌──────────────────────────┐
-                                                   │ v3  xmin=110            │──▶ ─ ─ ┐
-                                                   │     xmax=118            │        │
-                                                   │     status='active'     │        │
-                                                   └──────────────────────────┘        │
-                                                                                    ▼
-                                                                    ┌──────────────────────────┐
-                                                                    │ v4  xmin=118            │
-                                                                    │     xmax=0  (no xmax)   │
-                                                                    │     status='active'     │  ◀── LIVE
-                                                                    └──────────────────────────┘
+    <rect class="node" x="40" y="48" width="330" height="84" rx="4"/>
+    <text class="edge-label edge-label--strong" x="205" y="68" text-anchor="middle">v1 — xmin=100</text>
+    <text class="edge-label" x="205" y="86" text-anchor="middle">xmax=105</text>
+    <text class="edge-label" x="205" y="102" text-anchor="middle">status='new'</text>
+    <text class="edge-label" x="205" y="118" text-anchor="middle">ctid (0,14)</text>
 
-  A reader whose snapshot says xmin=100 is valid and xmax=105 is not yet
-  committed follows t_ctid from v1 to v2 to v3 to v4. Four page reads for
-  one logical row. The chain is walked in memory once the page is pinned,
-  so it is not four I/Os — but it is real CPU, and on a high-update table
-  the chains get long enough that the cost is visible in the plan.</code></pre><p>The cost model for a read is therefore: <em>the number of versions between the one your snapshot wants and the one that is current</em>. On a table updated frequently and read infrequently, that number can be large. This is the specific mechanism behind &quot;the table got slow and nothing changed&quot; — the same 200-byte row is fine at chain depth 1 and expensive at depth 40.</p><h3 class="vol__h3" id="33-the-visibility-rule">3.3 The Visibility Rule</h3><p>A tuple is visible to a snapshot when the snapshot's <code>xmin</code> horizon, its in-progress list, and the tuple's own header agree. Stated precisely, and precisely enough to reason about edge cases:</p><p>A tuple version is visible to a transaction if <strong>all</strong> of the following hold:</p><ol><li><code>xmin</code> is committed <strong>and</strong> <code>xmin</code> is not in the snapshot's in-progress list (<code>xip</code>), and <code>xmin</code> is below the snapshot's <code>xmax</code> horizon. If <code>xmin</code> is <code>FrozenTransactionId</code> (2), the tuple is unconditionally visible.</li><li><code>xmax</code> is 0 (never deleted or updated), <strong>or</strong> <code>xmax</code> is in the snapshot's in-progress list (so the deleter has not finished), <strong>or</strong> <code>xmax</code> is above the snapshot's <code>xmax</code> horizon (so the deleter started after our snapshot), <strong>or</strong> <code>xmax</code> is committed <em>and</em> below the snapshot's <code>xmin</code> horizon (so the deleter finished before our snapshot began).</li></ol><p>That third clause — &quot;committed and below the horizon&quot; — is the part that makes the whole thing cheap. Because the horizon only advances past transactions that are known to have finished, the common case of &quot;was this deleter already done when I started?&quot; does not need a lookup; it is a single integer comparison. The <code>xip</code> list, the <em>in-progress</em> set, is the exception and it is short, because only currently-running transactions are in it.</p><pre class="snippet" data-lang="sql"><code>-- the three inputs, live
+    <path class="edge" d="M 370 90 L 560 90 L 560 202 L 378 202" marker-end="url(#arw-database-07-04-a)"/>
+    <text class="edge-label" x="465" y="82" text-anchor="middle">t_ctid</text>
+    <text class="edge-label" x="572" y="148" text-anchor="start">dead: superseded</text>
+
+    <rect class="node" x="40" y="160" width="330" height="84" rx="4"/>
+    <text class="edge-label edge-label--strong" x="205" y="180" text-anchor="middle">v2 — xmin=105</text>
+    <text class="edge-label" x="205" y="198" text-anchor="middle">xmax=110</text>
+    <text class="edge-label" x="205" y="214" text-anchor="middle">status='new'</text>
+    <text class="edge-label" x="205" y="230" text-anchor="middle">ctid (0,15)</text>
+
+    <path class="edge" d="M 370 202 L 560 202 L 560 314 L 378 314" marker-end="url(#arw-database-07-04-a)"/>
+    <text class="edge-label" x="465" y="194" text-anchor="middle">t_ctid</text>
+
+    <path class="edge edge--return" d="M 370 314 L 560 314 L 560 426 L 378 426" marker-end="url(#arw-database-07-04-a)"/>
+    <text class="edge-label" x="465" y="306" text-anchor="middle">t_ctid</text>
+
+    <rect class="node" x="40" y="272" width="330" height="84" rx="4"/>
+    <text class="edge-label edge-label--strong" x="205" y="292" text-anchor="middle">v3 — xmin=110</text>
+    <text class="edge-label" x="205" y="310" text-anchor="middle">xmax=118</text>
+    <text class="edge-label" x="205" y="326" text-anchor="middle">status='active'</text>
+    <text class="edge-label" x="205" y="342" text-anchor="middle">ctid (0,16)</text>
+
+    <rect class="node node--good" x="40" y="384" width="330" height="84" rx="4"/>
+    <text class="edge-label edge-label--strong" x="205" y="404" text-anchor="middle">v4 — xmin=118</text>
+    <text class="edge-label" x="205" y="422" text-anchor="middle">xmax=0 (no xmax)</text>
+    <text class="edge-label" x="205" y="438" text-anchor="middle">status='active'</text>
+    <text class="edge-label" x="205" y="454" text-anchor="middle">ctid (0,17)</text>
+    <text class="edge-label edge-label--strong" x="390" y="412" text-anchor="start">LIVE</text>
+    <text class="edge-label" x="390" y="430" text-anchor="start">the version a current read returns</text>
+
+    <rect class="node node--accent" x="40" y="492" width="820" height="88" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="514" text-anchor="middle">A READER WHOSE SNAPSHOT SAYS xmin=100 IS VALID AND xmax=105 IS NOT YET COMMITTED</text>
+    <text class="edge-label" x="450" y="532" text-anchor="middle">follows t_ctid from v1 to v2 to v3 to v4 — four page reads for one logical row.</text>
+    <text class="edge-label" x="450" y="548" text-anchor="middle">The chain is walked in memory once the page is pinned — not four I/Os, but real CPU,</text>
+    <text class="edge-label" x="450" y="564" text-anchor="middle">and on a high-update table the chains get long enough that the cost is visible in the plan.</text>
+
+    <rect class="node node--warn" x="40" y="596" width="820" height="64" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="618" text-anchor="middle">THE COST MODEL: VERSIONS BETWEEN THE ONE YOUR SNAPSHOT WANTS AND THE CURRENT ONE</text>
+    <text class="edge-label" x="450" y="636" text-anchor="middle">the same 200-byte row is fine at chain depth 1 and expensive at depth 40.</text>
+  </svg>
+  <figcaption>
+    <strong>An UPDATE never modifies a row — it writes a new version and points the old version's t_ctid at it, chaining four versions of one row on a single page.</strong>
+    Row 42's v1 through v4 each carry their
+    own xmin and xmax; a reader whose snapshot
+    validates xmin=100 but not xmax=105 walks
+    the chain from v1 to v4, four page reads for
+    one logical row, all in memory once the page
+    is pinned. The cost of a read is the number
+    of versions between the one your snapshot
+    wants and the current one — the same 200-byte
+    row is fine at chain depth 1 and expensive at
+    depth 40.
+  </figcaption>
+</figure><p>The cost model for a read is therefore: <em>the number of versions between the one your snapshot wants and the one that is current</em>. On a table updated frequently and read infrequently, that number can be large. This is the specific mechanism behind &quot;the table got slow and nothing changed&quot; — the same 200-byte row is fine at chain depth 1 and expensive at depth 40.</p><h3 class="vol__h3" id="33-the-visibility-rule">3.3 The Visibility Rule</h3><p>A tuple is visible to a snapshot when the snapshot's <code>xmin</code> horizon, its in-progress list, and the tuple's own header agree. Stated precisely, and precisely enough to reason about edge cases:</p><p>A tuple version is visible to a transaction if <strong>all</strong> of the following hold:</p><ol><li><code>xmin</code> is committed <strong>and</strong> <code>xmin</code> is not in the snapshot's in-progress list (<code>xip</code>), and <code>xmin</code> is below the snapshot's <code>xmax</code> horizon. If <code>xmin</code> is <code>FrozenTransactionId</code> (2), the tuple is unconditionally visible.</li><li><code>xmax</code> is 0 (never deleted or updated), <strong>or</strong> <code>xmax</code> is in the snapshot's in-progress list (so the deleter has not finished), <strong>or</strong> <code>xmax</code> is above the snapshot's <code>xmax</code> horizon (so the deleter started after our snapshot), <strong>or</strong> <code>xmax</code> is committed <em>and</em> below the snapshot's <code>xmin</code> horizon (so the deleter finished before our snapshot began).</li></ol><p>That third clause — &quot;committed and below the horizon&quot; — is the part that makes the whole thing cheap. Because the horizon only advances past transactions that are known to have finished, the common case of &quot;was this deleter already done when I started?&quot; does not need a lookup; it is a single integer comparison. The <code>xip</code> list, the <em>in-progress</em> set, is the exception and it is short, because only currently-running transactions are in it.</p><pre class="snippet" data-lang="sql"><code>-- the three inputs, live
 SELECT txid_current_snapshot() AS my_snapshot,
        pg_current_snapshot()  AS global_snapshot;
 
@@ -243,37 +435,83 @@ SELECT txid_current_snapshot() AS my_snapshot,
 -- xmin: transactions older than this are all finished
 -- xmax: no transaction with an id &gt;= this was running when the snapshot was taken
 -- xip: the ones between them that are still in progress and must be checked
-SELECT * FROM txid_status(1200);   -- committed / in progress / aborted</code></pre><h3 class="vol__h3" id="34-the-global-horizon-the-most-important-operational-fact-in-the-volume">3.4 The Global Horizon — the Most Important Operational Fact in the Volume</h3><p>Every backend holds a snapshot, and each snapshot publishes a <code>backend_xmin</code> — the oldest transaction that could still be relevant to it. PostgreSQL maintains a <strong>cluster-wide horizon</strong>, the oldest such value, and that horizon is the oldest transaction in the entire installation.</p><p>This is the fact that causes the most expensive class of production incident in PostgreSQL, and it is worth being able to state in one sentence:</p><pre class="diagram"><code>  ONE LONG-RUNNING TRANSACTION PINS THE GLOBAL xmin HORIZON, AND THEREFORE
-  PREVENTS EVERY VACUUM IN EVERY DATABASE IN THE CLUSTER FROM RECLAIMING
-  ANYTHING.
+SELECT * FROM txid_status(1200);   -- committed / in progress / aborted</code></pre><h3 class="vol__h3" id="34-the-global-horizon-the-most-important-operational-fact-in-the-volume">3.4 The Global Horizon — the Most Important Operational Fact in the Volume</h3><p>Every backend holds a snapshot, and each snapshot publishes a <code>backend_xmin</code> — the oldest transaction that could still be relevant to it. PostgreSQL maintains a <strong>cluster-wide horizon</strong>, the oldest such value, and that horizon is the oldest transaction in the entire installation.</p><p>This is the fact that causes the most expensive class of production incident in PostgreSQL, and it is worth being able to state in one sentence:</p><figure class="figure">
+  <svg viewBox="0 0 900 630" role="img" aria-label="The global horizon. A backend idle in transaction for four days publishes a backend_xmin of 918,273, which freezes the global xmin horizon. Every vacuum in every database reports relfrozenxid 918,273, cannot freeze anything and cannot reclaim dead tuples in any table. Dead tuples accumulate silently until ENOSPC stops writes.">
+    <defs>
+      <marker id="arw-database-07-05-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--bad" x="40" y="24" width="820" height="56" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="46" text-anchor="middle">ONE LONG-RUNNING TRANSACTION PINS THE GLOBAL xmin HORIZON</text>
+    <text class="edge-label" x="450" y="64" text-anchor="middle">and therefore prevents every VACUUM in every database in the cluster</text>
 
-       ┌──────────────────────────────────────────────────────────┐
-       │   backend A: idle in transaction, 4 days old             │
-       │   backend_xmin = 918,273                                │
-       └───────────────────────────┬──────────────────────────────┘
-                                   │
-                                   ▼
-              global xmin horizon = 918,273   (frozen in place)
-                                   │
-       ┌───────────────────────────┴──────────────────────────────┐
-       ▼                           ▼                              ▼
-  VACUUM in db1:          VACUUM in db2:              VACUUM in db3:
-  &quot;relfrozenxid = 918,273&quot;  &quot;relfrozenxid = 918,273&quot;   &quot;relfrozenxid = 918,273&quot;
-  cannot freeze anything     cannot freeze anything      cannot freeze anything
-  cannot reclaim dead        cannot reclaim dead        cannot reclaim dead
-  tuples in ANY table        tuples in ANY table        tuples in ANY table
-       │                           │                              │
-       └───────────────────────────┴──────────────────────────────┘
-                                   │
-                                   ▼
-       dead tuples accumulate silently in tables nobody is working on
-       visibility map goes stale → index-only scans degrade everywhere
-       index entries accumulate → every index scan touches more pages
-       disk usage climbs with no error, no alert, and no log line
-                                   │
-                                   ▼
-                     eventually: ENOSPC, and the database stops
-                     accepting writes. The pager fires.</code></pre><p>The holder is almost never doing anything. It is a job that opened a transaction, ran one statement, and then spent hours building a CSV; a test that never rolled back; a <code>psql</code> session someone left open over lunch; a migration tool between batches; a reporting connection that ran a query and then waited on a human to press a key. The query that finds it is one of the highest-value queries in this volume:</p><pre class="snippet" data-lang="sql"><code>-- WHO IS HOLDING THE HORIZON
+    <rect class="node node--accent" x="300" y="100" width="300" height="64" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="120" text-anchor="middle">backend A</text>
+    <text class="edge-label" x="450" y="136" text-anchor="middle">idle in transaction, 4 days old</text>
+    <text class="edge-label" x="450" y="152" text-anchor="middle">backend_xmin = 918,273</text>
+
+    <path class="edge" d="M 450 164 L 450 190" marker-end="url(#arw-database-07-05-a)"/>
+
+    <rect class="node node--warn" x="280" y="190" width="340" height="48" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="210" text-anchor="middle">global xmin horizon = 918,273</text>
+    <text class="edge-label" x="450" y="226" text-anchor="middle">(frozen in place)</text>
+
+    <path class="edge" d="M 450 238 L 450 262" marker-end="url(#arw-database-07-05-a)"/>
+    <path class="edge" d="M 160 262 L 740 262" stroke-width="0.8"/>
+
+    <path class="edge" d="M 160 262 L 160 284" marker-end="url(#arw-database-07-05-a)"/>
+    <rect class="node" x="60" y="284" width="200" height="100" rx="4"/>
+    <text class="edge-label edge-label--strong" x="160" y="304" text-anchor="middle">VACUUM in db1</text>
+    <text class="edge-label" x="160" y="320" text-anchor="middle">&quot;relfrozenxid = 918,273&quot;</text>
+    <text class="edge-label" x="160" y="336" text-anchor="middle">cannot freeze anything</text>
+    <text class="edge-label" x="160" y="352" text-anchor="middle">cannot reclaim dead</text>
+    <text class="edge-label" x="160" y="368" text-anchor="middle">tuples in ANY table</text>
+
+    <path class="edge" d="M 450 262 L 450 284" marker-end="url(#arw-database-07-05-a)"/>
+    <rect class="node" x="350" y="284" width="200" height="100" rx="4"/>
+    <text class="edge-label edge-label--strong" x="450" y="304" text-anchor="middle">VACUUM in db2</text>
+    <text class="edge-label" x="450" y="320" text-anchor="middle">&quot;relfrozenxid = 918,273&quot;</text>
+    <text class="edge-label" x="450" y="336" text-anchor="middle">cannot freeze anything</text>
+    <text class="edge-label" x="450" y="352" text-anchor="middle">cannot reclaim dead</text>
+    <text class="edge-label" x="450" y="368" text-anchor="middle">tuples in ANY table</text>
+
+    <path class="edge" d="M 740 262 L 740 284" marker-end="url(#arw-database-07-05-a)"/>
+    <rect class="node" x="640" y="284" width="200" height="100" rx="4"/>
+    <text class="edge-label edge-label--strong" x="740" y="304" text-anchor="middle">VACUUM in db3</text>
+    <text class="edge-label" x="740" y="320" text-anchor="middle">&quot;relfrozenxid = 918,273&quot;</text>
+    <text class="edge-label" x="740" y="336" text-anchor="middle">cannot freeze anything</text>
+    <text class="edge-label" x="740" y="352" text-anchor="middle">cannot reclaim dead</text>
+    <text class="edge-label" x="740" y="368" text-anchor="middle">tuples in ANY table</text>
+
+    <path class="edge" d="M 160 384 L 160 404" stroke-width="0.8"/>
+    <path class="edge" d="M 450 384 L 450 404" stroke-width="0.8"/>
+    <path class="edge" d="M 740 384 L 740 404" stroke-width="0.8"/>
+    <path class="edge" d="M 160 404 L 740 404" stroke-width="0.8"/>
+    <path class="edge" d="M 450 404 L 450 424" marker-end="url(#arw-database-07-05-a)"/>
+
+    <rect class="node node--warn" x="40" y="424" width="820" height="100" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="448" text-anchor="middle">dead tuples accumulate silently in tables nobody is working on</text>
+    <text class="edge-label" x="450" y="466" text-anchor="middle">visibility map goes stale → index-only scans degrade everywhere</text>
+    <text class="edge-label" x="450" y="482" text-anchor="middle">index entries accumulate → every index scan touches more pages</text>
+    <text class="edge-label" x="450" y="498" text-anchor="middle">disk usage climbs with no error, no alert, and no log line</text>
+
+    <path class="edge" d="M 450 524 L 450 548" marker-end="url(#arw-database-07-05-a)"/>
+
+    <rect class="node node--bad" x="40" y="548" width="820" height="56" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="570" text-anchor="middle">eventually: ENOSPC — the database stops accepting writes.</text>
+    <text class="edge-label" x="450" y="586" text-anchor="middle">The pager fires.</text>
+  </svg>
+  <figcaption>
+    <strong>One idle transaction pins the cluster-wide xmin horizon, and every vacuum in every database stalls behind it.</strong>
+    A backend idle in transaction for four days publishes
+    backend_xmin = 918,273; the global horizon freezes at that
+    value, so VACUUM in db1, db2 and db3 all report relfrozenxid =
+    918,273 and cannot freeze or reclaim anything. Dead tuples
+    then accumulate with no error, no alert and no log line — until
+    ENOSPC stops the writes and the pager fires.
+  </figcaption>
+</figure><p>The holder is almost never doing anything. It is a job that opened a transaction, ran one statement, and then spent hours building a CSV; a test that never rolled back; a <code>psql</code> session someone left open over lunch; a migration tool between batches; a reporting connection that ran a query and then waited on a human to press a key. The query that finds it is one of the highest-value queries in this volume:</p><pre class="snippet" data-lang="sql"><code>-- WHO IS HOLDING THE HORIZON
 SELECT pid, datname, usename, application_name, client_addr,
        state,
        now() - xact_start  AS xact_age,
@@ -289,27 +527,77 @@ SELECT pid, datname, application_name, client_addr,
        now() - state_change AS idle_for, left(query, 100) AS query
 FROM pg_stat_activity
 WHERE state = 'idle in transaction'
-ORDER BY state_change;</code></pre><p>The preventive setting is <code>idle_in_transaction_session_timeout</code>, whose default is <strong>0</strong>, i.e. off. Setting it to something like <code>5min</code> means the next such session kills itself instead of pinning the cluster for a week. This is the single highest-value configuration change in this chapter, and it is not close.</p><aside class="callout callout--prod"><span class="callout__label">In production</span><p>Problem: A reporting database's disk usage climbs 8 GB a week. No query is slow, no <code>EXPLAIN</code> output looks wrong, and there is nothing in the log. Nothing has been manually vacuumed in eight months. Investigation: <code>pg_stat_user_tables</code> shows <code>events</code> with 240 million live tuples, 61 million dead tuples, and <code>last_autovacuum</code> of eleven days ago — despite autovacuum being enabled and running on schedule. <code>pg_stat_activity</code> filtered to <code>backend_xmin IS NOT NULL</code> shows exactly one row: an ETL service in state <code>idle in transaction</code>, <code>xact_start</code> four days old, <code>backend_xmin</code> set, its last query a <code>COPY</code> that finished long ago. Root cause: that one session holds the cluster's oldest snapshot, so the global <code>xmin</code> horizon is four days old, so no vacuum in any database can freeze a page or reclaim a dead tuple. Autovacuum has been running diligently and achieving nothing. Solution: terminate the session, set <code>idle_in_transaction_session_timeout = 5min</code> so the next one dies on its own, and run <code>VACUUM (ANALYZE)</code> on <code>events</code>. Note that disk usage will not come back — that requires <code>pg_repack</code> in a window, or an explicit decision to accept the size. Set <code>autovacuum_vacuum_scale_factor = 0.02</code> on <code>events</code> so the working set of dead tuples is an order of magnitude smaller in future. Prevention: alert on <code>max(age(datfrozenxid))</code>, alert on any <code>backend_xmin</code> older than ten minutes, alert on <code>n_dead_tup / n_live_tup &gt; 0.2</code>, and put a rule in the runbook that any job spending more than a minute outside SQL must not hold a transaction open.</p></aside><h3 class="vol__h3" id="35-hot-updates">3.5 HOT Updates</h3><p>A HOT (heap-only tuple) update is the case where the new version fits on the same page as the old one. Because the tuple never leaves the page, no index needs a new entry — the old index entries still point at the page, and a reader follows the chain. PostgreSQL requires <strong>both</strong> of the following:</p><ol><li><strong>No indexed column of the row changed.</strong> If any index covers a modified column, the index needs a new entry and the update is necessarily non-HOT.</li><li><strong>There is free space on the page.</strong> <code>fillfactor</code> reserves space for exactly this.</li></ol><pre class="diagram"><code>  ┌───────────────────── PAGE 7 ─────────────────────┐
-  │  ┌──────────────┐   ┌──────────────┐            │
-  │  │ index entry  │   │ index entry  │   ← UNCHANGED
-  │  │ (email)──────┼───┼──▶  block 7   │     with a
-  │  └──────────────┘   └──────────────┘     HOT update
-  │  ┌──────────────┐   ┌──────────────┐            │
-  │  │ index entry  │   │ index entry  │            │
-  │  │ (city)───────┼───┼──▶  block 7   │            │
-  │  └──────────────┘   └──────────────┘            │
-  │                                                    │
-  │  ctid (7,10) v1 ──▶ ctid (7,11) v2   [ new rows  │
-  │                               sit here, in the    │
-  │                               reserved space ]     │
-  └────────────────────────────────────────────────────┘
+ORDER BY state_change;</code></pre><p>The preventive setting is <code>idle_in_transaction_session_timeout</code>, whose default is <strong>0</strong>, i.e. off. Setting it to something like <code>5min</code> means the next such session kills itself instead of pinning the cluster for a week. This is the single highest-value configuration change in this chapter, and it is not close.</p><aside class="callout callout--prod"><span class="callout__label">In production</span><p>Problem: A reporting database's disk usage climbs 8 GB a week. No query is slow, no <code>EXPLAIN</code> output looks wrong, and there is nothing in the log. Nothing has been manually vacuumed in eight months. Investigation: <code>pg_stat_user_tables</code> shows <code>events</code> with 240 million live tuples, 61 million dead tuples, and <code>last_autovacuum</code> of eleven days ago — despite autovacuum being enabled and running on schedule. <code>pg_stat_activity</code> filtered to <code>backend_xmin IS NOT NULL</code> shows exactly one row: an ETL service in state <code>idle in transaction</code>, <code>xact_start</code> four days old, <code>backend_xmin</code> set, its last query a <code>COPY</code> that finished long ago. Root cause: that one session holds the cluster's oldest snapshot, so the global <code>xmin</code> horizon is four days old, so no vacuum in any database can freeze a page or reclaim a dead tuple. Autovacuum has been running diligently and achieving nothing. Solution: terminate the session, set <code>idle_in_transaction_session_timeout = 5min</code> so the next one dies on its own, and run <code>VACUUM (ANALYZE)</code> on <code>events</code>. Note that disk usage will not come back — that requires <code>pg_repack</code> in a window, or an explicit decision to accept the size. Set <code>autovacuum_vacuum_scale_factor = 0.02</code> on <code>events</code> so the working set of dead tuples is an order of magnitude smaller in future. Prevention: alert on <code>max(age(datfrozenxid))</code>, alert on any <code>backend_xmin</code> older than ten minutes, alert on <code>n_dead_tup / n_live_tup &gt; 0.2</code>, and put a rule in the runbook that any job spending more than a minute outside SQL must not hold a transaction open.</p></aside><h3 class="vol__h3" id="35-hot-updates">3.5 HOT Updates</h3><p>A HOT (heap-only tuple) update is the case where the new version fits on the same page as the old one. Because the tuple never leaves the page, no index needs a new entry — the old index entries still point at the page, and a reader follows the chain. PostgreSQL requires <strong>both</strong> of the following:</p><ol><li><strong>No indexed column of the row changed.</strong> If any index covers a modified column, the index needs a new entry and the update is necessarily non-HOT.</li><li><strong>There is free space on the page.</strong> <code>fillfactor</code> reserves space for exactly this.</li></ol><figure class="figure">
+  <svg viewBox="0 0 900 380" role="img" aria-label="Page 7 with a HOT update. Two index entries, on email and on city, both still point at block 7, unchanged. The old version at ctid 7,10 points through t_ctid to the new version at ctid 7,11, which sits in the page's reserved space. No index is touched.">
+    <defs>
+      <marker id="arw-database-07-06-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="40" y="24" width="560" height="280" rx="5"/>
+    <text class="edge-label edge-label--strong" x="320" y="48" text-anchor="middle">PAGE 7 — UNCHANGED by a HOT update</text>
 
-  HOT   : new version on same page, zero index writes, WAL is tiny,
-          visibility map can be repainted, chain is pruned on VACUUM.
-  NON-HOT: new version on another page, EVERY index covering a changed
-          column gets a NEW entry, the old entries become dead, WAL
-          carries a full new tuple, and the freed space is unusable
-          until VACUUM.</code></pre><pre class="snippet" data-lang="sql"><code>-- reserve room so updates can stay on the page. 10-30% cost, in exchange for
+    <rect class="node" x="70" y="64" width="150" height="40" rx="4"/>
+    <text class="edge-label" x="145" y="82" text-anchor="middle">index entry</text>
+    <text class="edge-label" x="145" y="98" text-anchor="middle">(email)</text>
+
+    <rect class="node" x="70" y="120" width="150" height="40" rx="4"/>
+    <text class="edge-label" x="145" y="138" text-anchor="middle">index entry</text>
+    <text class="edge-label" x="145" y="154" text-anchor="middle">(city)</text>
+
+    <path class="edge" d="M 220 84 L 440 108" marker-end="url(#arw-database-07-06-a)"/>
+    <path class="edge" d="M 220 140 L 440 136" marker-end="url(#arw-database-07-06-a)"/>
+
+    <rect class="node" x="440" y="92" width="130" height="60" rx="4"/>
+    <text class="edge-label edge-label--strong" x="505" y="118" text-anchor="middle">block 7</text>
+    <text class="edge-label" x="505" y="134" text-anchor="middle">both entries still land here</text>
+
+    <text class="edge-label edge-label--strong" x="330" y="182" text-anchor="middle">UNCHANGED with a HOT update</text>
+
+    <rect class="node" x="70" y="200" width="200" height="44" rx="4"/>
+    <text class="edge-label edge-label--strong" x="170" y="218" text-anchor="middle">ctid (7,10) — v1</text>
+    <text class="edge-label" x="170" y="234" text-anchor="middle">the old version</text>
+
+    <path class="edge" d="M 270 222 L 340 222" marker-end="url(#arw-database-07-06-a)"/>
+    <text class="edge-label" x="305" y="214" text-anchor="middle">t_ctid</text>
+
+    <rect class="node node--good" x="340" y="200" width="200" height="44" rx="4"/>
+    <text class="edge-label edge-label--strong" x="440" y="218" text-anchor="middle">ctid (7,11) — v2</text>
+    <text class="edge-label" x="440" y="234" text-anchor="middle">the new version</text>
+
+    <text class="edge-label" x="420" y="276" text-anchor="middle">[ new rows sit here, in the reserved space ]</text>
+
+    <rect class="node node--good" x="640" y="24" width="220" height="140" rx="5"/>
+    <text class="edge-label edge-label--strong" x="750" y="48" text-anchor="middle">HOT</text>
+    <text class="edge-label" x="750" y="68" text-anchor="middle">new version on same page,</text>
+    <text class="edge-label" x="750" y="84" text-anchor="middle">zero index writes,</text>
+    <text class="edge-label" x="750" y="100" text-anchor="middle">WAL is tiny,</text>
+    <text class="edge-label" x="750" y="116" text-anchor="middle">visibility map can be</text>
+    <text class="edge-label" x="750" y="132" text-anchor="middle">repainted, chain is</text>
+    <text class="edge-label" x="750" y="148" text-anchor="middle">pruned on VACUUM.</text>
+
+    <rect class="node node--bad" x="640" y="184" width="220" height="168" rx="5"/>
+    <text class="edge-label edge-label--strong" x="750" y="208" text-anchor="middle">NON-HOT</text>
+    <text class="edge-label" x="750" y="228" text-anchor="middle">new version on another</text>
+    <text class="edge-label" x="750" y="244" text-anchor="middle">page; EVERY index that</text>
+    <text class="edge-label" x="750" y="260" text-anchor="middle">covers a changed column</text>
+    <text class="edge-label" x="750" y="276" text-anchor="middle">gets a NEW entry; the</text>
+    <text class="edge-label" x="750" y="292" text-anchor="middle">old entries become dead,</text>
+    <text class="edge-label" x="750" y="308" text-anchor="middle">WAL carries a full new</text>
+    <text class="edge-label" x="750" y="324" text-anchor="middle">tuple; freed space is</text>
+    <text class="edge-label" x="750" y="340" text-anchor="middle">unusable until VACUUM.</text>
+  </svg>
+  <figcaption>
+    <strong>A HOT update keeps the new version on the same page, so no index needs a new entry — and the requirements are exactly two.</strong>
+    The old version's ctid points at the new one inside the reserved
+    space: zero index writes, tiny WAL, a repaintable visibility map,
+    and a chain pruned on VACUUM. Non-HOT — the new version on
+    another page — gives every index covering a changed column a new
+    entry, dead old entries, a full tuple in the WAL, and space
+    unusable until VACUUM. The requirements: no indexed column
+    changed, and free space on the page, which fillfactor reserves.
+  </figcaption>
+</figure><pre class="snippet" data-lang="sql"><code>-- reserve room so updates can stay on the page. 10-30% cost, in exchange for
 -- HOT updates on any table that is updated rather than appended to.
 ALTER TABLE events SET (fillfactor = 80);
 
@@ -482,37 +770,69 @@ ALTER TABLE subscriptions ADD CONSTRAINT one_active_per_user
 CREATE UNIQUE INDEX one_active ON subscriptions (user_id, COALESCE(status, ''))
   WHERE status IS NOT NULL;</code></pre><p><code>NULLS NOT DISTINCT</code> is one of the cleaner version-specific wins: the workaround above leaks a sentinel value into the index and needs a matching partial-index predicate, and the constraint version needs neither. Again, say which version.</p><p>Other sharp edges worth knowing exist in this dialect: <code>GROUPING SETS</code>, <code>ROLLUP</code> and <code>CUBE</code> for multi-level aggregation; <code>FILTER</code>; <code>arrays_agg</code> and <code>string_agg</code> with <code>ORDER BY</code> <em>inside</em> the aggregate, which is the only way to get ordered aggregation in PostgreSQL; and the fact that <code>UPDATE ... FROM</code> requires the target table to be mentioned in the <code>FROM</code> clause as a self-join, with the notorious &quot;the <code>FROM</code> item is a self-join and its <code>WHERE</code> clause references the target table&quot; error when the alias is wrong.</p><h4 class="vol__h4" id="common-mistakes-5">Common Mistakes</h4><ul><li>Saying &quot;PostgreSQL materialises CTEs&quot; without a version, and forgetting that recursive CTEs are always materialised</li><li>Forgetting that <code>DISTINCT ON</code> requires the <code>ORDER BY</code> to lead with the same expressions</li><li>Writing <code>ON CONFLICT</code> against a partial unique index without repeating the predicate</li><li>Using <code>MERGE</code> or <code>ON CONFLICT DO UPDATE</code> where the source has duplicate matches, and hitting &quot;cannot affect row a second time&quot;</li><li>Adding a <code>GENERATED ALWAYS AS ... STORED</code> column to a large table in one migration and taking a full-rewrite lock</li><li>Reaching for <code>SUM(CASE WHEN ...)</code> where <code>count(*) FILTER (WHERE ...)</code> visits each row once and is index-friendly</li><li>Assuming a unique index prevents duplicate NULLs, which it did not until version 15</li><li>Reaching for the <code>LATERAL</code> top-N form and then adding a <code>Materialize</code> node by accident through a correlated subquery in the <code>WHERE</code> clause</li></ul><h4 class="vol__h4" id="interview-questions-sql-feature-depth">Interview Questions — SQL Feature Depth</h4><article class="qa" id="5-sql-feature-depth-1"><p class="qa__q"><a class="qa__num" href="#5-sql-feature-depth-1">Q1</a> Are CTEs materialised in PostgreSQL? Walk me through the version history. <span class="qa__badge"><code>ADVANCED</code></span></p><div class="qa__a"><p>It depends on the version, and the version is the answer. Before PostgreSQL 12, a non-recursive <code>WITH</code> clause was a materialisation fence: the CTE was computed once into a tuplestore and every reference re-read it, the planner would not push a predicate from the outer query into it, and it would not be converted into a subquery or a join. That was safe — it protected against a volatile function being evaluated more than once — but it made CTEs much more expensive than the equivalent subquery, and it is the reason so much folklore exists about CTEs being slow. From PostgreSQL 12 onward, a non-recursive CTE with no side effects is inlined by default: the planner substitutes it into the referencing query as though you had written the subquery, so predicates push down and join order is chosen globally. The exception that has to be stated is that <strong>recursive CTEs are always materialised</strong>, in every version, because the working table is inherent to the algorithm. And the escape hatch is still there in both directions: <code>WITH x AS MATERIALIZED (...)</code> restores the old behaviour and <code>WITH x AS NOT MATERIALIZED (...)</code> forces inlining, which is the tool when a CTE genuinely must be computed once or contains a volatile function.</p></div></article><article class="qa" id="5-sql-feature-depth-2"><p class="qa__q"><a class="qa__num" href="#5-sql-feature-depth-2">Q2</a> <code>DISTINCT ON</code> gives an error. What are the possible causes? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>The overwhelmingly common one is the ordering rule: the expressions in the <code>DISTINCT ON</code> list must match the <em>initial</em> <code>ORDER BY</code> expressions. <code>SELECT DISTINCT ON (customer_id) ... ORDER BY customer_id, placed_at DESC</code> is valid because <code>ORDER BY</code> starts with <code>customer_id</code>; the same query with <code>ORDER BY placed_at DESC, customer_id</code> fails, because the sort order no longer groups by the thing being deduplicated. The fix is to reorder the <code>ORDER BY</code> — the <code>DISTINCT ON</code> columns first, then the tiebreaker. The other causes are rarer: duplicate output column names in a query that uses <code>DISTINCT</code>; a <code>DISTINCT ON</code> expression list that does not match the actual query semantics, producing a result that looks right and is not, which is the dangerous version because it does not error at all; and type mismatches where the <code>DISTINCT ON</code> expression and the <code>ORDER BY</code> expression are not the same type. The practical note is that <code>DISTINCT ON</code> is very often the wrong tool — it is non-standard, picking an arbitrary row among ties that happen to match the <code>ORDER BY</code>, and for &quot;top N per group&quot; the <code>LATERAL</code> form or a <code>row_number()</code> window is usually clearer and often faster because it stops reading after N rows per group instead of sorting everything.</p></div></article><article class="qa" id="5-sql-feature-depth-3"><p class="qa__q"><a class="qa__num" href="#5-sql-feature-depth-3">Q3</a> A <code>MERGE</code> statement is failing with &quot;ON CONFLICT DO UPDATE command cannot affect row a second time&quot;. What is happening? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>The source relation contains two or more rows that match the same target row. <code>MERGE</code> (and <code>ON CONFLICT DO UPDATE</code>, which shares the constraint) processes source rows one at a time against the target, and a single target row cannot be updated twice within one statement — the first update makes the row no longer match the join condition in a way the statement can reason about, or more precisely the statement's semantics do not permit applying two updates to the same row. This is not a PostgreSQL bug; it is a statement about what the operation means. The real problem is upstream: the source has duplicates. The usual sources are a join that fans out — joining a target to a source through a one-to-many relationship, so one target row matches three source rows — or a source that is not deduplicated. The fixes are to aggregate the source first (<code>GROUP BY</code> the join key and combine with <code>sum</code>, <code>max</code>, or whatever the intent is), to deduplicate it with <code>DISTINCT ON</code>, or to restructure so the statement is not doing a one-to-many merge. The design point: <code>MERGE</code> is genuinely good for upsert and for a small number of well-understood cases, and it becomes ambiguous exactly where a fan-out exists, so the fan-out should be handled in the source relation where it is visible rather than discovered as an error inside the merge.</p></div></article><article class="qa" id="5-sql-feature-depth-4"><p class="qa__q"><a class="qa__num" href="#5-sql-feature-depth-4">Q4</a> Adding a <code>jsonb</code> column to a 200-million-row table. What are the choices and their costs? <span class="qa__badge"><code>ADVANCED</code></span></p><div class="qa__a"><p>The cost depends almost entirely on whether the column is nullable with no default, and whether you backfill. <code>ALTER TABLE t ADD COLUMN c jsonb</code> with no <code>DEFAULT</code> is a catalog-only change: PostgreSQL stores the absence of the value in the null bitmap of existing rows rather than rewriting them, so it is fast on a large table and takes only a brief <code>ACCESS EXCLUSIVE</code> lock. Adding a <code>DEFAULT</code> is the dangerous version on older releases, because a non-volatile <code>DEFAULT</code> was implemented as a full table rewrite under lock; the modern approach is to add the column nullable, backfill in bounded batches, and then — if a default is genuinely needed — set it, which since PostgreSQL 11 avoids the rewrite for a non-volatile expression. The backfill is where the real cost hides, and it is Chapter 3's problem: a single <code>UPDATE</code> of 200 million rows is one enormous transaction that holds the vacuum horizon for its entire duration, which starves autovacuum for the whole cluster while it runs. So the backfill must be batched — thousands to low millions of rows per transaction, with a commit between batches — and that in turn means the table is temporarily in a state where some rows have the value and some do not, so any code reading it must tolerate both, or the deployment has to be ordered behind the backfill. The staff-level observation: a schema change that is one statement in the pull request is frequently a multi-hour operational project, and the review question is &quot;what locks does this take and for how long&quot; rather than &quot;is the syntax correct&quot;.</p></div></article><article class="qa" id="5-sql-feature-depth-5"><p class="qa__q"><a class="qa__num" href="#5-sql-feature-depth-5">Q5</a> <code>NULLS NOT DISTINCT</code> on a unique constraint. Why does it exist and what did people do before? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>Because SQL's <code>NULL</code> semantics mean a unique index traditionally treats <code>NULL</code>s as <em>distinct</em>, so it cannot prevent duplicate &quot;unknown&quot; values — a table with a <code>UNIQUE (user_id, status)</code> will happily hold two rows where <code>status IS NULL</code> for the same user, because <code>NULL</code> is not equal to <code>NULL</code>. That is correct SQL and useless for the actual business rule, which is &quot;one active subscription per user, where missing status counts as inactive&quot;. Before PostgreSQL 15 the workarounds were an expression index on <code>COALESCE(status, '')</code> — which requires inventing a sentinel value that then leaks into every query against the index, and which needs a matching <code>WHERE status IS NOT NULL</code> predicate on any partial index built over it — or a <code>CHECK</code> constraint, or simply an application-level guarantee that nothing checks. <code>UNIQUE NULLS NOT DISTINCT</code> (PostgreSQL 15) states the intent directly, needs no sentinel, and works with partial indexes without a predicate. The version matters because the behaviour genuinely changed, and a migration written for 14 that relies on the <code>COALESCE</code> idiom still works on 15+ but is now carrying a sentinel that no longer needs to exist. The general principle: SQL's three-valued logic is correct and routinely inconvenient, and the versions where an engine grows a way to opt out of the inconvenience are worth tracking, because the workaround you already have is often still in the schema after the fix has shipped.</p></div></article><h4 class="vol__h4" id="further-reading-5">Further Reading</h4><ul><li><a href="https://www.postgresql.org/docs/current/queries-with.html" rel="noopener noreferrer">PostgreSQL — <code>WITH</code> Queries</a> — common table expressions, <code>MATERIALIZED</code>, recursion, and the <code>SEARCH</code>/<code>CYCLE</code> clauses.</li><li><a href="https://www.postgresql.org/docs/current/sql-select.html" rel="noopener noreferrer">PostgreSQL — <code>SELECT</code> Reference</a> — <code>DISTINCT ON</code>, the ordering rule, and the locking clause forms.</li><li><a href="https://www.postgresql.org/docs/current/sql-insert.html" rel="noopener noreferrer">PostgreSQL — <code>INSERT</code></a> — <code>ON CONFLICT</code>, conflict-target inference, partial-index predicates, and <code>RETURNING</code>.</li><li><a href="https://www.postgresql.org/docs/current/sql-merge.html" rel="noopener noreferrer">PostgreSQL — <code>MERGE</code></a> — the <code>WHEN MATCHED</code> / <code>WHEN NOT MATCHED</code> forms and the per-source-row non-atomicity.</li><li><a href="https://www.postgresql.org/docs/current/functions-json.html" rel="noopener noreferrer">PostgreSQL — JSON Functions and Operators</a> — the path language, <code>jsonb_path_exists</code>, and <code>jsonb_path_query</code>.</li></ul><aside class="callout callout--summary"><span class="callout__label">Chapter summary</span><p>The dialect depth worth owning is where behaviour is version-specific or where the engine offers something the standard does not. The headline is CTEs: inlined by default from PostgreSQL 12, materialised as a fence before it, always materialised when recursive, and overridable in both directions with <code>MATERIALIZED</code> / <code>NOT MATERIALIZED</code>. <code>DISTINCT ON</code> gives non-standard top-per-group at the cost of an ordering rule that errors when the <code>ORDER BY</code> does not lead with the <code>DISTINCT ON</code> expressions. <code>ON CONFLICT</code> and <code>MERGE</code> both fail with &quot;cannot affect row a second time&quot; when the source fans out, which is a statement about the source rather than a bug. <code>NULLS NOT DISTINCT</code> (15) and <code>VIRTUAL</code> generated columns (18) are cases where the engine grew a way out of a real SQL inconvenience, and the workarounds people built for the older behaviour usually remain in the schema afterwards. And the operational point that catches people: adding a column to a large table is fast when nullable with no default and a project when backfilled, because an unbatched backfill is a single transaction that holds the vacuum horizon for the entire cluster.</p></aside></section>
 
-<section id="chapter-6-indexes-and-indexing" data-filter-target><h2 class="vol__h2">Chapter 6 — Indexes &amp; Indexing</h2><p>Volume 4 owns the B+ tree, the page split, the leftmost-prefix rule, and index types in general. This chapter is the PostgreSQL-specific surface: the six access methods, what each is actually good at, and the three index options — partial, expression, and covering — that have no direct equivalent elsewhere. The decision that matters most here is not &quot;which index&quot; but &quot;which access method&quot;, because PostgreSQL's access methods are genuinely different structures with genuinely different failure modes.</p><h3 class="vol__h3" id="61-the-six-access-methods">6.1 The Six Access Methods</h3><div class="table-wrap"><table><thead><tr><th>AM</th><th>Structure</th><th>Best for</th><th>Notable properties</th></tr></thead><tbody><tr><td><strong>B-tree</strong></td><td>balanced tree, ordered</td><td>equality and range on scalar types</td><td>The default; supports multicolumn, partial, expression, <code>INCLUDE</code></td></tr><tr><td><strong>Hash</strong></td><td>hash table</td><td>equality <em>only</em>, and only on <code>=</code></td><td>Smaller and sometimes faster than B-tree for pure equality; no range, no ordering</td></tr><tr><td><strong>GIN</strong></td><td>inverted index, posting lists + a pending list</td><td>containment (<code>@&gt;</code>, <code>?</code>), full text, arrays, <code>jsonb</code></td><td>Slow to build, expensive to write, lossy-free; opclass choice is critical</td></tr><tr><td><strong>GiST</strong></td><td>a <em>lossy</em> search structure over a common extensible interface</td><td>geometry, ranges, nearest-neighbour, <code>EXCLUDE</code></td><td>Lossy: stores signatures, re-checks candidates; can do KNN and <code>EXCLUDE</code></td></tr><tr><td><strong>SP-GiST</strong></td><td>space-partitioning: disjoint regions, one per node</td><td>non-balanced structures: IP prefixes, <code>inet</code>, <code>point</code>, text prefixes</td><td>Useful for prefix-like data; more specialised</td></tr><tr><td><strong>BRIN</strong></td><td>a small summary per <em>range of heap pages</em></td><td>very large tables, data physically correlated with insertion order</td><td>Tiny, nearly free to maintain; degrades to a scan when correlation is absent</td></tr></tbody></table></div><p>Three of these deserve a paragraph each, because they are the ones candidates misdescribe.</p><p><strong>GIN is a posting-list index and its cost is on the write path.</strong> Every value that must be findable gets an entry; for a document with fifty keys, an insert adds fifty entries, and an update is a delete plus fifty inserts. PostgreSQL mitigates this with a <strong>pending list</strong>: new entries go into a small buffer and are flushed into the main structure in batches, so the cost is amortised and the structure stays append-mostly. The dial is <code>gin_pending_list_limit</code> (default 4 MB), and a persistently non-empty pending list — visible via <code>pgstatindex()</code>'s <code>pending_list_pages</code> and <code>avg_pending_pages</code> — is a signal that writes are outpacing the merges. Bloat in a GIN index is repaired by <code>REINDEX</code>, not <code>VACUUM</code>.</p><p><strong>GiST is lossy, and that is a feature, not a defect.</strong> A GiST index stores a <em>signature</em> of each entry — for a geometry, a bounding box; for a range, a summarising interval — and a search returns candidates whose signature <em>might</em> match, after which the index's <code>consistent</code> function re-checks each one exactly. This is what allows GiST to support arbitrary types without knowing anything about them, and it is also why GiST index-only scans do not exist: a lossy index cannot answer a query on its own. The two capabilities that only GiST has in PostgreSQL are <strong>KNN</strong> (<code>ORDER BY geom &lt;-&gt; point</code>, nearest-neighbour without an approximate structure) and <strong><code>EXCLUDE</code> constraints</strong>.</p><p><strong>BRIN summarises blocks rather than indexing rows</strong>, and its whole design assumes physical correlation:</p><pre class="diagram"><code>  BRIN ON readings (recorded_at)  WITH (pages_per_range = 32)
+<section id="chapter-6-indexes-and-indexing" data-filter-target><h2 class="vol__h2">Chapter 6 — Indexes &amp; Indexing</h2><p>Volume 4 owns the B+ tree, the page split, the leftmost-prefix rule, and index types in general. This chapter is the PostgreSQL-specific surface: the six access methods, what each is actually good at, and the three index options — partial, expression, and covering — that have no direct equivalent elsewhere. The decision that matters most here is not &quot;which index&quot; but &quot;which access method&quot;, because PostgreSQL's access methods are genuinely different structures with genuinely different failure modes.</p><h3 class="vol__h3" id="61-the-six-access-methods">6.1 The Six Access Methods</h3><div class="table-wrap"><table><thead><tr><th>AM</th><th>Structure</th><th>Best for</th><th>Notable properties</th></tr></thead><tbody><tr><td><strong>B-tree</strong></td><td>balanced tree, ordered</td><td>equality and range on scalar types</td><td>The default; supports multicolumn, partial, expression, <code>INCLUDE</code></td></tr><tr><td><strong>Hash</strong></td><td>hash table</td><td>equality <em>only</em>, and only on <code>=</code></td><td>Smaller and sometimes faster than B-tree for pure equality; no range, no ordering</td></tr><tr><td><strong>GIN</strong></td><td>inverted index, posting lists + a pending list</td><td>containment (<code>@&gt;</code>, <code>?</code>), full text, arrays, <code>jsonb</code></td><td>Slow to build, expensive to write, lossy-free; opclass choice is critical</td></tr><tr><td><strong>GiST</strong></td><td>a <em>lossy</em> search structure over a common extensible interface</td><td>geometry, ranges, nearest-neighbour, <code>EXCLUDE</code></td><td>Lossy: stores signatures, re-checks candidates; can do KNN and <code>EXCLUDE</code></td></tr><tr><td><strong>SP-GiST</strong></td><td>space-partitioning: disjoint regions, one per node</td><td>non-balanced structures: IP prefixes, <code>inet</code>, <code>point</code>, text prefixes</td><td>Useful for prefix-like data; more specialised</td></tr><tr><td><strong>BRIN</strong></td><td>a small summary per <em>range of heap pages</em></td><td>very large tables, data physically correlated with insertion order</td><td>Tiny, nearly free to maintain; degrades to a scan when correlation is absent</td></tr></tbody></table></div><p>Three of these deserve a paragraph each, because they are the ones candidates misdescribe.</p><p><strong>GIN is a posting-list index and its cost is on the write path.</strong> Every value that must be findable gets an entry; for a document with fifty keys, an insert adds fifty entries, and an update is a delete plus fifty inserts. PostgreSQL mitigates this with a <strong>pending list</strong>: new entries go into a small buffer and are flushed into the main structure in batches, so the cost is amortised and the structure stays append-mostly. The dial is <code>gin_pending_list_limit</code> (default 4 MB), and a persistently non-empty pending list — visible via <code>pgstatindex()</code>'s <code>pending_list_pages</code> and <code>avg_pending_pages</code> — is a signal that writes are outpacing the merges. Bloat in a GIN index is repaired by <code>REINDEX</code>, not <code>VACUUM</code>.</p><p><strong>GiST is lossy, and that is a feature, not a defect.</strong> A GiST index stores a <em>signature</em> of each entry — for a geometry, a bounding box; for a range, a summarising interval — and a search returns candidates whose signature <em>might</em> match, after which the index's <code>consistent</code> function re-checks each one exactly. This is what allows GiST to support arbitrary types without knowing anything about them, and it is also why GiST index-only scans do not exist: a lossy index cannot answer a query on its own. The two capabilities that only GiST has in PostgreSQL are <strong>KNN</strong> (<code>ORDER BY geom &lt;-&gt; point</code>, nearest-neighbour without an approximate structure) and <strong><code>EXCLUDE</code> constraints</strong>.</p><p><strong>BRIN summarises blocks rather than indexing rows</strong>, and its whole design assumes physical correlation:</p><figure class="figure">
+  <svg viewBox="0 0 900 600" role="img" aria-label="A BRIN index on recorded_at, pages_per_range 32. A 64 GB table is about 8.4 million pages, summarised into about 262,000 entries — a few megabytes of index. Each entry holds the min and max recorded_at for its 32-page range, so a last-hour query reads only the last few hundred ranges.">
+    <text class="label" x="450" y="26" text-anchor="middle">BRIN ON readings (recorded_at) WITH (pages_per_range = 32)</text>
 
-  A 64 GB table at 8 kB/page = ~8.4 million pages.
-  pages_per_range=32  →  ~262,000 summary entries  →  a few MB of index.
-  A B-tree on the same column would be tens of percent of the table's own size
-  and would need an entry written on every single INSERT.
+    <rect class="node node--accent" x="40" y="40" width="820" height="64" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="62" text-anchor="middle">a 64 GB table at 8 kB/page = ~8.4 million pages</text>
+    <text class="edge-label" x="450" y="80" text-anchor="middle">pages_per_range = 32 → ~262,000 summary entries → a few MB of index</text>
+    <text class="edge-label" x="450" y="96" text-anchor="middle">a B-tree would be tens of percent of the table, with an entry per INSERT</text>
 
-  The summaries look like:
-  ┌──────────────┬──────────────────────────────────────────────┐
-  │ block range  │ min recorded_at        max recorded_at      │
-  ├──────────────┼──────────────────────────────────────────────┤
-  │ pages 1-32   │ 2026-01-01T00:00:00Z    2026-01-01T00:04:12Z │
-  │ pages 33-64  │ 2026-01-01T00:04:12Z    2026-01-01T00:08:41Z │
-  │ ...          │ ...                    ...                  │
-  │ pages 8.39M- │ 2026-02-28T23:55:03Z    2026-02-28T23:59:59Z │
-  │     8.39M+32 │                                              │
-  └──────────────┴──────────────────────────────────────────────┘
+    <rect class="node" x="40" y="120" width="820" height="30" rx="3"/>
+    <text class="edge-label edge-label--strong" x="140" y="140" text-anchor="middle">block range</text>
+    <text class="edge-label edge-label--strong" x="390" y="140" text-anchor="middle">min recorded_at</text>
+    <text class="edge-label edge-label--strong" x="700" y="140" text-anchor="middle">max recorded_at</text>
 
-  &quot;last hour&quot;  →  the last few hundred ranges. Everything older is
-                  excluded by summary without being read. THAT is the win.
+    <rect class="node" x="40" y="152" width="820" height="30" rx="3"/>
+    <text class="edge-label" x="140" y="172" text-anchor="middle">pages 1-32</text>
+    <text class="edge-label" x="390" y="172" text-anchor="middle">2026-01-01T00:00:00Z</text>
+    <text class="edge-label" x="700" y="172" text-anchor="middle">2026-01-01T00:04:12Z</text>
 
-  IF THE CORRELATION IS BROKEN — an UPDATE that moves rows, a
-  pg_repack that rewrites the file in a new order, a restore that
-  scrambles physical order — every range's min/max now spans the
-  whole value domain, every range &quot;might match&quot;, and the index
-  silently stops excluding anything. The plan still shows a Bitmap
-  Heap Scan; it just reads the whole table. There is no error.
+    <rect class="node" x="40" y="184" width="820" height="30" rx="3"/>
+    <text class="edge-label" x="140" y="204" text-anchor="middle">pages 33-64</text>
+    <text class="edge-label" x="390" y="204" text-anchor="middle">2026-01-01T00:04:12Z</text>
+    <text class="edge-label" x="700" y="204" text-anchor="middle">2026-01-01T00:08:41Z</text>
 
-  pages_per_range: default 128 (~1 MB of heap at 8 kB pages). Lower it for
-  finer granularity and a larger index; raise it for a smaller index and
-  coarser exclusion.</code></pre><h3 class="vol__h3" id="62-partial-expression-and-covering-indexes">6.2 Partial, Expression, and Covering Indexes</h3><p><strong>Partial indexes</strong> are the most under-used feature in the set, and they do double duty: they save space, and they can enforce a conditional uniqueness constraint that a plain <code>UNIQUE</code> cannot express (because the predicate has to be repeated in <code>ON CONFLICT</code>).</p><pre class="snippet" data-lang="sql"><code>-- only 2% of orders are open; the index covers 2% of the rows
+    <rect class="node" x="40" y="216" width="820" height="30" rx="3"/>
+    <text class="edge-label" x="140" y="236" text-anchor="middle">...</text>
+    <text class="edge-label" x="390" y="236" text-anchor="middle">...</text>
+    <text class="edge-label" x="700" y="236" text-anchor="middle">...</text>
+
+    <rect class="node" x="40" y="248" width="820" height="30" rx="3"/>
+    <text class="edge-label" x="140" y="268" text-anchor="middle">pages 8.39M-8.39M+32</text>
+    <text class="edge-label" x="390" y="268" text-anchor="middle">2026-02-28T23:55:03Z</text>
+    <text class="edge-label" x="700" y="268" text-anchor="middle">2026-02-28T23:59:59Z</text>
+
+    <rect class="node node--good" x="40" y="296" width="820" height="48" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="318" text-anchor="middle">&quot;last hour&quot; → the last few hundred ranges</text>
+    <text class="edge-label" x="450" y="334" text-anchor="middle">everything older is excluded by summary without being read</text>
+
+    <rect class="node node--bad" x="40" y="368" width="820" height="120" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="392" text-anchor="middle">IF THE CORRELATION IS BROKEN, THE INDEX SILENTLY STOPS EXCLUDING ANYTHING</text>
+    <text class="edge-label" x="450" y="410" text-anchor="middle">an UPDATE that moves rows, a pg_repack that rewrites the file in a new</text>
+    <text class="edge-label" x="450" y="426" text-anchor="middle">order, a restore that scrambles physical order — every range's min/max now</text>
+    <text class="edge-label" x="450" y="442" text-anchor="middle">spans the whole value domain, every range &quot;might match&quot;.</text>
+    <text class="edge-label" x="450" y="460" text-anchor="middle">The plan still shows a Bitmap Heap Scan; it just reads the whole table.</text>
+    <text class="edge-label" x="450" y="476" text-anchor="middle">There is no error.</text>
+
+    <rect class="node" x="40" y="508" width="820" height="64" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="528" text-anchor="middle">pages_per_range: default 128 (~1 MB of heap at 8 kB pages)</text>
+    <text class="edge-label" x="450" y="544" text-anchor="middle">lower it for finer granularity and a larger index;</text>
+    <text class="edge-label" x="450" y="560" text-anchor="middle">raise it for a smaller index and coarser exclusion.</text>
+  </svg>
+  <figcaption>
+    <strong>BRIN stores one min/max per 32 pages, so a range query excludes everything older by summary, without reading it.</strong>
+    A 64 GB table is ~8.4 million pages; at pages_per_range = 32
+    that is ~262,000 summary entries, a few MB of index, against a
+    B-tree that would be tens of percent of the table and need an
+    entry per INSERT. The whole design assumes physical correlation:
+    an UPDATE that moves rows, a pg_repack, or a restore that
+    scrambles order makes every range span the whole value domain,
+    and the index silently stops excluding anything — the plan still
+    shows a Bitmap Heap Scan and just reads the table.
+  </figcaption>
+</figure><h3 class="vol__h3" id="62-partial-expression-and-covering-indexes">6.2 Partial, Expression, and Covering Indexes</h3><p><strong>Partial indexes</strong> are the most under-used feature in the set, and they do double duty: they save space, and they can enforce a conditional uniqueness constraint that a plain <code>UNIQUE</code> cannot express (because the predicate has to be repeated in <code>ON CONFLICT</code>).</p><pre class="snippet" data-lang="sql"><code>-- only 2% of orders are open; the index covers 2% of the rows
 CREATE INDEX ON orders (customer_id, placed_at DESC) WHERE status = 'open';
 
 -- a partial UNIQUE is a constraint no plain UNIQUE can express
@@ -551,27 +871,74 @@ LIMIT  50;</code></pre><pre class="diagram"><code> Limit  (cost=48210.44..48212.
  Planning Time: 0.214 ms
  Execution Time: 812.902 ms
  Settings: effective_cache_size = '8GB', random_page_cost = 1.1,
-           work_mem = '4MB', jit = off</code></pre><p><strong>① <code>temp read=40218 written=40218</code> — the most important line, and routinely ignored.</strong> 40218 blocks is roughly <strong>314 MB of temporary file</strong>, written and read back. That is a <code>work_mem</code> spill, and it dominates the 812 ms runtime. The <code>Index Scan</code> was chosen on <code>status</code> alone and produced 31,194 candidate rows to satisfy <code>LIMIT 50</code>, and something downstream sorted or materialised them. This is a tuning signal, not necessarily a plan problem — but the plan question comes first.</p><p><strong>② Estimate versus actual: <code>rows=31194</code> predicted, <code>rows=50</code> actual.</strong> The index scan returned 50 rows, not 31,194, because <code>LIMIT</code> stopped it early. The estimate is not &quot;wrong&quot; in a way that misled the planner here — the planner costed the full 31,194 and the limit made it cheap. But note the shape: this is a <code>LIMIT</code>-over-an-index plan with a mis-matching index, and the fix is an index whose leading column is the equality predicate (<code>status</code>) with <code>placed_at DESC</code> second, so the scan reads 50 entries in order and stops.</p><p><strong>③ <code>Heap Fetches: 0</code> on the customers lookup — the index-only scan is pure.</strong> The visibility map is healthy for those pages. This is a number to watch over time: if it climbs, the table has been updated and vacuum has not caught up, which is Chapter 6's silent degradation.</p><p><strong>④ <code>Buffers: shared hit=48210 read=11903</code></strong> — 48,210 pages came from <code>shared_buffers</code> and 11,903 required a read. Roughly 80% cached. On a query this size, <code>read</code> is meaningful: it means either the working set exceeds <code>shared_buffers</code> or it is being evicted. <code>dirtied=0 written=0</code> is right for a read-only query, and a nonzero value here would be a surprise worth investigating.</p><p><strong>⑤ <code>Settings:</code></strong> — this is why you should always pass it. <code>random_page_cost = 1.1</code> is an SSD setting someone tuned deliberately. <code>jit = off</code> means JIT was disabled at the session or server level. Without this line, half of these queries' behaviour is unexplainable.</p><p><strong>⑥ <code>Planning Time</code> versus <code>Execution Time</code></strong> — 0.2 ms versus 813 ms. Planning is not the problem, and no amount of planner tuning will help this query. When planning time <em>is</em> significant — a query with many joins, or one using a <code>LATERAL</code> over a large relation — the <code>enable_*</code> and statistics discussion below becomes relevant; when it is 0.2 ms, it does not.</p><h3 class="vol__h3" id="73-node-types-worth-knowing">7.3 Node Types Worth Knowing</h3><ul><li><strong><code>Seq Scan</code></strong> — reads every page. Correct and often fastest when a large fraction of the table is needed; the <code>Filter</code> shows how many rows were discarded, and the node's cost is <code>pages × seq_page_cost</code>.</li><li><strong><code>Index Scan</code></strong> — a tree descent plus heap fetches. The <code>Index Cond</code> is what the index supplied; anything in the <code>Filter</code> was applied to the heap tuple and is <em>not</em> an index filter.</li><li><strong><code>Index Only Scan</code></strong> — as above, valid only when the visibility map permits.</li><li><strong><code>Bitmap Index Scan</code> → <code>Bitmap Heap Scan</code></strong> — reads a compact bitmap of matches, then visits the heap in physical order. The right answer for a low-selectivity predicate where an index scan would random-access too much; <code>Heap Blocks: exact</code> versus <code>lossy</code> tells you whether the bitmap fit in <code>work_mem</code>.</li><li><strong><code>Nested Loop</code></strong> — for a small outer side with an indexed inner side. The right plan far more often than people expect, especially under a <code>LIMIT</code>.</li><li><strong><code>Hash Join</code></strong> — needs to build a hash table over the <em>whole</em> inner relation, so it is the join that spills, and it is subject to <code>work_mem</code> and <code>hash_mem_multiplier</code>.</li><li><strong><code>Merge Join</code></strong> — both inputs sorted; the right choice when both are already ordered by an index, and it is the reason an index on the join key can remove a <code>Sort</code> node entirely.</li><li><strong><code>Gather</code> / <code>Gather Merge</code></strong> — parallel query. The number of children is the actual worker count, which may be lower than <code>max_parallel_workers_per_gather</code> (Chapter 1's worker pool).</li><li><strong><code>Materialize</code></strong> — caches the inner side of a nested loop. Its appearance usually means a plan shape changed, because the planner could not push an index condition inward.</li><li><strong><code>HashAggregate</code> / <code>GroupAggregate</code></strong> — the former spills to disk on a sort, the latter requires input already ordered.</li><li><strong><code>Subquery Scan</code> / <code>CTE Scan</code></strong> — a correlated subquery the planner chose not to flatten.</li></ul><h3 class="vol__h3" id="74-work_mem-and-the-spill">7.4 <code>work_mem</code> and the Spill</h3><p>This is the setting most often misconfigured, and the multiplication is the whole point.</p><pre class="diagram"><code>  THE MULTIPLICATION, ON ONE QUERY
+           work_mem = '4MB', jit = off</code></pre><p><strong>① <code>temp read=40218 written=40218</code> — the most important line, and routinely ignored.</strong> 40218 blocks is roughly <strong>314 MB of temporary file</strong>, written and read back. That is a <code>work_mem</code> spill, and it dominates the 812 ms runtime. The <code>Index Scan</code> was chosen on <code>status</code> alone and produced 31,194 candidate rows to satisfy <code>LIMIT 50</code>, and something downstream sorted or materialised them. This is a tuning signal, not necessarily a plan problem — but the plan question comes first.</p><p><strong>② Estimate versus actual: <code>rows=31194</code> predicted, <code>rows=50</code> actual.</strong> The index scan returned 50 rows, not 31,194, because <code>LIMIT</code> stopped it early. The estimate is not &quot;wrong&quot; in a way that misled the planner here — the planner costed the full 31,194 and the limit made it cheap. But note the shape: this is a <code>LIMIT</code>-over-an-index plan with a mis-matching index, and the fix is an index whose leading column is the equality predicate (<code>status</code>) with <code>placed_at DESC</code> second, so the scan reads 50 entries in order and stops.</p><p><strong>③ <code>Heap Fetches: 0</code> on the customers lookup — the index-only scan is pure.</strong> The visibility map is healthy for those pages. This is a number to watch over time: if it climbs, the table has been updated and vacuum has not caught up, which is Chapter 6's silent degradation.</p><p><strong>④ <code>Buffers: shared hit=48210 read=11903</code></strong> — 48,210 pages came from <code>shared_buffers</code> and 11,903 required a read. Roughly 80% cached. On a query this size, <code>read</code> is meaningful: it means either the working set exceeds <code>shared_buffers</code> or it is being evicted. <code>dirtied=0 written=0</code> is right for a read-only query, and a nonzero value here would be a surprise worth investigating.</p><p><strong>⑤ <code>Settings:</code></strong> — this is why you should always pass it. <code>random_page_cost = 1.1</code> is an SSD setting someone tuned deliberately. <code>jit = off</code> means JIT was disabled at the session or server level. Without this line, half of these queries' behaviour is unexplainable.</p><p><strong>⑥ <code>Planning Time</code> versus <code>Execution Time</code></strong> — 0.2 ms versus 813 ms. Planning is not the problem, and no amount of planner tuning will help this query. When planning time <em>is</em> significant — a query with many joins, or one using a <code>LATERAL</code> over a large relation — the <code>enable_*</code> and statistics discussion below becomes relevant; when it is 0.2 ms, it does not.</p><h3 class="vol__h3" id="73-node-types-worth-knowing">7.3 Node Types Worth Knowing</h3><ul><li><strong><code>Seq Scan</code></strong> — reads every page. Correct and often fastest when a large fraction of the table is needed; the <code>Filter</code> shows how many rows were discarded, and the node's cost is <code>pages × seq_page_cost</code>.</li><li><strong><code>Index Scan</code></strong> — a tree descent plus heap fetches. The <code>Index Cond</code> is what the index supplied; anything in the <code>Filter</code> was applied to the heap tuple and is <em>not</em> an index filter.</li><li><strong><code>Index Only Scan</code></strong> — as above, valid only when the visibility map permits.</li><li><strong><code>Bitmap Index Scan</code> → <code>Bitmap Heap Scan</code></strong> — reads a compact bitmap of matches, then visits the heap in physical order. The right answer for a low-selectivity predicate where an index scan would random-access too much; <code>Heap Blocks: exact</code> versus <code>lossy</code> tells you whether the bitmap fit in <code>work_mem</code>.</li><li><strong><code>Nested Loop</code></strong> — for a small outer side with an indexed inner side. The right plan far more often than people expect, especially under a <code>LIMIT</code>.</li><li><strong><code>Hash Join</code></strong> — needs to build a hash table over the <em>whole</em> inner relation, so it is the join that spills, and it is subject to <code>work_mem</code> and <code>hash_mem_multiplier</code>.</li><li><strong><code>Merge Join</code></strong> — both inputs sorted; the right choice when both are already ordered by an index, and it is the reason an index on the join key can remove a <code>Sort</code> node entirely.</li><li><strong><code>Gather</code> / <code>Gather Merge</code></strong> — parallel query. The number of children is the actual worker count, which may be lower than <code>max_parallel_workers_per_gather</code> (Chapter 1's worker pool).</li><li><strong><code>Materialize</code></strong> — caches the inner side of a nested loop. Its appearance usually means a plan shape changed, because the planner could not push an index condition inward.</li><li><strong><code>HashAggregate</code> / <code>GroupAggregate</code></strong> — the former spills to disk on a sort, the latter requires input already ordered.</li><li><strong><code>Subquery Scan</code> / <code>CTE Scan</code></strong> — a correlated subquery the planner chose not to flatten.</li></ul><h3 class="vol__h3" id="74-work_mem-and-the-spill">7.4 <code>work_mem</code> and the Spill</h3><p>This is the setting most often misconfigured, and the multiplication is the whole point.</p><figure class="figure">
+  <svg viewBox="0 0 900 520" role="img" aria-label="The work_mem multiplication. work_mem defaults to 4 MB and is a per-node limit. A leader with a hash, a sort, a materialise and a bitmap heap scan reaches about 24 MB; four parallel workers, 96 MB; one query at one moment, 120 MB; four concurrent queries, 480 MB; fifty connections, 24 GB.">
+    <text class="label" x="450" y="26" text-anchor="middle">THE MULTIPLICATION, ON ONE QUERY</text>
 
-  work_mem = 4MB (default)
-  plan: Hash Join → Hash (node)          allocates up to 4MB × hash_mem_multiplier
-                    Sort    (node)        allocates up to 4MB
-                    Materialize (node)    allocates up to 4MB
-                    Bitmap Heap Scan       allocates up to 4MB
-  parallel workers: 4
+    <rect class="node node--accent" x="40" y="40" width="820" height="36" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="63" text-anchor="middle">work_mem = 4MB (the default) — a per-NODE limit</text>
 
-  leader   :  ~4 nodes × 4MB, with hash doubled by hash_mem_multiplier (2.0)  ≈ 24 MB
-  4 workers: 4 × 24 MB                                                     ≈ 96 MB
-  ──────────────────────────────────────────────────────────────────────────────────
-  ONE QUERY, ONE MOMENT                                                      ~120 MB
+    <rect class="node" x="40" y="92" width="190" height="56" rx="4"/>
+    <text class="edge-label edge-label--strong" x="135" y="114" text-anchor="middle">Hash</text>
+    <text class="edge-label" x="135" y="130" text-anchor="middle">allocates up to 4MB</text>
+    <text class="edge-label" x="135" y="144" text-anchor="middle">× hash_mem_multiplier</text>
 
-  × concurrent queries on that connection  (say 4)                           ~480 MB
-  × connections on the instance           (say 50)                        ~24 GB
+    <rect class="node" x="255" y="92" width="190" height="56" rx="4"/>
+    <text class="edge-label edge-label--strong" x="350" y="114" text-anchor="middle">Sort</text>
+    <text class="edge-label" x="350" y="130" text-anchor="middle">allocates up to 4MB</text>
+    <text class="edge-label" x="350" y="144" text-anchor="middle">(no multiplier)</text>
 
-  So work_mem is NOT a per-connection budget and CANNOT be reasoned about as one.
-  Setting it globally to &quot;what my worst query needs&quot; is a decision whose
-  consequence scales with connection count and query concurrency, neither of
-  which the person editing the GUC is looking at.</code></pre><p><code>hash_mem_multiplier</code> (default <strong>2.0</strong>, PostgreSQL 16+) exists precisely because hash operations need more headroom than sorts for the same <code>work_mem</code>, and it is the reason a session that has raised <code>work_mem</code> for its sorts can still see a hash spill. It multiplies the memory available to hash operations only.</p><p>The correct practice, in order:</p><ol><li><strong>Eliminate the operation.</strong> An index matching the <code>ORDER BY</code> and the equality filter removes the <code>Sort</code> entirely — and unlike memory, it costs nothing at query time.</li><li><strong><code>SET LOCAL work_mem</code> for the one query</strong>, at a measured value, inside the transaction that needs it.</li><li><strong>Per-role or per-database overrides</strong> if a whole class of workload genuinely needs more, with the multiplication done for the expected concurrency.</li><li><strong>Leave the global default alone.</strong> It is 4 MB for a reason, and that reason is the multiplication above.</li></ol><p>The diagnostic that finds this in production without you having to run <code>EXPLAIN</code> on the offending statement is <code>log_temp_files = 0</code>, which logs <em>every</em> temporary file created. It is almost nobody's default and it is the single best setting in this chapter for finding spill.</p><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;WE'LL SET <code>enable_seqscan = off</code> TO FORCE THE INDEX&quot;</strong></p>
+    <rect class="node" x="470" y="92" width="190" height="56" rx="4"/>
+    <text class="edge-label edge-label--strong" x="565" y="114" text-anchor="middle">Materialize</text>
+    <text class="edge-label" x="565" y="130" text-anchor="middle">allocates up to 4MB</text>
+    <text class="edge-label" x="565" y="144" text-anchor="middle">(no multiplier)</text>
+
+    <rect class="node" x="685" y="92" width="190" height="56" rx="4"/>
+    <text class="edge-label edge-label--strong" x="780" y="114" text-anchor="middle">Bitmap Heap Scan</text>
+    <text class="edge-label" x="780" y="130" text-anchor="middle">allocates up to 4MB</text>
+    <text class="edge-label" x="780" y="144" text-anchor="middle">(no multiplier)</text>
+
+    <text class="edge-label" x="450" y="172" text-anchor="middle">parallel workers: 4</text>
+
+    <rect class="node" x="40" y="188" width="820" height="34" rx="4"/>
+    <text class="edge-label" x="70" y="210" text-anchor="start">leader: ~4 nodes × 4MB, with the hash doubled by the multiplier (2.0)</text>
+    <text class="edge-label edge-label--strong" x="830" y="210" text-anchor="end">≈ 24 MB</text>
+
+    <rect class="node" x="40" y="228" width="820" height="34" rx="4"/>
+    <text class="edge-label" x="70" y="250" text-anchor="start">4 parallel workers: 4 × 24 MB</text>
+    <text class="edge-label edge-label--strong" x="830" y="250" text-anchor="end">≈ 96 MB</text>
+
+    <rect class="node node--accent" x="40" y="268" width="820" height="34" rx="4"/>
+    <text class="edge-label edge-label--strong" x="70" y="290" text-anchor="start">ONE QUERY, ONE MOMENT</text>
+    <text class="edge-label edge-label--strong" x="830" y="290" text-anchor="end">≈ 120 MB</text>
+
+    <rect class="node node--warn" x="40" y="308" width="820" height="34" rx="4"/>
+    <text class="edge-label" x="70" y="330" text-anchor="start">× 4 concurrent queries on that connection</text>
+    <text class="edge-label edge-label--strong" x="830" y="330" text-anchor="end">≈ 480 MB</text>
+
+    <rect class="node node--bad" x="40" y="348" width="820" height="34" rx="4"/>
+    <text class="edge-label" x="70" y="370" text-anchor="start">× 50 connections on the instance</text>
+    <text class="edge-label edge-label--strong" x="830" y="370" text-anchor="end">≈ 24 GB</text>
+
+    <rect class="node node--bad" x="40" y="404" width="820" height="92" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="428" text-anchor="middle">work_mem is NOT a per-connection budget</text>
+    <text class="edge-label" x="450" y="446" text-anchor="middle">and cannot be reasoned about as one. Setting it globally to</text>
+    <text class="edge-label" x="450" y="462" text-anchor="middle">&quot;what my worst query needs&quot; is a decision whose consequence scales</text>
+    <text class="edge-label" x="450" y="478" text-anchor="middle">with connection count and query concurrency — neither of which the</text>
+    <text class="edge-label" x="450" y="494" text-anchor="middle">person editing the GUC is looking at.</text>
+  </svg>
+  <figcaption>
+    <strong>work_mem is a per-node limit, so one query multiplies it by every plan node, every parallel worker, every concurrent query and every connection.</strong>
+    With the 4 MB default, a leader running a hash, a sort, a
+    materialise and a bitmap heap scan — the hash doubled by
+    hash_mem_multiplier — reaches ~24 MB; four parallel workers
+    take that to ~96 MB, and one query at one moment to ~120 MB.
+    Four concurrent queries make ~480 MB, and fifty connections
+    make ~24 GB of authorised transient allocation, which the
+    kernel's OOM killer settles by choosing the largest-RSS
+    backend.
+  </figcaption>
+</figure><p><code>hash_mem_multiplier</code> (default <strong>2.0</strong>, PostgreSQL 16+) exists precisely because hash operations need more headroom than sorts for the same <code>work_mem</code>, and it is the reason a session that has raised <code>work_mem</code> for its sorts can still see a hash spill. It multiplies the memory available to hash operations only.</p><p>The correct practice, in order:</p><ol><li><strong>Eliminate the operation.</strong> An index matching the <code>ORDER BY</code> and the equality filter removes the <code>Sort</code> entirely — and unlike memory, it costs nothing at query time.</li><li><strong><code>SET LOCAL work_mem</code> for the one query</strong>, at a measured value, inside the transaction that needs it.</li><li><strong>Per-role or per-database overrides</strong> if a whole class of workload genuinely needs more, with the multiplication done for the expected concurrency.</li><li><strong>Leave the global default alone.</strong> It is 4 MB for a reason, and that reason is the multiplication above.</li></ol><p>The diagnostic that finds this in production without you having to run <code>EXPLAIN</code> on the offending statement is <code>log_temp_files = 0</code>, which logs <em>every</em> temporary file created. It is almost nobody's default and it is the single best setting in this chapter for finding spill.</p><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;WE'LL SET <code>enable_seqscan = off</code> TO FORCE THE INDEX&quot;</strong></p>
 <p>The honest answer is that this is a diagnostic, not a fix, and using it as a fix is actively harmful. <code>enable_seqscan = off</code> does not make the planner's cost estimate correct — it removes the planner's ability to <em>choose</em> correctly, by making sequential scans look so expensive that the planner will use an index scan even when scanning the whole table would be far faster. The query gets a plan that looks right and performs worse, and the underlying mis-estimate is still there, so the next data distribution change moves the cost back. It is also session-scoped, so in a pooled-connection application it leaks onto unrelated queries, and it is a per-plan-type switch that teams then start applying wholesale, at which point the planner is no longer doing its job at all. The legitimate use is diagnostic and narrow: set it, confirm the plan changes and the query gets <em>faster</em>, and you have learned that the planner's row estimate for that node is wrong. Then go and fix the estimate — <code>ANALYZE</code>, extended statistics on correlated columns, <code>default_statistics_target</code>, and check that <code>random_page_cost</code> and <code>effective_cache_size</code> match the actual hardware. <code>enable_seqscan</code>, <code>enable_nestloop</code>, <code>enable_hashjoin</code>, <code>enable_mergejoin</code> and <code>enable_indexscan</code> are all a way of looking at the problem without solving it, and their danger is that they work often enough to be copied into production by someone who never found the mis-estimate underneath.</p></blockquote><h3 class="vol__h3" id="75-jit">7.5 JIT</h3><p>PostgreSQL can compile parts of a query with LLVM. It kicks in above <code>jit_above_cost</code> (default <strong>100000</strong>) and does more work above <code>jit_optimize_above_cost</code> and <code>jit_inline_above_cost</code> (both default <strong>500000</strong>). The <code>JIT:</code> block in the plan reports functions compiled, timing, and — importantly — the **emission<code> and </code>optimization` counts, which is where most of the time goes.</p><p>JIT pays off on a query with a very expensive plan over a large relation, and it loses on a query whose plan is expensive because of a bad row estimate, because the compilation cost is proportional to plan size and the execution is still wrong. It also has a real operational cost: it allocates memory outside the normal path, and the <code>jit</code> GUC is session-settable, so a session with <code>jit = on</code> on a machine without LLVM support will fail to plan. The practical advice is to look at the <code>JIT:</code> block before tuning, because a plan spending 40% of its time in JIT <em>emission</em> is a plan that is too big, and that is a planning problem wearing a JIT costume.</p><h3 class="vol__h3" id="76-statistics">7.6 Statistics</h3><p>The planner's input is estimates, and estimates come from statistics. The pieces:</p><ul><li><strong><code>default_statistics_target</code></strong> (default <strong>100</strong>) — the sample size for a column, multiplied by 300 to get the number of rows ANALYZE samples. Raising it on columns with skewed distributions directly improves estimates, at the cost of a longer <code>ANALYZE</code>.</li><li><strong><code>ANALYZE</code></strong> — the re-sampling. Autovacuum's analyzer does it on a schedule (<code>autovacuum_analyze_scale_factor</code>, default <strong>0.1</strong>), and after a bulk load nothing does it for you, which is the single most common cause of &quot;the plan changed and nothing changed&quot;.</li><li><strong>Extended statistics</strong> (<code>CREATE STATISTICS</code>, PostgreSQL 10+) — for <em>correlated</em> columns, where the planner's independence assumption is wrong. This is the most under-used feature in the whole chapter. Two predicates on correlated columns multiply to an estimate that can be off by orders of magnitude, and no amount of <code>ANALYZE</code> fixes it because the problem is the model, not the sample.</li></ul><pre class="snippet" data-lang="sql"><code>-- the mis-estimate diagnostic
 SELECT attname, n_distinct, null_frac, correlation, most_common_vals, most_common_freqs
 FROM   pg_stats WHERE tablename = 'orders' AND attname IN ('status','customer_id');
@@ -607,27 +974,64 @@ COMMIT;                                 COMMIT;
 -- believing there were 200 free. The database detected that no serial order
 -- of T1 and T2 produces that result, and refused to let the wrong one stand.
 -- The application retries T2 — and on retry it reads 100, updates 100, and
--- the outcome is correct.</code></pre><h3 class="vol__h3" id="82-read-skew-and-the-fix-hierarchy">8.2 Read Skew, and the Fix Hierarchy</h3><p>Because <code>REPEATABLE READ</code> is snapshot isolation, the classic read skew is possible. The canonical version is the &quot;bank transfer in both directions&quot; check:</p><pre class="diagram"><code>  T1 (READ COMMITTED)                      T2 (READ COMMITTED)
-  ───────────────────                       ───────────────────
-  reads A = 100                            reads B = 100
-  reads B = 100                            reads A = 100
-  checks: A ≥ 50  ✓                        checks: B ≥ 50  ✓
-  A = A - 60   → 40                        B = B - 60   → 40
-  COMMIT                                    COMMIT
+-- the outcome is correct.</code></pre><h3 class="vol__h3" id="82-read-skew-and-the-fix-hierarchy">8.2 Read Skew, and the Fix Hierarchy</h3><p>Because <code>REPEATABLE READ</code> is snapshot isolation, the classic read skew is possible. The canonical version is the &quot;bank transfer in both directions&quot; check:</p><figure class="figure">
+  <svg viewBox="0 0 900 590" role="img" aria-label="Read skew. T1 and T2, both READ COMMITTED, each read A=100 and B=100, check their own account against 50, subtract 60, and both commit — leaving both balances at 40. Each transaction saw a consistent view. REPEATABLE READ does not fix this; SERIALIZABLE fixes it by aborting one.">
+    <rect class="node node--accent" x="40" y="24" width="390" height="34" rx="4"/>
+    <text class="edge-label edge-label--strong" x="235" y="46" text-anchor="middle">T1 (READ COMMITTED)</text>
 
-  Both transactions passed the check. Both committed. The &quot;no overdraft&quot;
-  invariant is violated — and each transaction individually saw a
-  consistent view, which is precisely why READ COMMITTED permits it.
+    <rect class="node" x="40" y="66" width="390" height="32" rx="4"/>
+    <text class="edge-label" x="235" y="86" text-anchor="middle">reads A = 100</text>
+    <rect class="node" x="40" y="104" width="390" height="32" rx="4"/>
+    <text class="edge-label" x="235" y="124" text-anchor="middle">reads B = 100</text>
+    <rect class="node" x="40" y="142" width="390" height="32" rx="4"/>
+    <text class="edge-label" x="235" y="162" text-anchor="middle">checks: A ≥ 50 — passes</text>
+    <rect class="node" x="40" y="180" width="390" height="32" rx="4"/>
+    <text class="edge-label" x="235" y="200" text-anchor="middle">A = A − 60 → 40</text>
+    <rect class="node" x="40" y="218" width="390" height="32" rx="4"/>
+    <text class="edge-label edge-label--strong" x="235" y="238" text-anchor="middle">COMMIT</text>
 
-  NOW THE SAME THING UNDER REPEATABLE READ:
-  Each transaction's view is a single snapshot. If T1's snapshot was taken
-  before T2 committed, T1 sees A=100, B=100 and passes. If T2's snapshot was
-  taken before T1 committed, T2 also sees A=100, B=100 and passes. Both
-  snapshots are internally consistent; neither is consistent with the other
-  transaction's commit. The read skew SURVIVES.
+    <rect class="node node--accent" x="470" y="24" width="390" height="34" rx="4"/>
+    <text class="edge-label edge-label--strong" x="665" y="46" text-anchor="middle">T2 (READ COMMITTED)</text>
 
-  This is the counter-intuitive part: REPEATABLE READ does NOT fix this.
-  It is a snapshot, not a lock.  SERIALIZABLE does fix it — by aborting one.</code></pre><p>The fix hierarchy, which is the actionable part:</p><ol><li><strong>Express the invariant as a constraint.</strong> <code>CHECK (balance &gt;= 0)</code> is exactly &quot;no overdraft&quot;, enforced for every writer, with no retry and no isolation escalation. This is the right answer far more often than people reach for.</li><li><strong>Make the read-modify-write a single statement.</strong> <code>UPDATE accounts SET balance = balance - 60 WHERE id = 1 AND balance &gt;= 60</code> is atomic, holds one row lock, and cannot interleave. Then check the affected-row count: zero rows means the check failed.</li><li><strong>Lock the rows you read.</strong> <code>SELECT ... FOR UPDATE</code> on both accounts before checking, so nothing can change between the read and the write.</li><li><strong><code>SERIALIZABLE</code> and retry.</strong> Correct, and the last resort rather than the first, because of the abort rate, the latency cost, and the requirement that every side effect be idempotent.</li></ol><h3 class="vol__h3" id="83-row-locks-and-the-work-queue">8.3 Row Locks and the Work Queue</h3><pre class="snippet" data-lang="sql"><code>SELECT * FROM jobs WHERE status = 'pending' FOR UPDATE;
+    <rect class="node" x="470" y="66" width="390" height="32" rx="4"/>
+    <text class="edge-label" x="665" y="86" text-anchor="middle">reads B = 100</text>
+    <rect class="node" x="470" y="104" width="390" height="32" rx="4"/>
+    <text class="edge-label" x="665" y="124" text-anchor="middle">reads A = 100</text>
+    <rect class="node" x="470" y="142" width="390" height="32" rx="4"/>
+    <text class="edge-label" x="665" y="162" text-anchor="middle">checks: B ≥ 50 — passes</text>
+    <rect class="node" x="470" y="180" width="390" height="32" rx="4"/>
+    <text class="edge-label" x="665" y="200" text-anchor="middle">B = B − 60 → 40</text>
+    <rect class="node" x="470" y="218" width="390" height="32" rx="4"/>
+    <text class="edge-label edge-label--strong" x="665" y="238" text-anchor="middle">COMMIT</text>
+
+    <rect class="node node--bad" x="40" y="272" width="820" height="76" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="296" text-anchor="middle">both transactions passed the check. both committed.</text>
+    <text class="edge-label" x="450" y="314" text-anchor="middle">the &quot;no overdraft&quot; invariant is violated — and each transaction</text>
+    <text class="edge-label" x="450" y="330" text-anchor="middle">individually saw a consistent view, which is precisely why</text>
+    <text class="edge-label" x="450" y="346" text-anchor="middle">READ COMMITTED permits it.</text>
+
+    <rect class="node node--warn" x="40" y="372" width="820" height="110" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="396" text-anchor="middle">THE SAME THING UNDER REPEATABLE READ</text>
+    <text class="edge-label" x="450" y="414" text-anchor="middle">each transaction's view is a single snapshot; if T1's snapshot was</text>
+    <text class="edge-label" x="450" y="430" text-anchor="middle">taken before T2 committed, T1 sees A=100, B=100 and passes — and</text>
+    <text class="edge-label" x="450" y="446" text-anchor="middle">so does T2. Both snapshots are internally consistent; neither is</text>
+    <text class="edge-label" x="450" y="462" text-anchor="middle">consistent with the other transaction's commit. The read skew SURVIVES.</text>
+
+    <rect class="node node--accent" x="40" y="506" width="820" height="56" rx="5"/>
+    <text class="edge-label edge-label--strong" x="450" y="528" text-anchor="middle">REPEATABLE READ does NOT fix this — it is a snapshot, not a lock.</text>
+    <text class="edge-label" x="450" y="544" text-anchor="middle">SERIALIZABLE does fix it — by aborting one.</text>
+  </svg>
+  <figcaption>
+    <strong>Two READ COMMITTED transactions each see a consistent snapshot, transfer in both directions, and jointly violate the invariant they each checked.</strong>
+    T1 reads A=100 and B=100, checks A ≥ 50, subtracts 60 from
+    A and commits; T2 does the mirror image on B. Both checks
+    pass, both commit, and both balances end at 40. REPEATABLE
+    READ does not fix this — it is a snapshot, not a lock; both
+    snapshots are internally consistent and neither is consistent
+    with the other's commit. SERIALIZABLE fixes it by aborting
+    one.
+  </figcaption>
+</figure><p>The fix hierarchy, which is the actionable part:</p><ol><li><strong>Express the invariant as a constraint.</strong> <code>CHECK (balance &gt;= 0)</code> is exactly &quot;no overdraft&quot;, enforced for every writer, with no retry and no isolation escalation. This is the right answer far more often than people reach for.</li><li><strong>Make the read-modify-write a single statement.</strong> <code>UPDATE accounts SET balance = balance - 60 WHERE id = 1 AND balance &gt;= 60</code> is atomic, holds one row lock, and cannot interleave. Then check the affected-row count: zero rows means the check failed.</li><li><strong>Lock the rows you read.</strong> <code>SELECT ... FOR UPDATE</code> on both accounts before checking, so nothing can change between the read and the write.</li><li><strong><code>SERIALIZABLE</code> and retry.</strong> Correct, and the last resort rather than the first, because of the abort rate, the latency cost, and the requirement that every side effect be idempotent.</li></ol><h3 class="vol__h3" id="83-row-locks-and-the-work-queue">8.3 Row Locks and the Work Queue</h3><pre class="snippet" data-lang="sql"><code>SELECT * FROM jobs WHERE status = 'pending' FOR UPDATE;
 SELECT * FROM jobs WHERE status = 'pending' FOR UPDATE NOWAIT;
 SELECT * FROM jobs WHERE status = 'pending' FOR UPDATE SKIP LOCKED LIMIT 1;</code></pre><div class="table-wrap"><table><thead><tr><th>Clause</th><th>Locks</th><th>Use for</th></tr></thead><tbody><tr><td><code>FOR UPDATE</code></td><td>exclusive, conflicts with everything</td><td>read-modify-write on the row's value</td></tr><tr><td><code>FOR NO KEY UPDATE</code></td><td>exclusive, but weaker — does not conflict with <code>FOR KEY SHARE</code></td><td>the right choice for most application updates; leaves foreign keys alone</td></tr><tr><td><code>FOR SHARE</code></td><td>shared</td><td>&quot;read now, ensure it does not change&quot;</td></tr><tr><td><code>FOR KEY SHARE</code></td><td>weaker shared; never blocks, never is blocked by a non-key update</td><td>what foreign-key checks take</td></tr><tr><td><code>NOWAIT</code></td><td>—</td><td>fail immediately rather than block; for latency-sensitive paths</td></tr><tr><td><code>SKIP LOCKED</code></td><td>—</td><td>work queues: take what nobody else has</td></tr><tr><td><code>OF table_alias</code></td><td>only the named tables</td><td>when joining, to lock only one side</td></tr></tbody></table></div><p><code>FOR NO KEY UPDATE</code> is the under-used one, and it is the right default for application updates. Because it does not conflict with <code>FOR KEY SHARE</code>, it does not block concurrent foreign-key checks on the same row, which means ordinary updates stop serialising against every reference to that row.</p><p><code>SKIP LOCKED</code> is the work-queue primitive, and it is genuinely excellent — with a specific failure mode that has to be designed for:</p><pre class="snippet" data-lang="sql"><code>-- 12 workers pulling from one queue, no coordination
 BEGIN;
