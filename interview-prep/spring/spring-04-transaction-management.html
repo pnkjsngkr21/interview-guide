@@ -16,7 +16,7 @@
 
 <main class="main main--guide" id="main">
 
-<header class="masthead"><p class="masthead__eyebrow">Spring — TRANSACTION MANAGEMENT</p><h1>The Spring Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>9 chapters</li><li>113 questions</li><li>19 diagrams</li></ul></header>
+<header class="masthead"><p class="masthead__eyebrow">Spring — TRANSACTION MANAGEMENT</p><h1>The Spring Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>9 chapters</li><li>113 questions</li><li>12 figures</li><li>8 text blocks</li></ul></header>
 
 <div class="toolbar"><div class="search"><input type="search" data-filter-input placeholder="Filter chapters — press /" aria-label="Filter chapters"><span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span></div><div class="pager"><a class="pager__prev" href="spring-03-aop-proxying.html">&larr; AOP &amp; PROXYING</a><a class="pager__next" href="spring-05-spring-mvc-web-layer.html">SPRING MVC &amp; THE WEB LAYER &rarr;</a></div></div>
 
@@ -190,31 +190,89 @@ public @interface Transactional {
     Class&lt;? extends Throwable&gt;[] rollbackFor() default {};
 
     String[] rollbackForClassName() default {};
-}</code></pre><p>Every attribute is <em>metadata</em>. Nothing in <code>@Transactional</code> starts a transaction. The sequence is:</p><pre class="diagram"><code>1. A BeanPostProcessor wraps the bean in a proxy (only if a TransactionAttributeSource
-   finds @Transactional on the class or its methods — see Volume 3).
-        │
-2. At call time, the proxy's TransactionInterceptor builds/looks up a
-   TransactionAttribute from the AnnotationTransactionAttributeSource, resolving
-   attributes with the SAME precedence rules as Spring's other annotations:
-        method annotation  &gt;  class annotation  &gt;  interface method  &gt;  interface
-        (and @EnableTransactionManagement(order=) orders multiple advisors)
-        │
-3. TransactionInterceptor.invokeWithinTransaction(...):
-        ├─ tm = getTransactionManager(annotation)          ← name → bean lookup
-        ├─ txInfo = createTransactionIfNecessary(tm, attr, ...)  ← PROPAGATION LIVES HERE
-        ├─ try { retVal = invocation.proceed(); }
-        ├─ catch (Throwable t) { completeTransactionAfterThrowing(txInfo, t); }  ← ROLLBACK RULE
-        └─ else { commitTransactionAfterReturning(txInfo); }</code></pre><p>Steps 2 and 3 are where every failure in this chapter lives. Step 1 is where the failures in Volume 3 live.</p><aside class="callout callout--must"><span class="callout__label">Must remember</span><p><code>@Transactional</code> is read once, at context refresh, by <code>BeanFactoryTransactionAttributeSourceAdvisor</code>, and it is a <strong>proxy advisor</strong>. A method that is not reachable through a proxy has no transaction — not &quot;a weak transaction&quot;, no transaction. The annotation is a label on a door; the proxy is the doorframe, and a call that bypasses the doorframe never sees it.</p></aside><h3 class="vol__h3" id="22-attribute-by-attribute">2.2 Attribute by Attribute</h3><div class="table-wrap"><table><thead><tr><th>Attribute</th><th>Default</th><th>What it does</th><th>Where it stops working</th></tr></thead><tbody><tr><td><code>value</code> / <code>transactionManager</code></td><td><code>&quot;&quot;</code></td><td>Selects the <code>PlatformTransactionManager</code> bean by name</td><td>Two managers + no name = <code>NoUniqueBeanDefinitionException</code> at first call</td></tr><tr><td><code>propagation</code></td><td><code>REQUIRED</code></td><td>Decides join / create / suspend</td><td><code>REQUIRES_NEW</code> costs a second connection; <code>NESTED</code> needs a savepoint-capable driver</td></tr><tr><td><code>isolation</code></td><td><code>DEFAULT</code></td><td>Sets the isolation on the underlying connection</td><td>Not portable under JPA; deferred to the driver; can invalidate cached plans</td></tr><tr><td><code>timeout</code></td><td><code>-1</code> (default)</td><td><strong>Seconds.</strong> Maps to a query timeout</td><td><code>-1</code> means &quot;use the default&quot;, not &quot;infinite&quot; — a real <code>TIMEOUT_DEFAULT</code> is unbounded by Spring</td></tr><tr><td><code>readOnly</code></td><td><code>false</code></td><td>Driver hint + Hibernate <code>FlushMode.MANUAL</code></td><td>Not enforced on MySQL/H2; silently drops dirty state under Hibernate</td></tr><tr><td><code>rollbackFor</code></td><td><code>{}</code></td><td>Additional exception types that force a rollback</td><td>Only matches the type and its subclasses; the class list is per-annotation</td></tr><tr><td><code>rollbackForClassName</code></td><td><code>{}</code></td><td>The same, by string name, for XML/legacy interop</td><td>Cannot be validated at compile time; a typo is a silent no-op</td></tr><tr><td><code>label</code></td><td><code>&quot;&quot;</code></td><td>A name in the transaction manager's status — the value in logs and in <code>TransactionSynchronizationManager.getCurrentTransactionName()</code></td><td>Purely diagnostic; it changes nothing about behaviour</td></tr></tbody></table></div><p>A note on <code>label</code> that people find useful and almost nobody knows: it is what <code>TransactionSynchronizationManager.getCurrentTransactionName()</code> returns, and therefore what shows up in the transaction name in your database's <code>pg_stat_activity</code> or <code>information_schema</code> output when you set the driver's query-comment behaviour. Setting a meaningful <code>label</code> on long-running transactional methods is one of the cheapest observability wins in the whole framework, because it turns &quot;connection idle in transaction&quot; from a mystery into a search term.</p><pre class="snippet" data-lang="java"><code>@Transactional(label = &quot;settlement.run&quot;)            // ◄── shows up in pg_stat_activity
-public SettlementSummary runDailySettlement(Date day) { ... }</code></pre><h3 class="vol__h3" id="23-the-rollback-rule-the-most-important-thing-in-this-chapter">2.3 The Rollback Rule — The Most Important Thing in This Chapter</h3><pre class="diagram"><code>Exception type thrown out of the @Transactional method
-        │
-        ├── RuntimeException (includes NPE, IllegalArgumentException, DataIntegrityViolation)
-        │        └── ROLLBACK
-        │
-        ├── Error (OutOfMemoryError, StackOverflowError, AssertionError)
-        │        └── ROLLBACK
-        │
-        └── checked Exception (IOException, SQLException, MyBusinessException extends Exception)
-                 └── COMMIT   ◄── the default, and the surprise</code></pre><pre class="snippet" data-lang="java"><code>@Transactional
+}</code></pre><p>Every attribute is <em>metadata</em>. Nothing in <code>@Transactional</code> starts a transaction. The sequence is:</p><figure class="figure">
+  <svg viewBox="0 0 900 500" role="img" aria-label="A BeanPostProcessor wraps the bean in a proxy at context refresh. At call time the TransactionInterceptor resolves the TransactionAttribute with method-over-class-over-interface precedence, then invokeWithinTransaction looks up the manager, creates the transaction where propagation is decided, and commits or rolls back around the target method.">
+    <defs>
+      <marker id="arw-spring-04-01-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="230" y="24" width="440" height="64" rx="5"/>
+    <text class="label" x="450" y="52" text-anchor="middle">A BeanPostProcessor wraps the bean</text>
+    <text class="label label--sub" x="450" y="70" text-anchor="middle">in a proxy — only when @Transactional is present</text>
+    <path class="edge" d="M 450 88 L 450 118" marker-end="url(#arw-spring-04-01-a)"/>
+    <text class="edge-label" x="462" y="108">at call time</text>
+    <rect class="node" x="150" y="122" width="600" height="104" rx="5"/>
+    <text class="label" x="450" y="150" text-anchor="middle">TransactionInterceptor builds the TransactionAttribute</text>
+    <text class="label label--sub" x="450" y="168" text-anchor="middle">precedence: method annotation &gt; class annotation</text>
+    <text class="label label--sub" x="450" y="184" text-anchor="middle">&gt; interface method &gt; interface</text>
+    <text class="label label--sub" x="450" y="200" text-anchor="middle">the same rules as Spring's other annotations</text>
+    <path class="edge" d="M 450 226 L 450 260" marker-end="url(#arw-spring-04-01-a)"/>
+    <rect class="node node--accent" x="200" y="264" width="500" height="112" rx="5"/>
+    <text class="label" x="450" y="292" text-anchor="middle">invokeWithinTransaction(...)</text>
+    <text class="label label--sub" x="450" y="310" text-anchor="middle">tm = getTransactionManager(annotation)</text>
+    <text class="label label--sub" x="450" y="326" text-anchor="middle">txInfo = createTransactionIfNecessary(tm, attr, ...)</text>
+    <text class="label label--sub" x="450" y="342" text-anchor="middle">PROPAGATION LIVES HERE — the fork is made here</text>
+    <text class="label label--sub" x="450" y="358" text-anchor="middle">retVal = invocation.proceed()</text>
+    <path class="edge" d="M 380 376 L 250 414" marker-end="url(#arw-spring-04-01-a)"/>
+    <text class="edge-label" x="340" y="392">throws</text>
+    <path class="edge" d="M 520 376 L 650 414" marker-end="url(#arw-spring-04-01-a)"/>
+    <text class="edge-label" x="560" y="392">returns</text>
+    <rect class="node node--bad" x="60" y="418" width="360" height="66" rx="5"/>
+    <text class="label" x="240" y="446" text-anchor="middle">catch (Throwable t)</text>
+    <text class="label label--sub" x="240" y="462" text-anchor="middle">completeTransactionAfterThrowing(txInfo, t)</text>
+    <text class="label label--sub" x="240" y="476" text-anchor="middle">the rollback rule</text>
+    <rect class="node node--good" x="480" y="418" width="360" height="66" rx="5"/>
+    <text class="label" x="660" y="446" text-anchor="middle">return normally</text>
+    <text class="label label--sub" x="660" y="462" text-anchor="middle">commitTransactionAfterReturning(txInfo)</text>
+    <text class="label label--sub" x="660" y="476" text-anchor="middle">the commit path</text>
+  </svg>
+  <figcaption>
+    <strong>A proxy wraps the bean at context refresh, and at call time the interceptor resolves the attribute, opens the transaction, and commits or rolls back around the target method.</strong> The attribute resolves with the same precedence as Spring's other annotations: method over class over interface. PROPAGATION lives in createTransactionIfNecessary, the rollback rule in completeTransactionAfterThrowing — and a method not reachable through a proxy has no transaction at all.
+  </figcaption>
+</figure><p>Steps 2 and 3 are where every failure in this chapter lives. Step 1 is where the failures in Volume 3 live.</p><aside class="callout callout--must"><span class="callout__label">Must remember</span><p><code>@Transactional</code> is read once, at context refresh, by <code>BeanFactoryTransactionAttributeSourceAdvisor</code>, and it is a <strong>proxy advisor</strong>. A method that is not reachable through a proxy has no transaction — not &quot;a weak transaction&quot;, no transaction. The annotation is a label on a door; the proxy is the doorframe, and a call that bypasses the doorframe never sees it.</p></aside><h3 class="vol__h3" id="22-attribute-by-attribute">2.2 Attribute by Attribute</h3><div class="table-wrap"><table><thead><tr><th>Attribute</th><th>Default</th><th>What it does</th><th>Where it stops working</th></tr></thead><tbody><tr><td><code>value</code> / <code>transactionManager</code></td><td><code>&quot;&quot;</code></td><td>Selects the <code>PlatformTransactionManager</code> bean by name</td><td>Two managers + no name = <code>NoUniqueBeanDefinitionException</code> at first call</td></tr><tr><td><code>propagation</code></td><td><code>REQUIRED</code></td><td>Decides join / create / suspend</td><td><code>REQUIRES_NEW</code> costs a second connection; <code>NESTED</code> needs a savepoint-capable driver</td></tr><tr><td><code>isolation</code></td><td><code>DEFAULT</code></td><td>Sets the isolation on the underlying connection</td><td>Not portable under JPA; deferred to the driver; can invalidate cached plans</td></tr><tr><td><code>timeout</code></td><td><code>-1</code> (default)</td><td><strong>Seconds.</strong> Maps to a query timeout</td><td><code>-1</code> means &quot;use the default&quot;, not &quot;infinite&quot; — a real <code>TIMEOUT_DEFAULT</code> is unbounded by Spring</td></tr><tr><td><code>readOnly</code></td><td><code>false</code></td><td>Driver hint + Hibernate <code>FlushMode.MANUAL</code></td><td>Not enforced on MySQL/H2; silently drops dirty state under Hibernate</td></tr><tr><td><code>rollbackFor</code></td><td><code>{}</code></td><td>Additional exception types that force a rollback</td><td>Only matches the type and its subclasses; the class list is per-annotation</td></tr><tr><td><code>rollbackForClassName</code></td><td><code>{}</code></td><td>The same, by string name, for XML/legacy interop</td><td>Cannot be validated at compile time; a typo is a silent no-op</td></tr><tr><td><code>label</code></td><td><code>&quot;&quot;</code></td><td>A name in the transaction manager's status — the value in logs and in <code>TransactionSynchronizationManager.getCurrentTransactionName()</code></td><td>Purely diagnostic; it changes nothing about behaviour</td></tr></tbody></table></div><p>A note on <code>label</code> that people find useful and almost nobody knows: it is what <code>TransactionSynchronizationManager.getCurrentTransactionName()</code> returns, and therefore what shows up in the transaction name in your database's <code>pg_stat_activity</code> or <code>information_schema</code> output when you set the driver's query-comment behaviour. Setting a meaningful <code>label</code> on long-running transactional methods is one of the cheapest observability wins in the whole framework, because it turns &quot;connection idle in transaction&quot; from a mystery into a search term.</p><pre class="snippet" data-lang="java"><code>@Transactional(label = &quot;settlement.run&quot;)            // ◄── shows up in pg_stat_activity
+public SettlementSummary runDailySettlement(Date day) { ... }</code></pre><h3 class="vol__h3" id="23-the-rollback-rule-the-most-important-thing-in-this-chapter">2.3 The Rollback Rule — The Most Important Thing in This Chapter</h3><figure class="figure">
+  <svg viewBox="0 0 900 370" role="img" aria-label="The exception type thrown out of the transactional method decides the outcome. RuntimeException and Error, the unchecked types, always roll back. A checked Exception — IOException, SQLException, or a business exception extending Exception — commits by default, the surprise inherited from EJB, unless rollbackFor names it.">
+    <defs>
+      <marker id="arw-spring-04-02-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="200" y="24" width="500" height="56" rx="5"/>
+    <text class="label" x="450" y="50" text-anchor="middle">Exception type thrown out of the</text>
+    <text class="label label--sub" x="450" y="66" text-anchor="middle">@Transactional method</text>
+    <path class="edge" d="M 400 80 L 170 114" marker-end="url(#arw-spring-04-02-a)"/>
+    <path class="edge" d="M 450 80 L 450 114" marker-end="url(#arw-spring-04-02-a)"/>
+    <path class="edge" d="M 500 80 L 730 114" marker-end="url(#arw-spring-04-02-a)"/>
+    <rect class="node node--bad" x="40" y="118" width="260" height="96" rx="5"/>
+    <text class="label" x="170" y="146" text-anchor="middle">RuntimeException</text>
+    <text class="label label--sub" x="170" y="164" text-anchor="middle">NPE, IllegalArgumentException,</text>
+    <text class="label label--sub" x="170" y="180" text-anchor="middle">DataIntegrityViolation</text>
+    <rect class="node node--bad" x="320" y="118" width="260" height="96" rx="5"/>
+    <text class="label" x="450" y="146" text-anchor="middle">Error</text>
+    <text class="label label--sub" x="450" y="164" text-anchor="middle">OutOfMemoryError, StackOverflowError,</text>
+    <text class="label label--sub" x="450" y="180" text-anchor="middle">AssertionError</text>
+    <rect class="node node--warn" x="600" y="118" width="260" height="96" rx="5"/>
+    <text class="label" x="730" y="146" text-anchor="middle">checked Exception</text>
+    <text class="label label--sub" x="730" y="164" text-anchor="middle">IOException, SQLException,</text>
+    <text class="label label--sub" x="730" y="180" text-anchor="middle">MyBusinessException extends Exception</text>
+    <path class="edge" d="M 170 214 L 170 274" marker-end="url(#arw-spring-04-02-a)"/>
+    <path class="edge" d="M 450 214 L 450 274" marker-end="url(#arw-spring-04-02-a)"/>
+    <path class="edge" d="M 730 214 L 730 274" marker-end="url(#arw-spring-04-02-a)"/>
+    <rect class="node node--bad" x="40" y="278" width="260" height="66" rx="5"/>
+    <text class="label" x="170" y="306" text-anchor="middle">ROLLBACK</text>
+    <text class="label label--sub" x="170" y="322" text-anchor="middle">unchecked — always</text>
+    <rect class="node node--bad" x="320" y="278" width="260" height="66" rx="5"/>
+    <text class="label" x="450" y="306" text-anchor="middle">ROLLBACK</text>
+    <text class="label label--sub" x="450" y="322" text-anchor="middle">always</text>
+    <rect class="node node--warn" x="600" y="278" width="260" height="66" rx="5"/>
+    <text class="label" x="730" y="306" text-anchor="middle">COMMIT</text>
+    <text class="label label--sub" x="730" y="322" text-anchor="middle">the default, and the surprise</text>
+  </svg>
+  <figcaption>
+    <strong>The exception type alone decides the outcome: anything unchecked rolls back, and a checked exception commits by default.</strong> RuntimeException and Error always roll back; a checked Exception — IOException, SQLException, your own MyBusinessException extending Exception — commits unless you name it in rollbackFor. That default is inherited from EJB 2.0 CMT, and it is the most common production surprise: a batch exception that extends Exception leaves the ledger row written and settled=true.
+  </figcaption>
+</figure><pre class="snippet" data-lang="java"><code>@Transactional
 public void transfer(Account from, Account to, BigDecimal amount) throws SQLException {
     debit(from, amount);            // INSERT into ledger
     credit(to, amount);             // UPDATE accounts SET balance = ...
@@ -326,22 +384,60 @@ public long computeApproximateAccountTotal(List&lt;Long&gt; accountIds) {
     // doing so would hold the caller's write locks for the full scan.
     ...
 }</code></pre><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;PROPAGATION REQUIRES_NEW GIVES YOU A CLEAN SLATE&quot;</strong></p>
-<p>Half right, and the half that is wrong is the expensive one. <code>REQUIRES_NEW</code> gives you a <em>logically independent</em> transaction — a separate commit and a separate rollback. It does NOT give you a clean slate: the outer transaction is <strong>suspended, not rolled back</strong>, and it still holds its connection, its row locks, and its snapshot. A <code>REQUIRES_NEW</code> inside a transaction that has already written 40 rows still holds 40 row locks for the whole inner call, and the inner call now needs a second connection from the same pool. The senior version of the answer is about the two connections and the suspended locks, not about isolation.</p></blockquote><h3 class="vol__h3" id="32-the-suspension-mechanism">3.2 The Suspension Mechanism</h3><pre class="diagram"><code>Thread: T1                      Pool: 10 connections
- │
- ├─ OUTER @Transactional                 ── holds CONN-1, has locked rows 1..40
- │    │
- │    ├─► INNER @Transactional(REQUIRES_NEW)
- │    │       1. suspend(txResources)   ── UNBIND CONN-1 from the thread
- │    │                                    (the connection is NOT returned to the pool)
- │    │       2. startNewTransaction()   ── borrow CONN-2
- │    │       3. doBegin()               ── setAutoCommit(false) on CONN-2
- │    │       4. run the inner method
- │    │       5. commit CONN-2
- │    │       6. resume(txResources)     ── REBIND CONN-1
- │    │
- │    └─    continue on CONN-1
- │
- └─ commit CONN-1</code></pre><p>The single most important line is step 1. <code>CONN-1</code> is <strong>unbound from the thread, not released to the pool</strong>. It stays checked out, still holding <code>rows 1..40</code> locks, for the entire duration of the inner transaction. A pool of size N therefore supports at most <code>N/2</code> concurrent <code>REQUIRES_NEW</code> nests, and if the inner transaction then calls a <em>third</em> nested <code>REQUIRES_NEW</code>, three connections are held simultaneously.</p><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p>A HikariCP pool of <code>maximumPoolSize = 10</code>, 10 concurrent request threads each doing one <code>REQUIRES_NEW</code>, means every thread is holding two connections. The 11th thread waits the full <code>connectionTimeout</code> and the log shows <code>HikariPool-1 - Connection is not available, request timed out after 30000ms</code>. The database is healthy, its CPU is at 8%, and the on-call paged the DBA. The rule of thumb: <strong>the effective connection demand is <code>pool size × max nesting depth</code></strong>, so if you must nest, either size the pool as <code>peak concurrency × max depth</code> with headroom, or — much better — restructure so you don't nest.</p></aside><p><code>PROPAGATION_REQUIRES_NEW</code> also has a documented cost beyond connections: it forces <code>hibernate.connection.handling_mode</code> to be something other than <code>DELAYED_ACQUISITION_AND_HOLD</code> in some setups, because the session is suspended and rebound rather than left alone, and that costs a JDBC round trip per suspend/resume. Under <code>JpaTransactionManager</code> the second connection also means a <strong>second persistence context</strong> — so entities loaded in the inner transaction are a <em>different object graph</em> from the ones in the outer one, detached from the first-level cache, and a change made to an inner entity is invisible to the outer transaction's <code>flush</code>.</p><pre class="snippet" data-lang="java"><code>@Transactional
+<p>Half right, and the half that is wrong is the expensive one. <code>REQUIRES_NEW</code> gives you a <em>logically independent</em> transaction — a separate commit and a separate rollback. It does NOT give you a clean slate: the outer transaction is <strong>suspended, not rolled back</strong>, and it still holds its connection, its row locks, and its snapshot. A <code>REQUIRES_NEW</code> inside a transaction that has already written 40 rows still holds 40 row locks for the whole inner call, and the inner call now needs a second connection from the same pool. The senior version of the answer is about the two connections and the suspended locks, not about isolation.</p></blockquote><h3 class="vol__h3" id="32-the-suspension-mechanism">3.2 The Suspension Mechanism</h3><figure class="figure">
+  <svg viewBox="0 0 900 680" role="img" aria-label="REQUIRES_NEW does not give a clean slate. The outer transaction is suspended, not rolled back: its connection stays checked out with its row locks held. The inner transaction suspends the resource, borrows a second connection, begins, runs, commits, and resumes, so a pool of size N supports at most N/2 concurrent nests.">
+    <defs>
+      <marker id="arw-spring-04-03-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="30" y="30" width="260" height="84" rx="5"/>
+    <text class="label" x="160" y="56" text-anchor="middle">OUTER @Transactional</text>
+    <text class="label label--sub" x="160" y="74" text-anchor="middle">holds CONN-1</text>
+    <text class="label label--sub" x="160" y="90" text-anchor="middle">rows 1..40 locked</text>
+    <rect class="node node--accent" x="340" y="30" width="320" height="84" rx="5"/>
+    <text class="label" x="500" y="56" text-anchor="middle">INNER @Transactional(REQUIRES_NEW)</text>
+    <text class="label label--sub" x="500" y="74" text-anchor="middle">a logically independent transaction</text>
+    <text class="label label--sub" x="500" y="90" text-anchor="middle">separate commit, separate rollback</text>
+    <rect class="node" x="710" y="30" width="160" height="84" rx="5"/>
+    <text class="label" x="790" y="56" text-anchor="middle">Pool: 10 connections</text>
+    <text class="label label--sub" x="790" y="74" text-anchor="middle">CONN-1 checked out</text>
+    <text class="label label--sub" x="790" y="90" text-anchor="middle">CONN-2 borrowed</text>
+    <path class="edge" d="M 290 72 L 334 72" marker-end="url(#arw-spring-04-03-a)"/>
+    <text class="edge-label" x="312" y="60" text-anchor="middle">calls</text>
+    <path class="edge" d="M 710 72 L 666 72" marker-end="url(#arw-spring-04-03-a)"/>
+    <text class="edge-label" x="688" y="60" text-anchor="middle">CONN-2</text>
+    <path class="edge" d="M 500 114 L 500 144" marker-end="url(#arw-spring-04-03-a)"/>
+    <rect class="node" x="340" y="150" width="320" height="76" rx="5"/>
+    <text class="label" x="500" y="176" text-anchor="middle">1. suspend(txResources)</text>
+    <text class="label label--sub" x="500" y="194" text-anchor="middle">UNBIND CONN-1 from the thread</text>
+    <text class="label label--sub" x="500" y="210" text-anchor="middle">the connection is NOT pooled</text>
+    <path class="edge" d="M 500 226 L 500 248" marker-end="url(#arw-spring-04-03-a)"/>
+    <rect class="node" x="340" y="254" width="320" height="60" rx="5"/>
+    <text class="label" x="500" y="278" text-anchor="middle">2. startNewTransaction()</text>
+    <text class="label label--sub" x="500" y="296" text-anchor="middle">borrow CONN-2 from the pool</text>
+    <path class="edge" d="M 500 314 L 500 336" marker-end="url(#arw-spring-04-03-a)"/>
+    <rect class="node" x="340" y="342" width="320" height="60" rx="5"/>
+    <text class="label" x="500" y="366" text-anchor="middle">3. doBegin()</text>
+    <text class="label label--sub" x="500" y="384" text-anchor="middle">setAutoCommit(false) on CONN-2</text>
+    <path class="edge" d="M 500 402 L 500 424" marker-end="url(#arw-spring-04-03-a)"/>
+    <rect class="node" x="340" y="430" width="320" height="44" rx="5"/>
+    <text class="label" x="500" y="458" text-anchor="middle">4. run the inner method</text>
+    <path class="edge" d="M 500 474 L 500 496" marker-end="url(#arw-spring-04-03-a)"/>
+    <rect class="node" x="340" y="502" width="320" height="44" rx="5"/>
+    <text class="label" x="500" y="530" text-anchor="middle">5. commit CONN-2</text>
+    <path class="edge" d="M 500 546 L 500 568" marker-end="url(#arw-spring-04-03-a)"/>
+    <rect class="node" x="340" y="574" width="320" height="60" rx="5"/>
+    <text class="label" x="500" y="598" text-anchor="middle">6. resume(txResources)</text>
+    <text class="label label--sub" x="500" y="616" text-anchor="middle">REBIND CONN-1 to the thread</text>
+    <path class="edge edge--return" d="M 500 634 L 500 664 L 160 664 L 160 118" marker-end="url(#arw-spring-04-03-a)"/>
+    <text class="edge-label" x="330" y="656" text-anchor="middle">continue on CONN-1</text>
+    <text class="edge-label" x="148" y="400" text-anchor="end">commit CONN-1</text>
+  </svg>
+  <figcaption>
+    <strong>REQUIRES_NEW suspends the outer transaction rather than ending it: CONN-1 stays checked out with its locks held, and the inner work borrows CONN-2.</strong> The six steps are suspend (unbind, not pool), startNewTransaction, doBegin, run, commit, resume. A pool of size N supports at most N/2 concurrent REQUIRES_NEW nests, because every nested call holds two connections for its whole duration — and under JPA the inner work runs in a second persistence context, invisible to the outer flush.
+  </figcaption>
+</figure><p>The single most important line is step 1. <code>CONN-1</code> is <strong>unbound from the thread, not released to the pool</strong>. It stays checked out, still holding <code>rows 1..40</code> locks, for the entire duration of the inner transaction. A pool of size N therefore supports at most <code>N/2</code> concurrent <code>REQUIRES_NEW</code> nests, and if the inner transaction then calls a <em>third</em> nested <code>REQUIRES_NEW</code>, three connections are held simultaneously.</p><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p>A HikariCP pool of <code>maximumPoolSize = 10</code>, 10 concurrent request threads each doing one <code>REQUIRES_NEW</code>, means every thread is holding two connections. The 11th thread waits the full <code>connectionTimeout</code> and the log shows <code>HikariPool-1 - Connection is not available, request timed out after 30000ms</code>. The database is healthy, its CPU is at 8%, and the on-call paged the DBA. The rule of thumb: <strong>the effective connection demand is <code>pool size × max nesting depth</code></strong>, so if you must nest, either size the pool as <code>peak concurrency × max depth</code> with headroom, or — much better — restructure so you don't nest.</p></aside><p><code>PROPAGATION_REQUIRES_NEW</code> also has a documented cost beyond connections: it forces <code>hibernate.connection.handling_mode</code> to be something other than <code>DELAYED_ACQUISITION_AND_HOLD</code> in some setups, because the session is suspended and rebound rather than left alone, and that costs a JDBC round trip per suspend/resume. Under <code>JpaTransactionManager</code> the second connection also means a <strong>second persistence context</strong> — so entities loaded in the inner transaction are a <em>different object graph</em> from the ones in the outer one, detached from the first-level cache, and a change made to an inner entity is invisible to the outer transaction's <code>flush</code>.</p><pre class="snippet" data-lang="java"><code>@Transactional
 public void process(Order order) {
     order.setStatus(PROCESSING);
     repo.save(order);                 // outer context; order is MANAGED here
@@ -384,23 +480,43 @@ public class OrderService {
     }
 }</code></pre><p><code>markExpired()</code> has no boundary. Whether its changes are written depends on whether an outer context happened to be active and whether the persistence context was extended (an <code>OpenEntityManagerInViewInterceptor</code> in a web request extends it, which is why this bug <em>does</em> reproduce on a request path and <em>does not</em> reproduce in a <code>@Scheduled</code> method — the test is <code>@Transactional</code> by default, so it hides both).</p><aside class="callout callout--staff"><span class="callout__label">Staff-level</span><p>The reliable defence against ambient-transaction bugs is a <strong>single, explicit rule about where transaction boundaries live</strong>: one boundary per use case, at the service layer, and none anywhere else. Not &quot;annotate the service layer and maybe a few repositories&quot; — a real rule with a real enforcement mechanism, because the two teams that will break it are the one writing the new endpoint and the one migrating the old job. Enforcement that works: an ArchUnit rule asserting that <code>@Transactional</code> appears only on <code>..service..</code> classes, and a startup assertion in the test slice that every <code>@Scheduled</code> and <code>@EventListener</code> entry point calls a boundary-declared method. A documented convention with no enforcement is a convention that decays.</p></aside><h4 class="vol__h4" id="common-mistakes-3">Common Mistakes</h4><ul><li>Believing <code>REQUIRES_NEW</code> releases the outer transaction's connection. It suspends it; the connection stays checked out and its locks stay held.</li><li>Using <code>REQUIRES_NEW</code> as a general error-recovery tool. It is a <em>semantic</em> decision about whether the inner work should survive the outer failure, and it is usually made by accident.</li><li>Assuming <code>NESTED</code> is available everywhere. Under <code>JpaTransactionManager</code> + Hibernate it is frequently promoted to fresh-transaction semantics, silently.</li><li>Expecting <code>NESTED</code> with no outer transaction to establish a savepoint. It creates a plain transaction, because there is nothing to nest inside.</li><li>Writing a <code>@Transactional</code> method that a <code>@Scheduled</code> task and an <code>ApplicationListener</code> both call, and being surprised that the scheduled path has no transaction.</li><li>Setting <code>maximumPoolSize</code> without checking the maximum nesting depth of the code that uses that pool.</li></ul><h4 class="vol__h4" id="interview-questions-propagation">Interview Questions — Propagation</h4><article class="qa" id="3-propagation-in-depth-1"><p class="qa__q"><a class="qa__num" href="#3-propagation-in-depth-1">Q1</a> Explain what <code>AbstractPlatformTransactionManager</code> actually does differently for <code>REQUIRED</code> and <code>REQUIRES_NEW</code>. <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p><code>REQUIRED</code> finds a transaction (or a synchronization) already bound to the thread via <code>TransactionSynchronizationManager</code>, and if one exists it participates in it — the same resource, no new connection, <code>TransactionStatus.isNewTransaction()</code> is <code>false</code>. <code>REQUIRES_NEW</code> always begins a new one: it calls <code>suspend(existingTransaction)</code> to unbind the current resource holders from the thread (the underlying connection is not returned to the pool), calls <code>doBegin</code> on the transaction manager to acquire a second resource, runs the work, then calls <code>resume(suspendedResources)</code> to rebind the original holders. The suspended transaction object is retained on the stack for the duration, holding its connection and its locks.</p></div></article><article class="qa" id="3-propagation-in-depth-2"><p class="qa__q"><a class="qa__num" href="#3-propagation-in-depth-2">Q2</a> A service has 10 concurrent requests and a pool of 10 connections. Users start seeing <code>Connection is not available, request timed out after 30000ms</code>, and the database is at 8% CPU. What do you check first? <span class="qa__badge"><code>SCENARIO</code></span></p><div class="qa__a"><p>Connection demand versus pool size. The classic cause is <code>PROPAGATION_REQUIRES_NEW</code> (or deep self-invocation) somewhere on the path: every request now holds two connections, so ten requests need twenty and the eleventh blocks. I would also check for a leaked connection (many DAOs outside Spring, which never return it) and for a long transaction holding a connection across a remote HTTP call. The fix is to remove the nesting or size the pool as <code>peak concurrency × max nesting depth</code> — and to fix the code, because the second is a band-aid that makes the next incident worse.</p></div></article><article class="qa" id="3-propagation-in-depth-3"><p class="qa__q"><a class="qa__num" href="#3-propagation-in-depth-3">Q3</a> What is the difference between <code>NESTED</code> and <code>REQUIRES_NEW</code> in one sentence? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p><code>NESTED</code> reuses the same connection and establishes a savepoint so a failure rolls back only that portion of the transaction, while <code>REQUIRES_NEW</code> suspends the current transaction, takes a second connection, and gives the inner work a completely independent commit that survives — or fails independently of — the outer outcome.</p></div></article><article class="qa" id="3-propagation-in-depth-4"><p class="qa__q"><a class="qa__num" href="#3-propagation-in-depth-4">Q4</a> When is <code>NESTED</code> the wrong tool? <span class="qa__badge"><code>ADVANCED</code></span></p><div class="qa__a"><p>Whenever the inner work must be visible outside the outer transaction even if the caller later rolls back — then the inner commit must be independent, and <code>NESTED</code> (which is contained by the outer) is wrong. It is also wrong when the persistence layer cannot supply a savepoint, because Spring's fallback is a fresh transaction that silently changes the semantics. And it is wrong for anything on a hot path: establishing a savepoint costs statements and, on some engines, a flush.</p></div></article><article class="qa" id="3-propagation-in-depth-5"><p class="qa__q"><a class="qa__num" href="#3-propagation-in-depth-5">Q5</a> A developer uses <code>REQUIRES_NEW</code> to make a log write survive a rollback. What is wrong with that beyond the connection cost? <span class="qa__badge"><code>ADVANCED</code></span></p><div class="qa__a"><p>Several things. The log write now needs a second connection from a pool that was sized for one connection per request. It breaks first-level-cache coherence — the inner transaction reads a different persistence context, so any entity it loads is a different instance. It destroys atomicity in a way nobody thinks about: the log entry now claims something happened that the database says did not. And if the inner transaction is the one that fails, the outer transaction — which may have done perfectly valid work — still rolls back because the exception propagates. For an audit trail, a transactionally-outbox row in the <em>same</em> transaction is almost always the better answer (Chapter 7).</p></div></article><article class="qa" id="3-propagation-in-depth-6"><p class="qa__q"><a class="qa__num" href="#3-propagation-in-depth-6">Q6</a> What do <code>MANDATORY</code> and <code>NEVER</code> buy you? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>They are assertions rather than strategies. <code>MANDATORY</code> fails fast with <code>IllegalTransactionStateException</code> if the method is called outside a transaction, which turns a latent design violation into an immediate, obvious failure at that call site. <code>NEVER</code> fails fast if it is called <em>inside</em> one, which is how you protect a long read-only computation from inheriting — and holding — a caller's write locks. Both are more maintainable than a comment saying &quot;this must be called from a transaction,&quot; because they are enforced by the framework and they are enforced in the test.</p></div></article><article class="qa" id="3-propagation-in-depth-7"><p class="qa__q"><a class="qa__num" href="#3-propagation-in-depth-7">Q7</a> A <code>@Transactional</code> method on a class with <code>@Transactional(propagation = REQUIRES_NEW)</code> at the class level. One method is annotated <code>@Transactional</code> with no attributes. What propagation does it get? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p><code>REQUIRED</code>. The method-level annotation replaces the class-level attribute set wholesale; there is no merging. This catches teams every time they extract a service and add a method annotation &quot;just to be explicit&quot; without realising they have reset the propagation. The diagnostic is <code>TransactionStatus.isNewTransaction()</code> from the programmatic API, or logging the <code>label</code> — a <code>REQUIRES_NEW</code> class with one <code>REQUIRED</code> method logs two different connection identities for one inbound request.</p></div></article><article class="qa" id="3-propagation-in-depth-8"><p class="qa__q"><a class="qa__num" href="#3-propagation-in-depth-8">Q8</a> Explain the interaction between propagation and <code>rollbackFor</code> on the <em>outer</em> method. <span class="qa__badge"><code>SCENARIO</code></span></p><div class="qa__a"><p>If an inner method participates in the outer's transaction (any propagation other than <code>REQUIRES_NEW</code>) and throws, the inner interceptor calls <code>completeTransactionAfterThrowing</code> with the outer's <code>TransactionStatus</code>, which calls <code>setRollbackOnly()</code> on it — the outer transaction is now doomed. If the inner method then <em>catches</em> the exception and returns normally, the outer method sees no exception, proceeds, and at the end tries to commit a transaction already marked rollback-only. Spring throws <code>UnexpectedRollbackException(&quot;Transaction rolled back because it has been marked as rollback-only&quot;)</code>. Teams find this baffling because nothing was thrown; the answer is that the exception <em>was</em> thrown and swallowed, and the marker is how the framework remembers it after the stack unwound.</p><aside class="callout callout--summary"><span class="callout__label">Chapter summary</span><p>Propagation is not a style preference — it is a statement about whether a unit of work belongs to its caller's. <code>REQUIRED</code> joins, <code>REQUIRES_NEW</code> suspends and takes a second connection while the first stays checked out and keeps its locks, <code>NESTED</code> reuses the connection with a savepoint, and <code>MANDATORY</code>/<code>NEVER</code> are assertions that fail fast. <code>REQUIRES_NEW</code> under JPA additionally breaks persistence-context coherence, and its connection cost is a genuine capacity-planning input — pool demand is <code>concurrency × nesting depth</code>. <code>NESTED</code> is the right tool for &quot;undo just this part and continue,&quot; and it is the one most often mis-chosen because the fallback when savepoints are unavailable is a fresh transaction rather than an error.</p></aside></div></article><h4 class="vol__h4" id="further-reading-3">Further Reading</h4><ul><li><a href="https://docs.spring.io/spring-framework/reference/data-access/transaction.html" rel="noopener noreferrer">Spring Framework Reference — Transaction Management</a> — the propagation table and the &quot;transaction suspension&quot; section, including which resources support it.</li><li><a href="https://docs.spring.io/spring-framework/reference/data-access/jdbc.html" rel="noopener noreferrer">Spring Framework Reference — DataSource Utilities</a> — how <code>DataSourceUtils</code> binds and unbinds a connection to the thread, which is the mechanism behind every suspension cost.</li><li><a href="https://www.postgresql.org/docs/current/explicit-locking.html" rel="noopener noreferrer">PostgreSQL — Explicit Locking</a> — what <code>SELECT ... FOR UPDATE</code>, <code>FOR SHARE</code> and <code>FOR UPDATE NOWAIT</code> actually lock, which is what makes a suspended transaction expensive.</li><li><a href="https://microservices.io/patterns/data/saga.html" rel="noopener noreferrer">Microservices Patterns — Saga</a> — the cross-service version of the same &quot;commit independently or undo&quot; decision, at a scope where savepoints are not available to you.</li></ul></section>
 
-<section id="chapter-4-isolation-levels-and-concurrency" data-filter-target><h2 class="vol__h2">Chapter 4 — Isolation Levels &amp; Concurrency</h2><h3 class="vol__h3" id="41-the-three-anomalies">4.1 The Three Anomalies</h3><p>Everything in this chapter is a consequence of three specific things going wrong:</p><pre class="diagram"><code>DIRTY READ
-  T1: BEGIN; UPDATE account SET balance = 100 WHERE id = 1;   ── not committed
-  T2:                     SELECT balance FROM account WHERE id = 1;  ── sees 100
-  T1: ROLLBACK;
-      → T2 made a business decision on a number that never existed.
-
-NON-REPEATABLE READ
-  T1: BEGIN; SELECT balance ...;   ── sees 100
-  T2:        BEGIN; UPDATE ... SET balance = 200; COMMIT;
-  T1: SELECT balance ...;   ── sees 200  (same transaction, different answer)
-      → T1's &quot;check then act&quot; logic is broken. Compare-and-set does not work.
-
-PHANTOM READ
-  T1: BEGIN; SELECT COUNT(*) FROM orders WHERE status = 'PENDING';  ── 40
-  T2:        BEGIN; INSERT INTO orders ... (status='PENDING'); COMMIT;
-  T1: SELECT COUNT(*) FROM orders WHERE status = 'PENDING';  ── 41
-      → the same aggregate query returns a different count inside one transaction.</code></pre><p>The distinction between the last two matters and is frequently blurred: a <strong>non-repeatable read</strong> is the same <em>row</em> changing, and a <strong>phantom</strong> is a different <em>set of rows</em> matching a predicate. <code>SERIALIZABLE</code> prevents both; <code>REPEATABLE READ</code> prevents only the first, on most databases.</p><h3 class="vol__h3" id="42-the-four-sql-levels">4.2 The Four SQL Levels</h3><div class="table-wrap"><table><thead><tr><th>Level</th><th>Dirty</th><th>Non-repeatable</th><th>Phantom</th><th>Mechanism</th><th>Cost</th></tr></thead><tbody><tr><td><code>READ UNCOMMITTED</code></td><td><strong>Possible</strong></td><td>Possible</td><td>Possible</td><td>No locks at all; readers may see uncommitted rows and even re-read a row to a <em>different</em> value mid-statement</td><td>Rarely correct. A reporting replica at best</td></tr><tr><td><code>READ COMMITTED</code></td><td>Prevented</td><td><strong>Possible</strong></td><td>Possible</td><td>Statement-level snapshot. The PostgreSQL and MySQL/InnoDB default</td><td>Each statement takes a fresh snapshot; read consistency is per-statement only</td></tr><tr><td><code>REPEATABLE READ</code></td><td>Prevented</td><td>Prevented</td><td><strong>Possible</strong> (PostgreSQL) / Prevented (MySQL/InnoDB)</td><td>Transaction-level snapshot (MVCC) or gap locks (InnoDB)</td><td>Long-running transactions pin an old snapshot and inflate bloat</td></tr><tr><td><code>SERIALIZABLE</code></td><td>Prevented</td><td>Prevented</td><td>Prevented</td><td>Predicate locks / SSI conflict detection (Postgres) or next-key locks (InnoDB)</td><td><strong>Aborts.</strong> Serialization failures become a normal, expected outcome you must retry</td></tr></tbody></table></div><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;SERIALIZABLE PREVENTS EVERY CONCURRENCY PROBLEM&quot;</strong></p>
+<section id="chapter-4-isolation-levels-and-concurrency" data-filter-target><h2 class="vol__h2">Chapter 4 — Isolation Levels &amp; Concurrency</h2><h3 class="vol__h3" id="41-the-three-anomalies">4.1 The Three Anomalies</h3><p>Everything in this chapter is a consequence of three specific things going wrong:</p><figure class="figure">
+  <svg viewBox="0 0 900 350" role="img" aria-label="Three anomalies define the isolation problem. A dirty read lets T2 see a value T1 later rolls back. A non-repeatable read lets the same transaction see the same row change. A phantom read lets the same query return a different count after another transaction inserts matching rows.">
+    <rect class="node node--accent" x="30" y="24" width="270" height="44" rx="5"/>
+    <text class="label" x="165" y="52" text-anchor="middle">DIRTY READ</text>
+    <rect class="node node--accent" x="315" y="24" width="270" height="44" rx="5"/>
+    <text class="label" x="450" y="52" text-anchor="middle">NON-REPEATABLE READ</text>
+    <rect class="node node--accent" x="600" y="24" width="270" height="44" rx="5"/>
+    <text class="label" x="735" y="52" text-anchor="middle">PHANTOM READ</text>
+    <path class="edge" d="M 165 68 L 165 88" stroke-width="0.8"/>
+    <path class="edge" d="M 450 68 L 450 88" stroke-width="0.8"/>
+    <path class="edge" d="M 735 68 L 735 88" stroke-width="0.8"/>
+    <rect class="node node--bad" x="30" y="92" width="270" height="230" rx="5"/>
+    <text class="label" x="165" y="124" text-anchor="middle">T1: UPDATE balance = 100</text>
+    <text class="label label--sub" x="165" y="142" text-anchor="middle">(not committed)</text>
+    <text class="label" x="165" y="164" text-anchor="middle">T2: SELECT — sees 100</text>
+    <text class="label" x="165" y="182" text-anchor="middle">T1: ROLLBACK</text>
+    <text class="edge-label fill-bad" x="165" y="216" text-anchor="middle">T2 decided on a number</text>
+    <text class="edge-label fill-bad" x="165" y="232" text-anchor="middle">that never existed</text>
+    <rect class="node node--warn" x="315" y="92" width="270" height="230" rx="5"/>
+    <text class="label" x="450" y="124" text-anchor="middle">T1: SELECT — sees 100</text>
+    <text class="label" x="450" y="144" text-anchor="middle">T2: UPDATE = 200, COMMIT</text>
+    <text class="label" x="450" y="162" text-anchor="middle">T1: SELECT — sees 200</text>
+    <text class="label label--sub" x="450" y="180" text-anchor="middle">same transaction, different answer</text>
+    <text class="edge-label fill-warn" x="450" y="216" text-anchor="middle">check-then-act logic</text>
+    <text class="edge-label fill-warn" x="450" y="232" text-anchor="middle">is broken</text>
+    <rect class="node node--warn" x="600" y="92" width="270" height="230" rx="5"/>
+    <text class="label" x="735" y="124" text-anchor="middle">T1: COUNT(PENDING) = 40</text>
+    <text class="label" x="735" y="144" text-anchor="middle">T2: INSERT a PENDING row,</text>
+    <text class="label" x="735" y="162" text-anchor="middle">COMMIT</text>
+    <text class="label label--sub" x="735" y="180" text-anchor="middle">inside one transaction</text>
+    <text class="edge-label fill-warn" x="735" y="216" text-anchor="middle">the same aggregate query</text>
+    <text class="edge-label fill-warn" x="735" y="232" text-anchor="middle">returns a different count</text>
+  </svg>
+  <figcaption>
+    <strong>Three anomalies define the isolation problem: a dirty read sees uncommitted data, a non-repeatable read sees the same row change, and a phantom sees a different set of rows.</strong> A dirty read is T2 deciding on a number that never existed; a non-repeatable read breaks check-then-act logic inside one transaction; a phantom changes an aggregate count. SERIALIZABLE prevents all three; REPEATABLE READ prevents only the first on most databases.
+  </figcaption>
+</figure><p>The distinction between the last two matters and is frequently blurred: a <strong>non-repeatable read</strong> is the same <em>row</em> changing, and a <strong>phantom</strong> is a different <em>set of rows</em> matching a predicate. <code>SERIALIZABLE</code> prevents both; <code>REPEATABLE READ</code> prevents only the first, on most databases.</p><h3 class="vol__h3" id="42-the-four-sql-levels">4.2 The Four SQL Levels</h3><div class="table-wrap"><table><thead><tr><th>Level</th><th>Dirty</th><th>Non-repeatable</th><th>Phantom</th><th>Mechanism</th><th>Cost</th></tr></thead><tbody><tr><td><code>READ UNCOMMITTED</code></td><td><strong>Possible</strong></td><td>Possible</td><td>Possible</td><td>No locks at all; readers may see uncommitted rows and even re-read a row to a <em>different</em> value mid-statement</td><td>Rarely correct. A reporting replica at best</td></tr><tr><td><code>READ COMMITTED</code></td><td>Prevented</td><td><strong>Possible</strong></td><td>Possible</td><td>Statement-level snapshot. The PostgreSQL and MySQL/InnoDB default</td><td>Each statement takes a fresh snapshot; read consistency is per-statement only</td></tr><tr><td><code>REPEATABLE READ</code></td><td>Prevented</td><td>Prevented</td><td><strong>Possible</strong> (PostgreSQL) / Prevented (MySQL/InnoDB)</td><td>Transaction-level snapshot (MVCC) or gap locks (InnoDB)</td><td>Long-running transactions pin an old snapshot and inflate bloat</td></tr><tr><td><code>SERIALIZABLE</code></td><td>Prevented</td><td>Prevented</td><td>Prevented</td><td>Predicate locks / SSI conflict detection (Postgres) or next-key locks (InnoDB)</td><td><strong>Aborts.</strong> Serialization failures become a normal, expected outcome you must retry</td></tr></tbody></table></div><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;SERIALIZABLE PREVENTS EVERY CONCURRENCY PROBLEM&quot;</strong></p>
 <p>It prevents the three <em>anomalies</em>, which is not the same as preventing lost updates and is certainly not the same as preventing your application from being wrong. Two important corrections a senior answer makes: (1) under <code>SERIALIZABLE</code> on PostgreSQL, concurrent transactions do not queue — they <strong>abort</strong> with <code>ERROR: could not serialize access due to concurrent update</code> (40001), so any code that runs at <code>SERIALIZABLE</code> without a retry loop is a latent outage; (2) the most common real-world corruption — the lost update — is <em>not</em> on this list at all, and no standard isolation level prevents it in the sense people assume. See 4.4.</p></blockquote><pre class="snippet" data-lang="java"><code>@Transactional(isolation = Isolation.SERIALIZABLE)
 public void transfer(long from, long to, BigDecimal amount) {
     debit(from, amount);
@@ -410,19 +526,78 @@ MySQL       →  SET TRANSACTION ISOLATION LEVEL SERIALIZABLE   (before the tx b
 Oracle      →  SET TRANSACTION ISOLATION LEVEL SERIALIZABLE
 JPA/Hibernate → NOT a portable JPA call. Applied to the JDBC connection underneath,
                 which requires a dialect with connection handling that makes this
-                possible. On a non-database-aware EntityManager it silently does nothing.</code></pre><h3 class="vol__h3" id="43-mvcc-what-postgres-and-innodb-actually-do">4.3 MVCC — What Postgres and InnoDB Actually Do</h3><p>The mental model &quot;isolation level = how many locks&quot; is wrong for the two databases most Spring applications run on. Both implement <strong>Multi-Version Concurrency Control</strong>: every row update writes a new row version, and readers read the version that was current when their snapshot was taken. Old versions are collected later by a cleanup process.</p><pre class="diagram"><code>                    ┌───────────── row id 42 ─────────────┐
-T1 reads at 10:00  │ version A: balance=100 (created 09:00)│ ◄── T1 sees this
-T2 writes at 10:01 │ version B: balance=90  (10:01, uncommitted)
-T1 reads again     │ version A: balance=100                 │ ◄── SAME ANSWER
-T2 commits at 10:02│ version B: balance=90  (10:01, now committed)
-T1 reads again     │ version A: balance=100                 │ ◄── still the snapshot
-                    └────────────────────────────────────────┘</code></pre><p>Three consequences that change how you design transactions:</p><ol><li><strong>Readers never block writers, and writers never block readers.</strong> A long <code>SELECT</code> does not hold an <code>ACCESS SHARE</code> lock that blocks an <code>UPDATE</code>; it holds a buffer pin and a snapshot. This is why a reporting query in Postgres cannot take down the OLTP path the way the same query in MySQL's old locking model could.</li><li><strong>A long transaction is expensive even if it writes nothing</strong>, because it pins an old snapshot and prevents dead row versions from being reclaimed. That is the <code>idle in transaction</code> state, and the setting that catches it is <code>idle_in_transaction_session_timeout</code>.</li><li><strong>The MVCC snapshot is taken at a specific moment</strong>, and <em>when</em> differs by isolation level. Under <code>READ COMMITTED</code> (the Postgres default) it is taken at the start of each <em>statement</em>. Under <code>REPEATABLE READ</code> or <code>SERIALIZABLE</code> it is taken at the start of the <em>transaction</em>. This is the whole explanation for &quot;the same query inside one transaction returned two different counts.&quot;</li></ol><aside class="callout callout--must"><span class="callout__label">Must remember</span><p>Under <code>READ COMMITTED</code> — which is the PostgreSQL and MySQL/InnoDB default, and therefore what most Spring applications run — <strong>the guarantee is per statement, not per transaction.</strong> Any &quot;read the value, decide, write&quot; logic that spans more than one query in the same transaction is unprotected. That is not a missing isolation setting; it is the designed behaviour of the default, and fixing it is a locking decision, not a settings change.</p></aside><h3 class="vol__h3" id="44-lost-updates-the-one-no-standard-level-fixes">4.4 Lost Updates — The One No Standard Level Fixes</h3><pre class="diagram"><code>Account balance = 100
-
-T1: SELECT balance FROM account WHERE id = 1;   ──► 100
-T2: SELECT balance FROM account WHERE id = 1;   ──► 100
-T1: UPDATE account SET balance = 100 - 30 WHERE id = 1;  ──► 70
-T2: UPDATE account SET balance = 100 - 20 WHERE id = 1;  ──► 80
-                                            ── the 30 T1 spent is gone</code></pre><p>Both transactions ran at <code>SERIALIZABLE</code> and both still corrupted the data, because the bug is not in the read — it is that T2 computed its write from a value that T1 had already invalidated. This is the <strong>read-modify-write race</strong>, and it is by some distance the most common real data-corruption bug in Spring applications, because it reproduces perfectly under a single-threaded test.</p><p><strong>Fix 1 — optimistic locking with <code>@Version</code>:</strong></p><pre class="snippet" data-lang="java"><code>@Entity
+                possible. On a non-database-aware EntityManager it silently does nothing.</code></pre><h3 class="vol__h3" id="43-mvcc-what-postgres-and-innodb-actually-do">4.3 MVCC — What Postgres and InnoDB Actually Do</h3><p>The mental model &quot;isolation level = how many locks&quot; is wrong for the two databases most Spring applications run on. Both implement <strong>Multi-Version Concurrency Control</strong>: every row update writes a new row version, and readers read the version that was current when their snapshot was taken. Old versions are collected later by a cleanup process.</p><figure class="figure">
+  <svg viewBox="0 0 900 310" role="img" aria-label="Multi-Version Concurrency Control: every row update writes a new row version, and readers read the version current when their snapshot was taken. T1 reads row 42 at 10:00, 10:01 and 10:02 and sees version A every time, while T2 writes and commits version B in between.">
+    <defs>
+      <marker id="arw-spring-04-05-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="250" y="24" width="400" height="260" rx="5"/>
+    <text class="label" x="450" y="50" text-anchor="middle">row id 42</text>
+    <rect class="node node--good" x="280" y="64" width="340" height="62" rx="5"/>
+    <text class="label" x="450" y="90" text-anchor="middle">version A: balance = 100</text>
+    <text class="label label--sub" x="450" y="108" text-anchor="middle">created 09:00</text>
+    <rect class="node node--warn" x="280" y="150" width="340" height="62" rx="5"/>
+    <text class="label" x="450" y="176" text-anchor="middle">version B: balance = 90</text>
+    <text class="label label--sub" x="450" y="194" text-anchor="middle">written 10:01, committed 10:02</text>
+    <rect class="node" x="30" y="70" width="180" height="56" rx="5"/>
+    <text class="label" x="120" y="92" text-anchor="middle">T1 reads at 10:00</text>
+    <text class="label label--sub" x="120" y="110" text-anchor="middle">sees version A</text>
+    <path class="edge" d="M 210 98 L 246 98" marker-end="url(#arw-spring-04-05-a)"/>
+    <rect class="node" x="30" y="150" width="180" height="56" rx="5"/>
+    <text class="label" x="120" y="172" text-anchor="middle">T1 reads again</text>
+    <text class="label label--sub" x="120" y="190" text-anchor="middle">SAME ANSWER</text>
+    <path class="edge" d="M 210 178 L 246 178" marker-end="url(#arw-spring-04-05-a)"/>
+    <rect class="node" x="30" y="230" width="180" height="56" rx="5"/>
+    <text class="label" x="120" y="252" text-anchor="middle">T1 reads again</text>
+    <text class="label label--sub" x="120" y="270" text-anchor="middle">still the snapshot</text>
+    <path class="edge" d="M 210 258 L 246 258" marker-end="url(#arw-spring-04-05-a)"/>
+    <rect class="node" x="690" y="150" width="180" height="56" rx="5"/>
+    <text class="label" x="780" y="172" text-anchor="middle">T2 writes at 10:01</text>
+    <text class="label label--sub" x="780" y="190" text-anchor="middle">uncommitted, then commits</text>
+    <path class="edge" d="M 690 178 L 654 178" marker-end="url(#arw-spring-04-05-a)"/>
+  </svg>
+  <figcaption>
+    <strong>Every update writes a new row version, and a reader's snapshot decides which version it sees — T1 reads version A three times and gets the same answer throughout.</strong> T2's write at 10:01 creates version B, uncommitted until 10:02, and T1 never sees it: readers read the version that was current when their snapshot was taken. Old versions are collected later by a cleanup process, which is why a long transaction pins them.
+  </figcaption>
+</figure><p>Three consequences that change how you design transactions:</p><ol><li><strong>Readers never block writers, and writers never block readers.</strong> A long <code>SELECT</code> does not hold an <code>ACCESS SHARE</code> lock that blocks an <code>UPDATE</code>; it holds a buffer pin and a snapshot. This is why a reporting query in Postgres cannot take down the OLTP path the way the same query in MySQL's old locking model could.</li><li><strong>A long transaction is expensive even if it writes nothing</strong>, because it pins an old snapshot and prevents dead row versions from being reclaimed. That is the <code>idle in transaction</code> state, and the setting that catches it is <code>idle_in_transaction_session_timeout</code>.</li><li><strong>The MVCC snapshot is taken at a specific moment</strong>, and <em>when</em> differs by isolation level. Under <code>READ COMMITTED</code> (the Postgres default) it is taken at the start of each <em>statement</em>. Under <code>REPEATABLE READ</code> or <code>SERIALIZABLE</code> it is taken at the start of the <em>transaction</em>. This is the whole explanation for &quot;the same query inside one transaction returned two different counts.&quot;</li></ol><aside class="callout callout--must"><span class="callout__label">Must remember</span><p>Under <code>READ COMMITTED</code> — which is the PostgreSQL and MySQL/InnoDB default, and therefore what most Spring applications run — <strong>the guarantee is per statement, not per transaction.</strong> Any &quot;read the value, decide, write&quot; logic that spans more than one query in the same transaction is unprotected. That is not a missing isolation setting; it is the designed behaviour of the default, and fixing it is a locking decision, not a settings change.</p></aside><h3 class="vol__h3" id="44-lost-updates-the-one-no-standard-level-fixes">4.4 Lost Updates — The One No Standard Level Fixes</h3><figure class="figure">
+  <svg viewBox="0 0 900 420" role="img" aria-label="Both transactions read the balance as 100. T1 updates 100 minus 30 and writes 70; T2 updates 100 minus 20 and writes 80. The second write overwrites the first, and the 30 T1 spent is gone — the read-modify-write race that no standard isolation level prevents.">
+    <defs>
+      <marker id="arw-spring-04-06-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="300" y="24" width="300" height="48" rx="5"/>
+    <text class="label" x="450" y="54" text-anchor="middle">Account balance = 100</text>
+    <path class="edge" d="M 380 72 L 230 104" marker-end="url(#arw-spring-04-06-a)"/>
+    <path class="edge" d="M 520 72 L 670 104" marker-end="url(#arw-spring-04-06-a)"/>
+    <rect class="node" x="60" y="110" width="340" height="52" rx="5"/>
+    <text class="label" x="230" y="132" text-anchor="middle">T1: SELECT balance</text>
+    <text class="label label--sub" x="230" y="148" text-anchor="middle">reads 100</text>
+    <rect class="node" x="500" y="110" width="340" height="52" rx="5"/>
+    <text class="label" x="670" y="132" text-anchor="middle">T2: SELECT balance</text>
+    <text class="label label--sub" x="670" y="148" text-anchor="middle">reads 100</text>
+    <path class="edge" d="M 230 162 L 230 214" marker-end="url(#arw-spring-04-06-a)"/>
+    <path class="edge" d="M 670 162 L 670 214" marker-end="url(#arw-spring-04-06-a)"/>
+    <rect class="node" x="60" y="220" width="340" height="64" rx="5"/>
+    <text class="label" x="230" y="246" text-anchor="middle">T1: UPDATE 100 - 30</text>
+    <text class="label label--sub" x="230" y="262" text-anchor="middle">writes 70</text>
+    <text class="label label--sub" x="230" y="278" text-anchor="middle">based on the 100 it read</text>
+    <rect class="node" x="500" y="220" width="340" height="64" rx="5"/>
+    <text class="label" x="670" y="246" text-anchor="middle">T2: UPDATE 100 - 20</text>
+    <text class="label label--sub" x="670" y="262" text-anchor="middle">writes 80</text>
+    <text class="label label--sub" x="670" y="278" text-anchor="middle">based on the same 100</text>
+    <path class="edge" d="M 230 284 L 350 324" marker-end="url(#arw-spring-04-06-a)"/>
+    <path class="edge" d="M 670 284 L 550 324" marker-end="url(#arw-spring-04-06-a)"/>
+    <rect class="node node--bad" x="250" y="330" width="400" height="60" rx="5"/>
+    <text class="label" x="450" y="356" text-anchor="middle">final balance = 80</text>
+    <text class="label label--sub" x="450" y="372" text-anchor="middle">the 30 T1 spent is gone</text>
+  </svg>
+  <figcaption>
+    <strong>Both transactions read 100 and computed their write from it, so the second write overwrote the first and the 30 T1 spent is gone.</strong> This is the read-modify-write race, and it reproduces perfectly under a single-threaded test. The bug is not in the read — it is that T2 computed its write from a value T1 had already invalidated, and no standard isolation level prevents it in the sense people assume.
+  </figcaption>
+</figure><p>Both transactions ran at <code>SERIALIZABLE</code> and both still corrupted the data, because the bug is not in the read — it is that T2 computed its write from a value that T1 had already invalidated. This is the <strong>read-modify-write race</strong>, and it is by some distance the most common real data-corruption bug in Spring applications, because it reproduces perfectly under a single-threaded test.</p><p><strong>Fix 1 — optimistic locking with <code>@Version</code>:</strong></p><pre class="snippet" data-lang="java"><code>@Entity
 @Table(name = &quot;account&quot;)
 public class Account {
 
@@ -460,10 +635,39 @@ public void withdraw(Long id, BigDecimal amount) {
 }</code></pre><pre class="diagram"><code>T1: SELECT ... FOR UPDATE  ──► takes ROW EXCLUSIVE, sees balance=100
 T2: SELECT ... FOR UPDATE  ──► BLOCKS until T1 commits or rolls back
 T1: UPDATE ... COMMIT      ──► balance = 70, lock released
-T2: ...resumes...          ──► re-reads (in READ COMMITTED) balance=70, applies its own delta</code></pre><p>Choose optimistic by default. Pessimistic is right when the conflict rate is high (so that retrying is mostly wasted work), when the operation is not a simple single-entity write (a multi-row invariant), or when a &quot;check this precondition holds&quot; semantics is genuinely needed. Pessimistic's cost is that it <strong>converts a lost update into a wait</strong>, and a wait with a timeout is a deadlock waiting for a load spike.</p><aside class="callout callout--staff"><span class="callout__label">Staff-level</span><p>Optimistic locking is a <em>correctness</em> decision, but adopting it across a codebase is an <em>organisational</em> one, because it means every write path can now fail with <code>ObjectOptimisticLockingFailureException</code> and every caller needs a policy. The realistic migration: put <code>@Version</code> on the entities where the invariant is real and the write rate is moderate, leave it off hot counters, and write down where the retry is owned — service layer, or the caller, or (for the genuinely hot paths) a queue with a bounded number of attempts. The wrong move is a blanket <code>@Version</code> on every entity with no retry policy, which converts silent corruption into a visible 500s — technically an improvement, operationally a fire.</p></aside><h3 class="vol__h3" id="45-deadlocks-the-inevitable-consequence">4.5 Deadlocks — The Inevitable Consequence</h3><p>A deadlock is two transactions each holding what the other wants:</p><pre class="diagram"><code>T1: UPDATE account 1        ── holds lock on row 1
-T2: UPDATE account 2        ── holds lock on row 2
-T1: UPDATE account 2        ── waiting for T2
-T2: UPDATE account 1        ── waiting for T1     XX: DEADLOCK</code></pre><p>The database detects this itself — every major engine has a deadlock detector, and InnoDB and PostgreSQL both abort one of the two transactions immediately rather than waiting. So the practical response is not to prevent deadlocks, which is not fully possible, but to <strong>treat the abort as a normal outcome and retry</strong>.</p><pre class="diagram"><code>PostgreSQL:  ERROR: deadlock detected
+T2: ...resumes...          ──► re-reads (in READ COMMITTED) balance=70, applies its own delta</code></pre><p>Choose optimistic by default. Pessimistic is right when the conflict rate is high (so that retrying is mostly wasted work), when the operation is not a simple single-entity write (a multi-row invariant), or when a &quot;check this precondition holds&quot; semantics is genuinely needed. Pessimistic's cost is that it <strong>converts a lost update into a wait</strong>, and a wait with a timeout is a deadlock waiting for a load spike.</p><aside class="callout callout--staff"><span class="callout__label">Staff-level</span><p>Optimistic locking is a <em>correctness</em> decision, but adopting it across a codebase is an <em>organisational</em> one, because it means every write path can now fail with <code>ObjectOptimisticLockingFailureException</code> and every caller needs a policy. The realistic migration: put <code>@Version</code> on the entities where the invariant is real and the write rate is moderate, leave it off hot counters, and write down where the retry is owned — service layer, or the caller, or (for the genuinely hot paths) a queue with a bounded number of attempts. The wrong move is a blanket <code>@Version</code> on every entity with no retry policy, which converts silent corruption into a visible 500s — technically an improvement, operationally a fire.</p></aside><h3 class="vol__h3" id="45-deadlocks-the-inevitable-consequence">4.5 Deadlocks — The Inevitable Consequence</h3><p>A deadlock is two transactions each holding what the other wants:</p><figure class="figure">
+  <svg viewBox="0 0 900 320" role="img" aria-label="A deadlock is two transactions each holding what the other wants. T1 updates account 1 and holds its lock, T2 updates account 2 and holds its lock, then T1 waits for row 2 and T2 waits for row 1. The database detects the cycle and aborts one transaction immediately.">
+    <defs>
+      <marker id="arw-spring-04-07-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="60" y="40" width="300" height="64" rx="5"/>
+    <text class="label" x="210" y="68" text-anchor="middle">T1: UPDATE account 1</text>
+    <text class="label label--sub" x="210" y="86" text-anchor="middle">holds the lock on row 1</text>
+    <rect class="node" x="540" y="40" width="300" height="64" rx="5"/>
+    <text class="label" x="690" y="68" text-anchor="middle">T2: UPDATE account 2</text>
+    <text class="label label--sub" x="690" y="86" text-anchor="middle">holds the lock on row 2</text>
+    <path class="edge" d="M 360 72 L 534 72" marker-end="url(#arw-spring-04-07-a)"/>
+    <path class="edge" d="M 690 104 L 690 214" marker-end="url(#arw-spring-04-07-a)"/>
+    <rect class="node" x="540" y="220" width="300" height="64" rx="5"/>
+    <text class="label" x="690" y="248" text-anchor="middle">T1: UPDATE account 2</text>
+    <text class="label label--sub" x="690" y="266" text-anchor="middle">waiting for T2</text>
+    <rect class="node" x="60" y="220" width="300" height="64" rx="5"/>
+    <text class="label" x="210" y="248" text-anchor="middle">T2: UPDATE account 1</text>
+    <text class="label label--sub" x="210" y="266" text-anchor="middle">waiting for T1</text>
+    <path class="edge" d="M 540 252 L 366 252" marker-end="url(#arw-spring-04-07-a)"/>
+    <path class="edge" d="M 210 220 L 210 108" marker-end="url(#arw-spring-04-07-a)"/>
+    <path class="edge" d="M 620 220 L 534 194" marker-end="url(#arw-spring-04-07-a)"/>
+    <path class="edge" d="M 280 220 L 366 194" marker-end="url(#arw-spring-04-07-a)"/>
+    <rect class="node node--bad" x="330" y="130" width="240" height="60" rx="5"/>
+    <text class="label" x="450" y="156" text-anchor="middle">DEADLOCK</text>
+    <text class="label label--sub" x="450" y="172" text-anchor="middle">detected; one is aborted</text>
+  </svg>
+  <figcaption>
+    <strong>A deadlock is a cycle: T1 holds row 1 and waits for row 2 while T2 holds row 2 and waits for row 1, and neither can proceed.</strong> Every major engine detects this itself and aborts one of the two transactions immediately rather than waiting — InnoDB and PostgreSQL both. The practical response is not to prevent deadlocks, which is not fully possible, but to treat the abort as a normal outcome and retry in a new transaction.
+  </figcaption>
+</figure><p>The database detects this itself — every major engine has a deadlock detector, and InnoDB and PostgreSQL both abort one of the two transactions immediately rather than waiting. So the practical response is not to prevent deadlocks, which is not fully possible, but to <strong>treat the abort as a normal outcome and retry</strong>.</p><pre class="diagram"><code>PostgreSQL:  ERROR: deadlock detected
              DETAIL: Process 4711 waits for ShareLock on transaction 4690;
                      Process 4690 waits for ShareLock on transaction 4711.
              → SQLState 40P01
@@ -775,27 +979,81 @@ spring.datasource.hikari.connection-init-sql=SET application_name TO 'app'
         &quot;a non-proxy instance, or a missing @Transactional&quot;)
     .isTrue();</code></pre><p>Put it in a base class for the tests that cover write paths. It converts the most common class of silent transaction bug from &quot;discovered in production&quot; to &quot;red in CI,&quot; and it costs one line.</p></aside><h4 class="vol__h4" id="common-mistakes-6">Common Mistakes</h4><ul><li>Trusting a green test suite as evidence that transactions work, when the tests are wrapped in a rollback transaction that never commits.</li><li>Setting <code>readOnly = true</code> for the performance and treating it as a correctness guarantee, when on MySQL and H2 it is a driver hint that does nothing.</li><li>Reading a value, then writing a value computed from it, in a <code>READ COMMITTED</code> transaction — a lost update that no test running in a single thread will ever reproduce.</li><li>Believing a <code>@Transactional</code> method called from a <code>@Scheduled</code> task or a listener runs inside the caller's transaction. There is no caller transaction.</li><li>Retrying a deadlock inside the same transaction instead of around a new one.</li><li>Assuming a slow endpoint is a slow endpoint, when a thread dump shows it parked in a socket read while holding a database transaction open.</li></ul><h4 class="vol__h4" id="interview-questions-failure-modes">Interview Questions — Failure Modes</h4><article class="qa" id="6-common-failure-modes-1"><p class="qa__q"><a class="qa__num" href="#6-common-failure-modes-1">Q1</a> A <code>@Transactional</code> method is called from a <code>@Scheduled</code> method. Is it transactional? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>Yes — but as its own, single-method transaction, and only because the scheduler invokes the bean through the proxy. The scheduler's thread is not a request thread, so there is no ambient transaction for it to join. That distinction is the one that bites: if the scheduled method loops over 1,000 items calling a <code>@Transactional</code> method, that is 1,000 transactions and 1,000 commits, not one. And because the outer method has no boundary, a failure at item 700 leaves 0–699 committed with no record of where it stopped.</p></div></article><article class="qa" id="6-common-failure-modes-2"><p class="qa__q"><a class="qa__num" href="#6-common-failure-modes-2">Q2</a> A team's integration tests pass; production shows missing rows. What is the most likely cause? <span class="qa__badge"><code>SCENARIO</code></span></p><div class="qa__a"><p>The tests are annotated <code>@Transactional</code> at the class level, which wraps each test in a transaction that <strong>rolls back at the end</strong>. Nothing in such a test ever exercises a real commit, so any bug in the commit path — a deferred constraint violation, a <code>@Transactional(readOnly = true)</code> flush-mode discard, a two-transaction-manager partial commit, a lost update at commit time — is invisible. The production symptom is almost always &quot;the data isn't there,&quot; because the write that &quot;worked&quot; in the test was never committed and a downstream reader, on another connection or a replica, correctly did not see it. The fix is a dedicated test slice with no rollback transaction, against a real database via Testcontainers, covering the write-and-read-back path.</p></div></article><article class="qa" id="6-common-failure-modes-3"><p class="qa__q"><a class="qa__num" href="#6-common-failure-modes-3">Q3</a> A developer says &quot;I set <code>readOnly = true</code> and the code still wrote to the database.&quot; What happened? <span class="qa__badge"><code>ADVANCED</code></span></p><div class="qa__a"><p>Two possibilities, and the honest answer is that the flag is not an enforcement mechanism. <code>JpaTransactionManager</code> sets Hibernate's <code>FlushMode.MANUAL</code> for a read-only transaction, which should discard changes — but on MySQL and H2, <code>Connection.setReadOnly(true)</code> is a driver hint, and if the flush mode was reset (an inner <code>@Transactional</code> without <code>readOnly</code>, a manual <code>em.flush()</code>, or a native query) the write goes through. On PostgreSQL the same code would throw. So the behaviour is <strong>database-dependent</strong>, which is the real lesson: if you need &quot;this method must not write,&quot; enforce it somewhere other than a transaction flag.</p></div></article><article class="qa" id="6-common-failure-modes-4"><p class="qa__q"><a class="qa__num" href="#6-common-failure-modes-4">Q4</a> What does <code>UnexpectedRollbackException: Transaction rolled back because it has been marked as rollback-only</code> actually mean? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>It means an inner participating method threw, was caught somewhere up the stack, and the outer method then tried to commit. When an inner method that joined the existing transaction (<code>REQUIRED</code>, <code>SUPPORTS</code>, <code>MANDATORY</code>, <code>NESTED</code>) throws, its interceptor calls <code>setRollbackOnly()</code> on the shared <code>TransactionStatus</code> before the exception propagates. If the outer code swallows that exception, the outer method sees a normal return, and the commit of an already-doomed transaction is what raises this. The fix is not to catch the exception and continue unless you genuinely can — because the inner work <em>has</em> been rolled back at commit time, and the &quot;continue&quot; runs on a transaction that will not commit.</p></div></article><article class="qa" id="6-common-failure-modes-5"><p class="qa__q"><a class="qa__num" href="#6-common-failure-modes-5">Q5</a> Rank the causes of <code>HikariPool - Connection is not available, request timed out after 30000ms</code>, most common first. <span class="qa__badge"><code>SCENARIO</code></span></p><div class="qa__a"><ol><li><strong>Connection demand exceeds pool size because of <code>REQUIRES_NEW</code> or deep nesting</strong> — every request holds two connections. Check for <code>REQUIRES_NEW</code> on the request path first; it is by far the most common and least obvious.</li><li><strong>A leaked connection</strong> — code doing <code>dataSource.getConnection()</code> without try-with-resources or a Spring-managed template. Outside Spring, nothing returns it.</li><li><strong>Long transactions</strong> — a slow request holds its connection for the request's whole duration, so effective capacity is <code>pool size / average transaction duration × request rate</code>. A 30-second transaction in a 10-connection pool is 0.33 transactions per second of capacity.</li><li><strong>The pool is genuinely too small for the load</strong> — which is the answer people jump to, and the one to check <em>last</em>, because raising the pool size to fix a nesting bug makes the database worse before it makes it better.</li></ol></div></article><article class="qa" id="6-common-failure-modes-6"><p class="qa__q"><a class="qa__num" href="#6-common-failure-modes-6">Q6</a> A method annotated <code>@Transactional(readOnly = true)</code> mutates an entity and the change is not persisted. No exception. Explain. <span class="qa__badge"><code>ADVANCED</code></span></p><div class="qa__a"><p><code>JpaTransactionManager</code> sets Hibernate's <code>FlushMode.MANUAL</code> for read-only transactions and restores it on completion. With <code>MANUAL</code>, dirty state in the persistence context is never flushed; at the end of the transaction the persistence context is closed and the changes are discarded. No exception is thrown because nothing failed — the write was simply never issued. The fix is to remove <code>readOnly</code> from a method that writes, and to be aware that this is the opposite failure mode from the one on MySQL, where the same code <em>does</em> write, because <code>Connection.setReadOnly</code> is a hint there.</p></div></article><article class="qa" id="6-common-failure-modes-7"><p class="qa__q"><a class="qa__num" href="#6-common-failure-modes-7">Q7</a> Your service writes to a remote system inside a <code>@Transactional</code> method. What are the three concerns, and how do you address each? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>First, <strong>the transaction holds locks across network I/O</strong>, so the remote call's latency — including every retry and timeout — becomes lock hold time. Address it by moving the call outside the transaction. Second, <strong>there is no distributed atomicity</strong>, so a failure after the remote call commits leaves the two systems inconsistent. Address it with an outbox row in the same transaction, a compensating action, or a Saga. Third, <strong>a retry of the request re-does the remote call</strong>, so the call must be idempotent — with an idempotency key, not by hoping the gateway is. The uncomfortable conclusion, which is the honest one, is that once a <code>@Transactional</code> method calls a remote system you are no longer writing a database method; you are writing a distributed workflow, and the annotation is only covering the local part.</p></div></article><article class="qa" id="6-common-failure-modes-8"><p class="qa__q"><a class="qa__num" href="#6-common-failure-modes-8">Q8</a> Why does the presence of a rollback test transaction hide bugs rather than merely &quot;make tests fast&quot;? <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>Because it changes what is under test. The test exercises the write path and the flush but never the commit, so anything that fails specifically at commit is untested: deferred constraint violations, connection loss during commit, <code>readOnly</code> flush-mode discards, partial commits from two transaction managers, and optimistic-lock failures that only surface when the <code>UPDATE</code> actually reaches the database. It also runs every assertion through the same persistence context, so a test can assert on uncommitted rows that no other connection would ever see — which is why a &quot;works in test, missing in production&quot; report is so common. The staff-level point: the test transaction is an <em>optimisation</em> that quietly removes a class of test, and the honest fix is to keep it for the fast tests and add a real commit slice for the ones that matter.</p><aside class="callout callout--summary"><span class="callout__label">Chapter summary</span><p>The failure modes in this chapter share one property: <strong>none of them throws.</strong> Self- invocation, <code>readOnly</code> flush-mode discards, a non-transactional caller, a test that never commits, and a read-modify-write race all produce a green build and corrupt data. The catalogue that matters is therefore short — self-invocation, the checked-exception rollback rule, <code>readOnly</code> on a writing method, two transaction managers, a missing caller boundary, transactions held across network I/O, and the rollback-wrapped test — and each has a specific diagnostic. The generalisable defences are: assert <code>isActualTransactionActive()</code> in the tests that cover writes, keep a small real-commit test slice, label every long-running transactional method, watch <code>pg_stat_activity WHERE state = 'idle in transaction'</code>, and remember that a transaction is a thread-bound fact, so the connection identity and the thread name are the two log fields that explain almost everything.</p></aside></div></article><h4 class="vol__h4" id="further-reading-6">Further Reading</h4><ul><li><a href="https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative.html" rel="noopener noreferrer">Spring Framework Reference — Declarative Transactions</a> — the rollback-rule table, and the section on why self-invocation does not work.</li><li><a href="https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/transaction/support/TransactionSynchronizationManager.html" rel="noopener noreferrer"><code>TransactionSynchronizationManager</code> Javadoc</a> — the thread-bound resources, and the exact contract of <code>isActualTransactionActive()</code> and <code>registerSynchronization</code>.</li><li><a href="https://docs.spring.io/spring-framework/reference/data-access/orm.html" rel="noopener noreferrer">Spring Framework Reference — ORM Support</a> — the <code>FlushMode</code> / <code>readOnly</code> interaction and shared-EntityManager behaviour, which is the mechanism behind the silent-drop bug.</li><li><a href="https://docs.spring.io/spring-boot/reference/data/sql.html" rel="noopener noreferrer">Spring Boot Reference — Data Access</a> — the auto-configuration that creates exactly one <code>PlatformTransactionManager</code>, and what makes it back off.</li></ul></section>
 
-<section id="chapter-7-beyond-one-database" data-filter-target><h2 class="vol__h2">Chapter 7 — Beyond One Database</h2><h3 class="vol__h3" id="71-the-problem-acid-does-not-solve">7.1 The Problem ACID Does Not Solve</h3><p>A local transaction gives you four guarantees about <strong>one</strong> resource under <strong>one</strong> coordinator. Distributed needs all four across several resources, several services, and several processes — and the reason it is hard is not the algorithms, it is that the guarantees are incompatible with availability and partitions.</p><pre class="diagram"><code>Service A                     Service B
-   │                             │
-   │ BEGIN  ──────────────────►  │ BEGIN
-   │ UPDATE orders               │ UPDATE inventory
-   │                             │
-   │ ─── can we commit? ──────────│
-   │                             │
-   ▼                             ▼
-A commits, B's network drops   B is stuck: it has a lock on inventory and
-                               doesn't know whether A committed</code></pre><p>A cannot commit alone (B may have failed) and cannot wait for B (B may be down). Every distributed transaction algorithm is a different answer to that impossibility. This is the same shape as the CAP argument and the same lesson: <strong>you are choosing which guarantee to spend</strong>, and the choice is a product decision expressed as a technical one.</p><h3 class="vol__h3" id="72-2pc-and-xa-the-blocked-commit-failure-mode">7.2 2PC and XA — The Blocked-Commit Failure Mode</h3><p>Two-phase commit splits commit into a <em>prepare</em> phase (everyone writes to durable storage and says &quot;I can commit this&quot;) and a <em>commit</em> phase (everyone is told to commit).</p><pre class="diagram"><code>          COORDINATOR
-         /     |      \
-        ▼      ▼       ▼
-   Resource A Resource B Resource C
-   PREPARED  PREPARED  PREPARED   ◄── phase 1: everyone promises
-        │      │       │
-        ▼      ▼       ▼
-   COMMITTED COMMITTED ???        ◄── phase 2: C is unreachable
-   ────────────────────────────────────────────────────────────
-   ⚠ A and B have committed. C is in-doubt, holding locks, until the
-     coordinator runs RECOVERY. If the coordinator itself has lost its
-     log, the outcome is a HEURISTIC: an arbitrary, human-resolved guess.</code></pre><p><strong>The blocking problem:</strong> between phase 1 and phase 2, every resource holds its locks and cannot proceed. A participant that has prepared cannot unilaterally decide to abort, because the coordinator may have already told others to commit. So it waits — and if the coordinator is gone, it waits for recovery, and if the recovery log is gone too, a human resolves it.</p><p><strong>The cost of XA, concretely:</strong></p><div class="table-wrap"><table><thead><tr><th>Cost</th><th>What it means in practice</th></tr></thead><tbody><tr><td>A transaction coordinator</td><td>A stateful process (Atomikos, Bitronix, Narayana) that is now a <strong>single point of failure</strong> and a thing to operate</td></tr><tr><td>Log growth and disk</td><td>Coordinators log every decision; recovery on startup is a real operation</td></tr><tr><td>Lock holding across the network</td><td>The prepared resources hold locks for the duration of the slowest participant's response — the blocking failure above</td></tr><tr><td>Heuristic outcomes</td><td>After a coordinator crash, a resource may be in a state only the coordinator can resolve. Your data is now uncertain and a human has to decide</td></tr><tr><td>Driver and pool support</td><td>Every connection pool must be XA-capable, which excludes or complicates several common pools and several cloud databases</td></tr><tr><td>Throughput</td><td>Prepare/record round trips multiply latency; throughput drops well below what a simple commit does</td></tr></tbody></table></div><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off</span><p>2PC/XA is <strong>correct</strong>, which is the whole argument for it: no compensating logic, no in-doubt states your application has to reason about, and the data model stays a single database. It costs a coordinator, a set of new failure modes (including ones a human must resolve), and a latency profile that is wrong for a synchronous request path. The flip condition: use it when the data genuinely must be atomic and the latency is acceptable — typically a low-throughput, high-value operation like a bank ledger posting, or a cross-organisation contract where neither side will accept eventual consistency. Do not use it for a checkout path or anything in the request's critical section. And note the asymmetry: it is far easier to say &quot;we needed ACID here&quot; than to remove it later, because removing it means writing compensating logic for code that was never designed to have any.</p></aside><aside class="callout callout--prod"><span class="callout__label">In production</span><p>Problem: a payments service's database transaction coordinator died during a deploy. Investigation: on restart, 41 orders were <code>PENDING</code> with corresponding <code>PREPARED</code> XA resources on two databases and no decision recorded. Support found 9 of them had actually been charged and 32 had not. Root cause: a non-HA coordinator terminated between the prepare and commit phases, with no replicated decision log. The transactions were genuinely in-doubt. Solution: a human compared each order against the payment provider's records and issued the 9 charges and cancelled the 32. Two hours of manual work, plus a customer communication for the 9 who had been charged twice in the meantime. Prevention: an HA coordinator with a replicated decision log, <em>or</em> — the decision a staff engineer should push for — removing XA from the checkout path entirely in favour of an outbox and a reconciler. The cost of XA is not the happy path; it is the 41 orders that needed a human.</p></aside><h3 class="vol__h3" id="73-the-saga-compensation-is-business-logic">7.3 The Saga — Compensation Is Business Logic</h3><p>A Saga is a local transaction per step, plus a <strong>compensating action</strong> per step, orchestrated in sequence.</p><pre class="diagram"><code>CreateOrder saga:
+<section id="chapter-7-beyond-one-database" data-filter-target><h2 class="vol__h2">Chapter 7 — Beyond One Database</h2><h3 class="vol__h3" id="71-the-problem-acid-does-not-solve">7.1 The Problem ACID Does Not Solve</h3><p>A local transaction gives you four guarantees about <strong>one</strong> resource under <strong>one</strong> coordinator. Distributed needs all four across several resources, several services, and several processes — and the reason it is hard is not the algorithms, it is that the guarantees are incompatible with availability and partitions.</p><figure class="figure">
+  <svg viewBox="0 0 900 280" role="img" aria-label="A local transaction guarantees one resource under one coordinator. Across two services, A commits while B's network drops, and B is stuck holding a lock on inventory with no knowledge of whether A committed. A cannot commit alone and cannot wait for B. Every distributed algorithm is a different answer to that impossibility.">
+    <defs>
+      <marker id="arw-spring-04-08-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="60" y="30" width="340" height="60" rx="5"/>
+    <text class="label" x="230" y="56" text-anchor="middle">Service A</text>
+    <text class="label label--sub" x="230" y="74" text-anchor="middle">BEGIN, UPDATE orders</text>
+    <rect class="node node--accent" x="500" y="30" width="340" height="60" rx="5"/>
+    <text class="label" x="670" y="56" text-anchor="middle">Service B</text>
+    <text class="label label--sub" x="670" y="74" text-anchor="middle">BEGIN, UPDATE inventory</text>
+    <path class="edge" d="M 400 60 L 494 60" marker-end="url(#arw-spring-04-08-a)"/>
+    <text class="edge-label" x="447" y="48" text-anchor="middle">can we commit?</text>
+    <path class="edge" d="M 230 90 L 230 154" marker-end="url(#arw-spring-04-08-a)"/>
+    <path class="edge" d="M 670 90 L 670 154" marker-end="url(#arw-spring-04-08-a)"/>
+    <rect class="node node--bad" x="60" y="160" width="340" height="90" rx="5"/>
+    <text class="label" x="230" y="190" text-anchor="middle">A commits, B's network drops</text>
+    <text class="label label--sub" x="230" y="208" text-anchor="middle">A is done — it cannot know</text>
+    <text class="label label--sub" x="230" y="224" text-anchor="middle">that B never committed</text>
+    <rect class="node node--warn" x="500" y="160" width="340" height="90" rx="5"/>
+    <text class="label" x="670" y="190" text-anchor="middle">B is stuck</text>
+    <text class="label label--sub" x="670" y="208" text-anchor="middle">it holds a lock on inventory</text>
+    <text class="label label--sub" x="670" y="224" text-anchor="middle">and does not know whether</text>
+    <text class="label label--sub" x="670" y="240" text-anchor="middle">A committed</text>
+  </svg>
+  <figcaption>
+    <strong>A cannot commit alone, because B may have failed, and cannot wait for B, because B may be down — and B is stuck holding a lock it cannot release.</strong> A commits while B's network drops, and B never learns the outcome. Every distributed transaction algorithm — 2PC, a saga, an outbox — is a different answer to that impossibility: you are choosing which guarantee to spend, and the choice is a product decision expressed as a technical one.
+  </figcaption>
+</figure><p>A cannot commit alone (B may have failed) and cannot wait for B (B may be down). Every distributed transaction algorithm is a different answer to that impossibility. This is the same shape as the CAP argument and the same lesson: <strong>you are choosing which guarantee to spend</strong>, and the choice is a product decision expressed as a technical one.</p><h3 class="vol__h3" id="72-2pc-and-xa-the-blocked-commit-failure-mode">7.2 2PC and XA — The Blocked-Commit Failure Mode</h3><p>Two-phase commit splits commit into a <em>prepare</em> phase (everyone writes to durable storage and says &quot;I can commit this&quot;) and a <em>commit</em> phase (everyone is told to commit).</p><figure class="figure">
+  <svg viewBox="0 0 900 500" role="img" aria-label="Two-phase commit splits commit into a prepare phase and a commit phase. In phase 1 the coordinator asks every resource to prepare, and each writes to durable storage and promises. In phase 2 it delivers the verdict: A and B commit, but C is unreachable and in-doubt, holding locks until recovery, and a lost recovery log means a human resolves it.">
+    <defs>
+      <marker id="arw-spring-04-09-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="330" y="24" width="240" height="48" rx="5"/>
+    <text class="label" x="450" y="54" text-anchor="middle">COORDINATOR</text>
+    <path class="edge" d="M 450 72 L 170 124" marker-end="url(#arw-spring-04-09-a)"/>
+    <path class="edge" d="M 450 72 L 480 124" marker-end="url(#arw-spring-04-09-a)"/>
+    <path class="edge" d="M 450 72 L 790 124" marker-end="url(#arw-spring-04-09-a)"/>
+    <text class="edge-label" x="495" y="100">phase 1: everyone promises</text>
+    <rect class="node node--warn" x="60" y="130" width="220" height="64" rx="5"/>
+    <text class="label" x="170" y="158" text-anchor="middle">Resource A</text>
+    <text class="label label--sub" x="170" y="176" text-anchor="middle">PREPARED</text>
+    <rect class="node node--warn" x="370" y="130" width="220" height="64" rx="5"/>
+    <text class="label" x="480" y="158" text-anchor="middle">Resource B</text>
+    <text class="label label--sub" x="480" y="176" text-anchor="middle">PREPARED</text>
+    <rect class="node node--warn" x="680" y="130" width="220" height="64" rx="5"/>
+    <text class="label" x="790" y="158" text-anchor="middle">Resource C</text>
+    <text class="label label--sub" x="790" y="176" text-anchor="middle">PREPARED</text>
+    <path class="edge" d="M 170 194 L 170 274" marker-end="url(#arw-spring-04-09-a)"/>
+    <path class="edge" d="M 480 194 L 480 274" marker-end="url(#arw-spring-04-09-a)"/>
+    <path class="edge" d="M 790 194 L 790 274" marker-end="url(#arw-spring-04-09-a)"/>
+    <text class="edge-label" x="495" y="240">phase 2: C is unreachable</text>
+    <rect class="node node--good" x="60" y="280" width="220" height="64" rx="5"/>
+    <text class="label" x="170" y="308" text-anchor="middle">COMMITTED</text>
+    <text class="label label--sub" x="170" y="326" text-anchor="middle">A is durable</text>
+    <rect class="node node--good" x="370" y="280" width="220" height="64" rx="5"/>
+    <text class="label" x="480" y="308" text-anchor="middle">COMMITTED</text>
+    <text class="label label--sub" x="480" y="326" text-anchor="middle">B is durable</text>
+    <rect class="node node--bad" x="680" y="280" width="220" height="64" rx="5"/>
+    <text class="label" x="790" y="308" text-anchor="middle">???</text>
+    <text class="label label--sub" x="790" y="326" text-anchor="middle">in-doubt: unreachable</text>
+    <rect class="node node--warn" x="60" y="370" width="780" height="100" rx="5"/>
+    <text class="label" x="450" y="396" text-anchor="middle">A and B have committed; C is in-doubt, holding locks</text>
+    <text class="label label--sub" x="450" y="414" text-anchor="middle">C stays that way until the coordinator runs RECOVERY</text>
+    <text class="label label--sub" x="450" y="430" text-anchor="middle">If the coordinator lost its log, the outcome is a HEURISTIC —</text>
+    <text class="label label--sub" x="450" y="446" text-anchor="middle">an arbitrary, human-resolved guess</text>
+  </svg>
+  <figcaption>
+    <strong>Two-phase commit splits the decision: phase 1 has every resource promise, phase 2 delivers the verdict — and a participant that has prepared holds its locks until the coordinator answers.</strong> If the coordinator is unreachable at phase 2, A and B have committed while C is in-doubt, holding locks, until recovery runs. A prepared resource cannot unilaterally abort, because the coordinator may already have told the others to commit; if the recovery log is gone too, a human resolves it.
+  </figcaption>
+</figure><p><strong>The blocking problem:</strong> between phase 1 and phase 2, every resource holds its locks and cannot proceed. A participant that has prepared cannot unilaterally decide to abort, because the coordinator may have already told others to commit. So it waits — and if the coordinator is gone, it waits for recovery, and if the recovery log is gone too, a human resolves it.</p><p><strong>The cost of XA, concretely:</strong></p><div class="table-wrap"><table><thead><tr><th>Cost</th><th>What it means in practice</th></tr></thead><tbody><tr><td>A transaction coordinator</td><td>A stateful process (Atomikos, Bitronix, Narayana) that is now a <strong>single point of failure</strong> and a thing to operate</td></tr><tr><td>Log growth and disk</td><td>Coordinators log every decision; recovery on startup is a real operation</td></tr><tr><td>Lock holding across the network</td><td>The prepared resources hold locks for the duration of the slowest participant's response — the blocking failure above</td></tr><tr><td>Heuristic outcomes</td><td>After a coordinator crash, a resource may be in a state only the coordinator can resolve. Your data is now uncertain and a human has to decide</td></tr><tr><td>Driver and pool support</td><td>Every connection pool must be XA-capable, which excludes or complicates several common pools and several cloud databases</td></tr><tr><td>Throughput</td><td>Prepare/record round trips multiply latency; throughput drops well below what a simple commit does</td></tr></tbody></table></div><aside class="callout callout--tradeoff"><span class="callout__label">Trade-off</span><p>2PC/XA is <strong>correct</strong>, which is the whole argument for it: no compensating logic, no in-doubt states your application has to reason about, and the data model stays a single database. It costs a coordinator, a set of new failure modes (including ones a human must resolve), and a latency profile that is wrong for a synchronous request path. The flip condition: use it when the data genuinely must be atomic and the latency is acceptable — typically a low-throughput, high-value operation like a bank ledger posting, or a cross-organisation contract where neither side will accept eventual consistency. Do not use it for a checkout path or anything in the request's critical section. And note the asymmetry: it is far easier to say &quot;we needed ACID here&quot; than to remove it later, because removing it means writing compensating logic for code that was never designed to have any.</p></aside><aside class="callout callout--prod"><span class="callout__label">In production</span><p>Problem: a payments service's database transaction coordinator died during a deploy. Investigation: on restart, 41 orders were <code>PENDING</code> with corresponding <code>PREPARED</code> XA resources on two databases and no decision recorded. Support found 9 of them had actually been charged and 32 had not. Root cause: a non-HA coordinator terminated between the prepare and commit phases, with no replicated decision log. The transactions were genuinely in-doubt. Solution: a human compared each order against the payment provider's records and issued the 9 charges and cancelled the 32. Two hours of manual work, plus a customer communication for the 9 who had been charged twice in the meantime. Prevention: an HA coordinator with a replicated decision log, <em>or</em> — the decision a staff engineer should push for — removing XA from the checkout path entirely in favour of an outbox and a reconciler. The cost of XA is not the happy path; it is the 41 orders that needed a human.</p></aside><h3 class="vol__h3" id="73-the-saga-compensation-is-business-logic">7.3 The Saga — Compensation Is Business Logic</h3><p>A Saga is a local transaction per step, plus a <strong>compensating action</strong> per step, orchestrated in sequence.</p><pre class="diagram"><code>CreateOrder saga:
 
   1. INSERT order (status=PENDING)         ── compensation: DELETE order (or CANCEL)
   2. reserve stock                        ── compensation: release stock
@@ -822,20 +1080,53 @@ public class CheckoutSaga {
     public void refundPayment(Order order)  { paymentService.refund(order); }
     public void releaseStock(Order order)   { inventoryService.release(order); }
     public void cancelOrder(Order order)   { orderService.cancel(order, &quot;saga failed&quot;); }
-}</code></pre><aside class="callout callout--must"><span class="callout__label">Must remember</span><p><strong>Compensation is not a rollback.</strong> A database rollback restores the previous state. A compensating action is <em>new business logic</em> that happens to move the system back to a similar state, and it has all the properties of new business logic: it can fail, it can be rate-limited by a third party, it can be observed by users, it can cost money, and it is never free. Charging a card and then refunding it is not equivalent to not charging — the customer sees both entries on their statement, the provider takes a fee on the refund, and fraud-detection systems can flag the pair. The saga design question is not &quot;how do I undo this&quot; but &quot;what is the compensating business action, what happens if IT fails, and is it idempotent?&quot;</p></aside><p>Three further properties that the term &quot;Saga&quot; hides:</p><ul><li><strong>There is no isolation.</strong> Between two steps, other transactions can read partially-completed state. A Saga makes the system <em>eventually</em> consistent, not <em>intermediately</em> consistent, and a UI that reads between steps can show an order with no stock. Every Saga design has to answer &quot;what does the user see mid-flight?&quot;</li><li><strong>Compensations must be idempotent and retriable.</strong> The framework will retry them, and it will retry them after a timeout during which the first attempt may have succeeded.</li><li><strong>The compensation is only as good as the last step.</strong> A Saga that ends with a non-compensable step (a sent email, a charged card) is a Saga with a hole in it.</li></ul><aside class="callout callout--staff"><span class="callout__label">Staff-level</span><p>A Saga is a decision to accept temporary inconsistency across services, and that decision belongs to the product, not to engineering. The questions that decide it are: what does the user see if this fails halfway; how long is the system allowed to be inconsistent; who absorbs the cost of a compensation; and what is the reconciliation story if a compensation itself fails. The wrong way to run this is to let a team pick a Saga because &quot;2PC is hard.&quot; The right way is to make the product owner state which of those four answers they want, and then build the thing that provides it. Most teams discover that for the large majority of flows, an outbox plus a reconciler is both simpler and more honest than a full saga, and that a saga earns its complexity only for genuinely multi-step, genuinely compensable business flows.</p></aside><h3 class="vol__h3" id="74-the-transactional-outbox-the-durability-guarantee-in-process-events-cannot-give">7.4 The Transactional Outbox — The Durability Guarantee In-Process Events Cannot Give</h3><p>This is the answer to the question Volume 1's events chapter ended on, and it is the single most important pattern in this volume for anyone running microservices.</p><pre class="diagram"><code>THE PROBLEM
-  service.commit();          ──►  publishEvent()   ──►  process dies   ──►  NO: message gone
-  (two systems of record disagree forever, with no record of the disagreement)
-
-THE OUTBOX
-  BEGIN
-    INSERT INTO orders       (..., status='CONFIRMED')
-    INSERT INTO outbox       (id, aggregate, event_type, payload, created_at)
-  COMMIT                                       ◄── ONE atomic commit, both rows
-
-  ── later, by a relay ──
-  SELECT * FROM outbox WHERE published_at IS NULL ORDER BY id LIMIT 100
-  broker.publish(payload)
-  UPDATE outbox SET published_at = now() WHERE id = ?</code></pre><pre class="snippet" data-lang="java"><code>@Service
+}</code></pre><aside class="callout callout--must"><span class="callout__label">Must remember</span><p><strong>Compensation is not a rollback.</strong> A database rollback restores the previous state. A compensating action is <em>new business logic</em> that happens to move the system back to a similar state, and it has all the properties of new business logic: it can fail, it can be rate-limited by a third party, it can be observed by users, it can cost money, and it is never free. Charging a card and then refunding it is not equivalent to not charging — the customer sees both entries on their statement, the provider takes a fee on the refund, and fraud-detection systems can flag the pair. The saga design question is not &quot;how do I undo this&quot; but &quot;what is the compensating business action, what happens if IT fails, and is it idempotent?&quot;</p></aside><p>Three further properties that the term &quot;Saga&quot; hides:</p><ul><li><strong>There is no isolation.</strong> Between two steps, other transactions can read partially-completed state. A Saga makes the system <em>eventually</em> consistent, not <em>intermediately</em> consistent, and a UI that reads between steps can show an order with no stock. Every Saga design has to answer &quot;what does the user see mid-flight?&quot;</li><li><strong>Compensations must be idempotent and retriable.</strong> The framework will retry them, and it will retry them after a timeout during which the first attempt may have succeeded.</li><li><strong>The compensation is only as good as the last step.</strong> A Saga that ends with a non-compensable step (a sent email, a charged card) is a Saga with a hole in it.</li></ul><aside class="callout callout--staff"><span class="callout__label">Staff-level</span><p>A Saga is a decision to accept temporary inconsistency across services, and that decision belongs to the product, not to engineering. The questions that decide it are: what does the user see if this fails halfway; how long is the system allowed to be inconsistent; who absorbs the cost of a compensation; and what is the reconciliation story if a compensation itself fails. The wrong way to run this is to let a team pick a Saga because &quot;2PC is hard.&quot; The right way is to make the product owner state which of those four answers they want, and then build the thing that provides it. Most teams discover that for the large majority of flows, an outbox plus a reconciler is both simpler and more honest than a full saga, and that a saga earns its complexity only for genuinely multi-step, genuinely compensable business flows.</p></aside><h3 class="vol__h3" id="74-the-transactional-outbox-the-durability-guarantee-in-process-events-cannot-give">7.4 The Transactional Outbox — The Durability Guarantee In-Process Events Cannot Give</h3><p>This is the answer to the question Volume 1's events chapter ended on, and it is the single most important pattern in this volume for anyone running microservices.</p><figure class="figure">
+  <svg viewBox="0 0 900 450" role="img" aria-label="The problem: commit, then publish in-process, then the process dies, and the message is gone — two systems of record disagree forever. The outbox: one transaction inserts the order row and the outbox row, so both are durable together. Later a relay selects unpublished rows, publishes to the broker, and marks published_at.">
+    <defs>
+      <marker id="arw-spring-04-10-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node" x="30" y="30" width="220" height="56" rx="5"/>
+    <text class="label" x="140" y="52" text-anchor="middle">service.commit()</text>
+    <text class="label label--sub" x="140" y="68" text-anchor="middle">the order row is durable</text>
+    <rect class="node" x="300" y="30" width="220" height="56" rx="5"/>
+    <text class="label" x="410" y="52" text-anchor="middle">publishEvent()</text>
+    <text class="label label--sub" x="410" y="68" text-anchor="middle">in-process, after the commit</text>
+    <rect class="node" x="570" y="30" width="220" height="56" rx="5"/>
+    <text class="label" x="680" y="52" text-anchor="middle">process dies here</text>
+    <text class="label label--sub" x="680" y="68" text-anchor="middle">the message is never sent</text>
+    <path class="edge" d="M 250 58 L 294 58" marker-end="url(#arw-spring-04-10-a)"/>
+    <path class="edge" d="M 520 58 L 564 58" marker-end="url(#arw-spring-04-10-a)"/>
+    <rect class="node node--bad" x="30" y="106" width="760" height="48" rx="5"/>
+    <text class="label" x="410" y="128" text-anchor="middle">two systems of record disagree forever,</text>
+    <text class="label label--sub" x="410" y="144" text-anchor="middle">with no record of the disagreement</text>
+    <rect class="node node--accent" x="150" y="190" width="600" height="120" rx="5"/>
+    <text class="label" x="450" y="214" text-anchor="middle">ONE atomic commit — both rows</text>
+    <rect class="node" x="180" y="230" width="260" height="64" rx="5"/>
+    <text class="label" x="310" y="254" text-anchor="middle">INSERT INTO orders</text>
+    <text class="label label--sub" x="310" y="272" text-anchor="middle">(..., status='CONFIRMED')</text>
+    <rect class="node" x="460" y="230" width="260" height="64" rx="5"/>
+    <text class="label" x="590" y="250" text-anchor="middle">INSERT INTO outbox</text>
+    <text class="label label--sub" x="590" y="266" text-anchor="middle">(id, aggregate, event_type,</text>
+    <text class="label label--sub" x="590" y="282" text-anchor="middle">payload, created_at)</text>
+    <text class="edge-label" x="450" y="336" text-anchor="middle">later, by a relay — a @Scheduled poller, LISTEN/NOTIFY, or Debezium</text>
+    <rect class="node" x="30" y="350" width="280" height="64" rx="5"/>
+    <text class="label" x="170" y="376" text-anchor="middle">SELECT * FROM outbox</text>
+    <text class="label label--sub" x="170" y="394" text-anchor="middle">WHERE published_at IS NULL</text>
+    <rect class="node" x="350" y="350" width="260" height="64" rx="5"/>
+    <text class="label" x="480" y="376" text-anchor="middle">broker.publish(payload)</text>
+    <text class="label label--sub" x="480" y="394" text-anchor="middle">can retry, can be monitored</text>
+    <rect class="node" x="650" y="350" width="220" height="64" rx="5"/>
+    <text class="label" x="760" y="376" text-anchor="middle">UPDATE outbox</text>
+    <text class="label label--sub" x="760" y="394" text-anchor="middle">SET published_at = now()</text>
+    <path class="edge" d="M 310 382 L 344 382" marker-end="url(#arw-spring-04-10-a)"/>
+    <path class="edge" d="M 610 382 L 644 382" marker-end="url(#arw-spring-04-10-a)"/>
+  </svg>
+  <figcaption>
+    <strong>The outbox makes the event as durable as the order: both rows are written in one transaction, so the state change and the event cannot disagree.</strong> The naive sequence — commit, then publish, then die — loses the message and leaves two systems of record disagreeing forever. A relay polls the outbox, publishes, and marks published_at, so delivery can retry and its backlog is a number on a dashboard.
+  </figcaption>
+</figure><pre class="snippet" data-lang="java"><code>@Service
 public class OrderService {
 
     private final JdbcTemplate jdbc;
@@ -847,33 +1138,85 @@ public class OrderService {
         outbox.save(OutboxMessage.of(&quot;order.confirmed&quot;, order.id(), toPayload(order)));
         return order;              // the event is now as durable as the order itself
     }
-}</code></pre><p><strong>What this buys, precisely:</strong> the event and the state change are committed by the same transaction, so they cannot disagree. A relay — a <code>@Scheduled</code> poller, a Postgres <code>LISTEN/NOTIFY</code> trigger, or Debezium reading the log — publishes it, and can retry, and can be monitored, and its backlog is a number on a dashboard.</p><p><strong>What it costs, precisely:</strong></p><div class="table-wrap"><table><thead><tr><th>Cost</th><th>Detail</th></tr></thead><tbody><tr><td><strong>Duplicate delivery</strong></td><td>The relay publishes, then crashes before <code>published_at</code> is set → the message is published twice. Consumers <strong>must</strong> be idempotent. This is not optional.</td></tr><tr><td><strong>Ordering</strong></td><td>Two events for the same aggregate can be published out of order. Fix with a per-aggregate sequence number the consumer checks, or a single-partition-per-aggregate topic.</td></tr><tr><td><strong>Relay lag</strong></td><td>Delivery is now &quot;eventually, on the next poll&quot; — a second or two. If the UI needs immediate, the outbox is the wrong tool.</td></tr><tr><td><strong>Schema</strong></td><td>The outbox table grows and needs pruning, and its payload format needs a versioning story.</td></tr><tr><td><strong>Ordering vs latency</strong></td><td>Streaming the log via CDC removes the poll latency and gives ordering, at the cost of a Debezium + Kafka + connector deployment.</td></tr></tbody></table></div><aside class="callout callout--prod"><span class="callout__label">In production</span><p>The most common way an outbox goes wrong in production is <strong>the payload was written but nothing ever reads it</strong>, because the relay was deployed to staging and not to production, or its <code>@Scheduled</code> method is in a profile that is not active, or it silently failed. An outbox table with a <code>published_at IS NULL</code> row count of 0 is therefore a metric you should alert on, not a table you should assume is being drained. The second most common way is <strong>duplicate consumption without idempotency</strong>, which produces double-charges and duplicate emails that are individually minor and collectively a headline.</p></aside><h3 class="vol__h3" id="75-cdc-change-data-capture">7.5 CDC — Change Data Capture</h3><p>CDC reads the database's own change log (Postgres logical replication / <code>wal2json</code>, MySQL binlog, SQL Server CDC) and publishes the changes to a broker, with no code change in the application.</p><pre class="diagram"><code>                         ┌──────────────────────────────┐
-   Application           │  Postgres write-ahead log   │
-   INSERT INTO outbox ──►│  (WAL)                      │
-                         └──────────────┬───────────────┘
-                                        │ decoded
-                                        ▼
-                              Debezium connector
-                                        │
-                                        ▼
-                                  Kafka topic
-                                        │
-                    ┌───────────────────┼───────────────────┐
-                    ▼                   ▼                   ▼
-             search index          analytics sink        replica
-
-PROPERTIES
+}</code></pre><p><strong>What this buys, precisely:</strong> the event and the state change are committed by the same transaction, so they cannot disagree. A relay — a <code>@Scheduled</code> poller, a Postgres <code>LISTEN/NOTIFY</code> trigger, or Debezium reading the log — publishes it, and can retry, and can be monitored, and its backlog is a number on a dashboard.</p><p><strong>What it costs, precisely:</strong></p><div class="table-wrap"><table><thead><tr><th>Cost</th><th>Detail</th></tr></thead><tbody><tr><td><strong>Duplicate delivery</strong></td><td>The relay publishes, then crashes before <code>published_at</code> is set → the message is published twice. Consumers <strong>must</strong> be idempotent. This is not optional.</td></tr><tr><td><strong>Ordering</strong></td><td>Two events for the same aggregate can be published out of order. Fix with a per-aggregate sequence number the consumer checks, or a single-partition-per-aggregate topic.</td></tr><tr><td><strong>Relay lag</strong></td><td>Delivery is now &quot;eventually, on the next poll&quot; — a second or two. If the UI needs immediate, the outbox is the wrong tool.</td></tr><tr><td><strong>Schema</strong></td><td>The outbox table grows and needs pruning, and its payload format needs a versioning story.</td></tr><tr><td><strong>Ordering vs latency</strong></td><td>Streaming the log via CDC removes the poll latency and gives ordering, at the cost of a Debezium + Kafka + connector deployment.</td></tr></tbody></table></div><aside class="callout callout--prod"><span class="callout__label">In production</span><p>The most common way an outbox goes wrong in production is <strong>the payload was written but nothing ever reads it</strong>, because the relay was deployed to staging and not to production, or its <code>@Scheduled</code> method is in a profile that is not active, or it silently failed. An outbox table with a <code>published_at IS NULL</code> row count of 0 is therefore a metric you should alert on, not a table you should assume is being drained. The second most common way is <strong>duplicate consumption without idempotency</strong>, which produces double-charges and duplicate emails that are individually minor and collectively a headline.</p></aside><h3 class="vol__h3" id="75-cdc-change-data-capture">7.5 CDC — Change Data Capture</h3><p>CDC reads the database's own change log (Postgres logical replication / <code>wal2json</code>, MySQL binlog, SQL Server CDC) and publishes the changes to a broker, with no code change in the application.</p><figure class="figure">
+  <svg viewBox="0 0 900 480" role="img" aria-label="Change Data Capture reads the database's own change log and publishes the changes to a broker. The application inserts into the outbox, the Postgres write-ahead log records it, a Debezium connector decodes the log into a Kafka topic, and search, analytics and replicas consume it with sub-second lag and no application code change.">
+    <defs>
+      <marker id="arw-spring-04-11-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="30" y="40" width="220" height="64" rx="5"/>
+    <text class="label" x="140" y="68" text-anchor="middle">Application</text>
+    <text class="label label--sub" x="140" y="86" text-anchor="middle">INSERT INTO outbox</text>
+    <rect class="node node--accent" x="340" y="30" width="300" height="84" rx="5"/>
+    <text class="label" x="490" y="62" text-anchor="middle">Postgres write-ahead log</text>
+    <text class="label label--sub" x="490" y="80" text-anchor="middle">(WAL)</text>
+    <path class="edge" d="M 250 72 L 334 72" marker-end="url(#arw-spring-04-11-a)"/>
+    <text class="edge-label" x="292" y="60" text-anchor="middle">writes</text>
+    <path class="edge" d="M 490 114 L 490 154" marker-end="url(#arw-spring-04-11-a)"/>
+    <text class="edge-label" x="502" y="138">decoded</text>
+    <rect class="node" x="340" y="160" width="300" height="56" rx="5"/>
+    <text class="label" x="490" y="186" text-anchor="middle">Debezium connector</text>
+    <text class="label label--sub" x="490" y="202" text-anchor="middle">decodes the log</text>
+    <path class="edge" d="M 490 216 L 490 254" marker-end="url(#arw-spring-04-11-a)"/>
+    <rect class="node" x="340" y="260" width="300" height="56" rx="5"/>
+    <text class="label" x="490" y="286" text-anchor="middle">Kafka topic</text>
+    <text class="label label--sub" x="490" y="302" text-anchor="middle">one topic per event</text>
+    <path class="edge" d="M 450 316 L 180 374" marker-end="url(#arw-spring-04-11-a)"/>
+    <path class="edge" d="M 490 316 L 450 374" marker-end="url(#arw-spring-04-11-a)"/>
+    <path class="edge" d="M 530 316 L 720 374" marker-end="url(#arw-spring-04-11-a)"/>
+    <rect class="node" x="60" y="380" width="240" height="64" rx="5"/>
+    <text class="label" x="180" y="406" text-anchor="middle">search index</text>
+    <text class="label label--sub" x="180" y="424" text-anchor="middle">updated sub-second</text>
+    <rect class="node" x="330" y="380" width="240" height="64" rx="5"/>
+    <text class="label" x="450" y="406" text-anchor="middle">analytics sink</text>
+    <text class="label label--sub" x="450" y="424" text-anchor="middle">the same rows, copied</text>
+    <rect class="node" x="600" y="380" width="240" height="64" rx="5"/>
+    <text class="label" x="720" y="406" text-anchor="middle">replica</text>
+    <text class="label label--sub" x="720" y="424" text-anchor="middle">another database</text>
+  </svg>
+  <figcaption>
+    <strong>CDC publishes the database's own change log to a broker: the application writes, the WAL records it, Debezium decodes it, and every consumer sees the same stream.</strong> There is no polling and no application code change, ordering is the WAL's order, and lag is sub-second. The cost is that every downstream is coupled to the database schema, not to an event contract — a schema change silently changes the event unless a connector is configured to translate it.
+  </figcaption>
+</figure><pre class="diagram"><code>PROPERTIES
   OK: No polling; sub-second lag
   OK: Ordering is preserved per key (it is the WAL's order)
   OK: The application is completely unaware — no outbox table, no relay, no extra write
   NO: Couples every downstream to the DATABASE SCHEMA, not to an event contract
   NO: A schema change silently changes the event contract unless a connector is configured
   NO: Operational weight: a Debezium deployment, connector config, offset storage, and
-    a schema registry if you want one</code></pre><p>The staff-level comparison: <strong>an outbox is an application-level contract; CDC is a database-level one.</strong> The outbox is more explicit — you choose the event type and the payload, and the table is yours. CDC is less code and better ordering, and it means every schema change is now a potential breaking change to every consumer. The pragmatic answer most teams converge on: <strong>CDC for replication, search indexing, and analytics, where the data is a copy and latency matters; an outbox for anything a <em>business process</em> depends on</strong>, where the contract must be explicit and versioned.</p><h3 class="vol__h3" id="76-idempotency-the-prerequisite-for-all-of-it">7.6 Idempotency — The Prerequisite for All of It</h3><p>Every mechanism above can deliver a message twice. The outbox relay can crash between publish and mark. CDC's at-least-once semantics duplicate on rewind. A saga retries a compensating action. A client retries a request that actually succeeded. So idempotency is not one pattern among several — it is the <strong>precondition</strong> for the rest of them being safe.</p><pre class="diagram"><code>THE PROBLEM
-  client ──POST /payments──►  service
-  client times out at 900ms
-  client ──POST /payments──►  service      ◄── the FIRST one is still running
-                              → two charges</code></pre><p>Three layers, in increasing order of strength:</p><p><strong>Layer 1 — an idempotency key, checked in the transaction.</strong></p><pre class="snippet" data-lang="java"><code>@Transactional
+    a schema registry if you want one</code></pre><p>The staff-level comparison: <strong>an outbox is an application-level contract; CDC is a database-level one.</strong> The outbox is more explicit — you choose the event type and the payload, and the table is yours. CDC is less code and better ordering, and it means every schema change is now a potential breaking change to every consumer. The pragmatic answer most teams converge on: <strong>CDC for replication, search indexing, and analytics, where the data is a copy and latency matters; an outbox for anything a <em>business process</em> depends on</strong>, where the contract must be explicit and versioned.</p><h3 class="vol__h3" id="76-idempotency-the-prerequisite-for-all-of-it">7.6 Idempotency — The Prerequisite for All of It</h3><p>Every mechanism above can deliver a message twice. The outbox relay can crash between publish and mark. CDC's at-least-once semantics duplicate on rewind. A saga retries a compensating action. A client retries a request that actually succeeded. So idempotency is not one pattern among several — it is the <strong>precondition</strong> for the rest of them being safe.</p><figure class="figure">
+  <svg viewBox="0 0 900 390" role="img" aria-label="A client posts a payment and times out at 900 milliseconds, but the first request is still running on the service. The client posts again, and both complete — two charges for one payment. Every mechanism in this chapter can deliver twice, so idempotency is the precondition for the rest being safe.">
+    <defs>
+      <marker id="arw-spring-04-12-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="30" y="40" width="220" height="56" rx="5"/>
+    <text class="label" x="140" y="62" text-anchor="middle">client</text>
+    <text class="label label--sub" x="140" y="78" text-anchor="middle">POST /payments</text>
+    <rect class="node" x="600" y="40" width="240" height="56" rx="5"/>
+    <text class="label" x="720" y="62" text-anchor="middle">service</text>
+    <text class="label label--sub" x="720" y="78" text-anchor="middle">charge(request)</text>
+    <path class="edge" d="M 250 68 L 594 68" marker-end="url(#arw-spring-04-12-a)"/>
+    <text class="edge-label" x="420" y="56" text-anchor="middle">request 1</text>
+    <path class="edge" d="M 140 96 L 140 164" marker-end="url(#arw-spring-04-12-a)"/>
+    <rect class="node node--warn" x="30" y="170" width="260" height="56" rx="5"/>
+    <text class="label" x="160" y="192" text-anchor="middle">client times out at 900ms</text>
+    <text class="label label--sub" x="160" y="208" text-anchor="middle">the first charge is still running</text>
+    <path class="edge" d="M 290 198 L 640 198 L 640 100" marker-end="url(#arw-spring-04-12-a)"/>
+    <text class="edge-label" x="360" y="190" text-anchor="middle">request 2</text>
+    <path class="edge" d="M 720 96 L 720 330 L 604 330" marker-end="url(#arw-spring-04-12-a)"/>
+    <text class="edge-label" x="660" y="320">the first completes</text>
+    <path class="edge" d="M 160 226 L 160 330 L 296 330" marker-end="url(#arw-spring-04-12-a)"/>
+    <rect class="node node--bad" x="300" y="300" width="300" height="60" rx="5"/>
+    <text class="label" x="450" y="326" text-anchor="middle">two charges</text>
+    <text class="label label--sub" x="450" y="342" text-anchor="middle">one payment, captured twice</text>
+  </svg>
+  <figcaption>
+    <strong>A client that times out and retries is not a hypothetical: the first request may still be running, so the retry can charge twice.</strong> The outbox relay can crash between publish and mark, CDC duplicates on rewind, a saga retries a compensating action, and a client retries a request that actually succeeded. Every mechanism in this chapter can deliver twice, which is why idempotency is the precondition for all of them being safe.
+  </figcaption>
+</figure><p>Three layers, in increasing order of strength:</p><p><strong>Layer 1 — an idempotency key, checked in the transaction.</strong></p><pre class="snippet" data-lang="java"><code>@Transactional
 public PaymentResult charge(ChargeRequest req, String idempotencyKey) {
     // The UNIQUE constraint is the lock. Two concurrent requests with the same key:
     // one inserts, the other gets a constraint violation and reads the winner's row.
