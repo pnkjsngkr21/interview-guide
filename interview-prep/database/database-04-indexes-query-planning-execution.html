@@ -16,7 +16,7 @@
 
 <main class="main main--guide" id="main">
 
-<header class="masthead"><p class="masthead__eyebrow">Database — INDEXES, QUERY PLANNING &amp; EXECUTION</p><h1>The Database Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>10 chapters</li><li>84 questions</li><li>65 diagrams</li></ul></header>
+<header class="masthead"><p class="masthead__eyebrow">Database — INDEXES, QUERY PLANNING &amp; EXECUTION</p><h1>The Database Complete Deep-Dive</h1><p class="masthead__sub">Study &amp; Interview Mastery Guide</p><ul class="masthead__meta"><li>10 chapters</li><li>84 questions</li><li>9 figures</li><li>56 text blocks</li></ul></header>
 
 <div class="toolbar"><div class="search"><input type="search" data-filter-input placeholder="Filter chapters — press /" aria-label="Filter chapters"><span class="search__count" data-filter-count role="button" tabindex="0" title="Clear filter"></span></div><div class="pager"><a class="pager__prev" href="database-03-sql-queries-joins-window-functions.html">&larr; SQL — QUERIES, JOINS, CTES &amp; WINDOW FUNCTIONS</a><a class="pager__next" href="database-05-transactions-isolation-concurrency.html">TRANSACTIONS, ISOLATION LEVELS &amp; CONCURRENCY &rarr;</a></div></div>
 
@@ -30,31 +30,88 @@ Production Example → Interview Questions</code></pre><p>Not every chapter uses
   usable page space        8192 - 24 (page header) - 16 (page-level)  = 8152 bytes
   tuples per page          floor(8152 / (200 + 4 slot))               = 39 rows/page
   total heap pages         10,000,000 / 39                            = 256,411 pages
-  total heap bytes         256,411 x 8,192                             = 2.01 GB</code></pre><p>Now the cost of touching all of it, on two different devices:</p><div class="table-wrap"><table><thead><tr><th>Access pattern</th><th>Per-page cost</th><th>256,411 pages</th><th>Notes</th></tr></thead><tbody><tr><td>NVMe SSD, sequential</td><td>~0.05 ms</td><td>~13 s</td><td>2 GB at ~160 MB/s effective</td></tr><tr><td>NVMe SSD, random</td><td>~0.10 ms</td><td>~26 s</td><td>10,000 IOPS ceiling, queue depth 1</td></tr><tr><td>SATA SSD, sequential</td><td>~0.5 ms</td><td>~128 s</td><td>~160 MB/s</td></tr><tr><td>SATA SSD, random</td><td>~5 ms</td><td>~1,283 s</td><td>~200 IOPS</td></tr><tr><td>Spinning disk, random</td><td>~8 ms</td><td>~2,051 s</td><td>seek dominates, ~125 IOPS</td></tr><tr><td>Spinning disk, sequential</td><td>~0.1 ms</td><td>~26 s</td><td>readahead hides the seek</td></tr></tbody></table></div><p>The two columns that matter are the <em>last two rows of each block</em>: sequential is 80× faster than random on the same spinning disk, and 2× faster than random on an NVMe. <strong>That ratio is the entire reason indexes are shaped the way they are.</strong> If random and sequential I/O cost the same, a hash index would be strictly better than a B+ tree for point lookups and nobody would care about range scans. The B+ tree is not the best structure for finding one row — it is the best structure for finding one row <em>and</em> then continuing to find the next few hundred rows in order, over a structure small enough to sit mostly in RAM.</p><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p>The crossover point where an index stops paying is a function of three numbers, and it is worth being able to compute it. With a 39-rows-per-page heap, a lookup that finds 1 row touches 1 index page + 1 heap page. A sequential scan touches <code>N/39</code> pages. The scan wins when <code>N/39 × C_seq &lt; C_rand × 3</code>, i.e. when <code>N &lt; 39 × 3 × (C_rand / C_seq)</code>. On NVMe that ratio is 2, giving <code>N &lt; 234</code>. On spinning disk the ratio is 80, giving <code>N &lt; 9,360</code>. <strong>So the same query on the same table is correctly index-scanned on a laptop and correctly seq-scanned on a 7200 rpm disk</strong>, and if a candidate quotes a single &quot;the table is too small&quot; threshold without a device, they have not thought about it.</p></aside><h3 class="vol__h3" id="12-b-tree-vs-b-tree-the-distinction-most-candidates-conflate">1.2 B-Tree vs B+ Tree — the Distinction Most Candidates Conflate</h3><p>This is the single most commonly fudged answer in database interviews, and the fudge is always the same: describing a B+ tree and calling it a B-tree. They are different structures, the difference is not cosmetic, and the difference is the reason range scans are fast.</p><p><strong>A B-tree stores the row payload (or a pointer to it) in <em>every</em> node — internal nodes included. A B+ tree stores keys in internal nodes and <em>all</em> payloads in the leaves only.</strong></p><pre class="diagram"><code>  B-TREE (payload in every node)                B+ TREE (payload in leaves only)
-  ┌───────────────────────────────┐             ┌───────────────────────────────┐
-  │ [10 | 20 | 30]  ← data HERE  │             │ [21 | 41]     separator keys │
-  ├───────┬────────┬──────────────┤             ├──────┬────────┬──────────────┤
-  │ [5]   │ [15]   │ [25]         │             │      ▼        ▼              │
-  │ d1    │ d2     │ d3     ← d4   │             │ ┌────────┐ ┌────────┐         │
-  └───────┴────────┴──────────────┘             │ │ 1..20  │→│ 22..40 │→…        │
-   a key equal to 20 lives in the ROOT          │ │ payload│ │ payload│         │
-   → 1 node touched, but the root is full       │ └────────┘ └────────┘         │
-                                                 │       linked leaf list       │
-                                                 └───────────────────────────────┘
-                                                 a key equal to 20 lives in a LEAF
-                                                 → 3 nodes touched, but 2 are tiny</code></pre><p>The consequences, in the order a candidate should give them:</p><ol><li><strong>A B+ tree's internal nodes are tiny.</strong> If an internal entry is a 8-byte key plus a 6-byte page pointer plus 8 bytes of tuple header and alignment, call it 16 bytes. An 8 kB page holds <code>8152 / 16 ≈ 509</code> of them. A B-tree internal node must also fit a full row payload — say 200 bytes — so it holds <code>8152 / (200 + 8) ≈ 39</code> of them. <strong>The B+ tree's fan-out is 13× higher, so its height is lower by a factor of <code>log(509)/log(39) ≈ 1.53</code> per level.</strong> On a 10M-row index that is the difference between a 3-level tree and a 4-level tree, and the difference between 3 page reads and 4.</li><li><strong>A B+ tree's leaves are in one sorted run, physically linked.</strong> A range scan touches the first leaf and then follows pointers left-to-right, reading pages that are adjacent in <em>key</em> order. The readahead-friendly property that made sequential I/O 80× cheaper than random is available to an index, not just to a full-table scan.</li><li><strong>A B+ tree has more levels for a small index but the extra levels are cheap.</strong> The root and internal levels are the pages most likely to stay pinned in the buffer pool, because every single-row lookup touches them. Their <em>hit rate</em> is near 100% and their <em>size</em> is tiny — for a 10M-row <code>bigint</code>-keyed index at ~28 bytes per leaf entry, the whole index is about 80 MB, of which the two upper levels are about 160 KB. This is why the &quot;three page reads&quot; mental model in Chapter 2 holds: two of the three reads are practically free.</li></ol><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;A B-TREE INDEX GIVES YOU O(log n) LOOKUPS&quot;</strong></p>
+  total heap bytes         256,411 x 8,192                             = 2.01 GB</code></pre><p>Now the cost of touching all of it, on two different devices:</p><div class="table-wrap"><table><thead><tr><th>Access pattern</th><th>Per-page cost</th><th>256,411 pages</th><th>Notes</th></tr></thead><tbody><tr><td>NVMe SSD, sequential</td><td>~0.05 ms</td><td>~13 s</td><td>2 GB at ~160 MB/s effective</td></tr><tr><td>NVMe SSD, random</td><td>~0.10 ms</td><td>~26 s</td><td>10,000 IOPS ceiling, queue depth 1</td></tr><tr><td>SATA SSD, sequential</td><td>~0.5 ms</td><td>~128 s</td><td>~160 MB/s</td></tr><tr><td>SATA SSD, random</td><td>~5 ms</td><td>~1,283 s</td><td>~200 IOPS</td></tr><tr><td>Spinning disk, random</td><td>~8 ms</td><td>~2,051 s</td><td>seek dominates, ~125 IOPS</td></tr><tr><td>Spinning disk, sequential</td><td>~0.1 ms</td><td>~26 s</td><td>readahead hides the seek</td></tr></tbody></table></div><p>The two columns that matter are the <em>last two rows of each block</em>: sequential is 80× faster than random on the same spinning disk, and 2× faster than random on an NVMe. <strong>That ratio is the entire reason indexes are shaped the way they are.</strong> If random and sequential I/O cost the same, a hash index would be strictly better than a B+ tree for point lookups and nobody would care about range scans. The B+ tree is not the best structure for finding one row — it is the best structure for finding one row <em>and</em> then continuing to find the next few hundred rows in order, over a structure small enough to sit mostly in RAM.</p><aside class="callout callout--scale"><span class="callout__label">Scaling reality check</span><p>The crossover point where an index stops paying is a function of three numbers, and it is worth being able to compute it. With a 39-rows-per-page heap, a lookup that finds 1 row touches 1 index page + 1 heap page. A sequential scan touches <code>N/39</code> pages. The scan wins when <code>N/39 × C_seq &lt; C_rand × 3</code>, i.e. when <code>N &lt; 39 × 3 × (C_rand / C_seq)</code>. On NVMe that ratio is 2, giving <code>N &lt; 234</code>. On spinning disk the ratio is 80, giving <code>N &lt; 9,360</code>. <strong>So the same query on the same table is correctly index-scanned on a laptop and correctly seq-scanned on a 7200 rpm disk</strong>, and if a candidate quotes a single &quot;the table is too small&quot; threshold without a device, they have not thought about it.</p></aside><h3 class="vol__h3" id="12-b-tree-vs-b-tree-the-distinction-most-candidates-conflate">1.2 B-Tree vs B+ Tree — the Distinction Most Candidates Conflate</h3><p>This is the single most commonly fudged answer in database interviews, and the fudge is always the same: describing a B+ tree and calling it a B-tree. They are different structures, the difference is not cosmetic, and the difference is the reason range scans are fast.</p><p><strong>A B-tree stores the row payload (or a pointer to it) in <em>every</em> node — internal nodes included. A B+ tree stores keys in internal nodes and <em>all</em> payloads in the leaves only.</strong></p><figure class="figure">
+  <svg viewBox="0 0 900 340" role="img" aria-label="A B-tree stores the row payload in every node, internal nodes included, so an internal page holds about 39 entries; a B+ tree stores separator keys in internal nodes and all payloads in a physically linked leaf run, so an internal page holds about 509 entries and a range scan never re-ascends.">
+    <defs>
+      <marker id="arw-database-04-01-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="label" x="225" y="26" text-anchor="middle">B-TREE</text>
+    <text class="label label--sub" x="225" y="42" text-anchor="middle">payload in every node</text>
+    <rect class="node" x="75" y="60" width="300" height="72" rx="5"/>
+    <text class="label" x="225" y="88" text-anchor="middle">Internal node</text>
+    <text class="label label--sub" x="225" y="106" text-anchor="middle">[10 | 20 | 30] + data</text>
+    <text class="label label--sub" x="225" y="122" text-anchor="middle">data in every node</text>
+    <path class="edge" d="M 185 132 L 148 192" marker-end="url(#arw-database-04-01-a)"/>
+    <path class="edge" d="M 265 132 L 302 192" marker-end="url(#arw-database-04-01-a)"/>
+    <rect class="node" x="75" y="196" width="140" height="64" rx="5"/>
+    <text class="label" x="145" y="224" text-anchor="middle">Child node</text>
+    <text class="label label--sub" x="145" y="240" text-anchor="middle">[5] + d1, d2</text>
+    <rect class="node" x="235" y="196" width="140" height="64" rx="5"/>
+    <text class="label" x="305" y="224" text-anchor="middle">Child node</text>
+    <text class="label label--sub" x="305" y="240" text-anchor="middle">[25] + d3, d4</text>
+    <text class="label label--sub" x="225" y="290" text-anchor="middle">a key equal to 20 lives in the ROOT</text>
+    <text class="label label--sub" x="225" y="306" text-anchor="middle">1 node touched, but the root is full</text>
+    <text class="label" x="675" y="26" text-anchor="middle">B+ TREE</text>
+    <text class="label label--sub" x="675" y="42" text-anchor="middle">payload in leaves only</text>
+    <rect class="node node--accent" x="525" y="60" width="300" height="72" rx="5"/>
+    <text class="label" x="675" y="88" text-anchor="middle">Internal node</text>
+    <text class="label label--sub" x="675" y="106" text-anchor="middle">[21 | 41] — separators</text>
+    <text class="label label--sub" x="675" y="122" text-anchor="middle">keys only, no payload</text>
+    <path class="edge" d="M 615 132 L 557 192" marker-end="url(#arw-database-04-01-a)"/>
+    <path class="edge" d="M 675 132 L 675 192" marker-end="url(#arw-database-04-01-a)"/>
+    <path class="edge" d="M 735 132 L 793 192" marker-end="url(#arw-database-04-01-a)"/>
+    <rect class="node" x="500" y="196" width="110" height="64" rx="5"/>
+    <text class="label" x="555" y="224" text-anchor="middle">Leaf</text>
+    <text class="label label--sub" x="555" y="240" text-anchor="middle">1..20 payload</text>
+    <rect class="node" x="620" y="196" width="110" height="64" rx="5"/>
+    <text class="label" x="675" y="224" text-anchor="middle">Leaf</text>
+    <text class="label label--sub" x="675" y="240" text-anchor="middle">22..40 payload</text>
+    <rect class="node" x="740" y="196" width="110" height="64" rx="5"/>
+    <text class="label" x="795" y="224" text-anchor="middle">Leaf</text>
+    <text class="label label--sub" x="795" y="240" text-anchor="middle">42..60 payload</text>
+    <path class="edge" d="M 555 260 L 555 284"/>
+    <path class="edge" d="M 675 260 L 675 284"/>
+    <path class="edge" d="M 795 260 L 795 284"/>
+    <path class="edge" d="M 530 284 L 820 284" marker-end="url(#arw-database-04-01-a)" marker-start="url(#arw-database-04-01-a)"/>
+    <text class="label label--sub" x="675" y="306" text-anchor="middle">a key equal to 20 lives in a LEAF</text>
+    <text class="label label--sub" x="675" y="324" text-anchor="middle">the linked leaf list — one sorted run</text>
+  </svg>
+  <figcaption><strong>A B+ tree moves the payload out of the internal nodes, so an internal page holds about 509 separator entries against a B-tree's 39 — the 13× fan-out gap is the entire structure.</strong> The left panel's root carries keys and data together; the right panel's root carries keys alone, and only its leaves are linked, which is what turns a range scan into one descent plus a left-to-right walk.</figcaption>
+</figure><p>The consequences, in the order a candidate should give them:</p><ol><li><strong>A B+ tree's internal nodes are tiny.</strong> If an internal entry is a 8-byte key plus a 6-byte page pointer plus 8 bytes of tuple header and alignment, call it 16 bytes. An 8 kB page holds <code>8152 / 16 ≈ 509</code> of them. A B-tree internal node must also fit a full row payload — say 200 bytes — so it holds <code>8152 / (200 + 8) ≈ 39</code> of them. <strong>The B+ tree's fan-out is 13× higher, so its height is lower by a factor of <code>log(509)/log(39) ≈ 1.53</code> per level.</strong> On a 10M-row index that is the difference between a 3-level tree and a 4-level tree, and the difference between 3 page reads and 4.</li><li><strong>A B+ tree's leaves are in one sorted run, physically linked.</strong> A range scan touches the first leaf and then follows pointers left-to-right, reading pages that are adjacent in <em>key</em> order. The readahead-friendly property that made sequential I/O 80× cheaper than random is available to an index, not just to a full-table scan.</li><li><strong>A B+ tree has more levels for a small index but the extra levels are cheap.</strong> The root and internal levels are the pages most likely to stay pinned in the buffer pool, because every single-row lookup touches them. Their <em>hit rate</em> is near 100% and their <em>size</em> is tiny — for a 10M-row <code>bigint</code>-keyed index at ~28 bytes per leaf entry, the whole index is about 80 MB, of which the two upper levels are about 160 KB. This is why the &quot;three page reads&quot; mental model in Chapter 2 holds: two of the three reads are practically free.</li></ol><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;A B-TREE INDEX GIVES YOU O(log n) LOOKUPS&quot;</strong></p>
 <p>The trap is not the complexity, it is the framing. A B-tree gives you O(log n) with <em>high constants</em>; a B+ tree gives you O(log n) with <em>low constants plus an O(k) sequential continuation</em>. The follow-up that distinguishes a senior answer is <strong>&quot;why does the leaf list matter?&quot;</strong> and the answer is: without it, a range scan would have to re-descend from the root for every row, turning <code>WHERE id BETWEEN 1 AND 1000</code> into 1000 × 3 = 3000 page reads. With it, the scan is 1 descent plus a left-to-right walk. And the reason that walk is fast is that its pages are <em>adjacent in key order</em>, which lets the OS readahead turn 1000 potentially-random reads into roughly 1000/64 = 16 sequential I/Os on a 64 kB readahead window.</p>
-<p>A second trap in the same family: MySQL InnoDB's primary key index is called a <em>clustered</em> index, and the word &quot;clustered&quot; is not a synonym for &quot;B-tree&quot;. It is a B+ tree that happens to store the entire row at the leaf, which makes the table and the index the same structure. Volume 8 Chapter 2 owns that story; the reason to know the distinction here is that it changes what a covering index costs on each engine.</p></blockquote><h3 class="vol__h3" id="13-sequential-io-is-the-entire-point">1.3 Sequential I/O Is the Entire Point</h3><p>The framing that makes every other index decision fall out: <strong>an index exists to shrink the number of pages you touch, and the pages it leaves you touching should be in as close to sequential order as possible.</strong> Both halves matter and most explanations only teach the first.</p><p>The shrink is a function of how much of the index fits in memory, and the arithmetic is in Chapter 2. The short form for a 10M-row <code>int8</code>-keyed index: 509 entries per page, so 19,646 leaf pages (157 MB), 39 second-level pages (312 kB), and one root. Height 3, and the entire non-leaf portion — the part every single lookup must touch — is 320 kB. That is the whole reason the index wins, and Chapter 2 does the arithmetic line by line.</p><p>The second half is subtler and is where good candidates separate from great ones. A B-tree descent is three <em>random</em> reads by nature — the root's child pointers point anywhere. A range scan that follows the leaf list is a mix: the first 3 reads are random, and everything after is sequential. On spinning disk, a query that returns 10 rows converts 3 random reads into 3 sequential-ish reads if the pages happen to be near each other, and cannot do better than 3 random reads otherwise. A query returning 10,000 rows converts 3 random + 35 sequential, and the 35 sequential reads are nearly free.</p><p><strong>This is why <code>LIMIT</code> interacts with index choice so strongly.</strong> <code>ORDER BY created_at LIMIT 10</code> on a table with an index on <code>(created_at)</code> reads 3 random pages plus 1 leaf page. The same query without the index reads the entire heap and sorts it — 256,411 pages plus a 10M-row sort, which in PostgreSQL may spill to a temp file. The index converts an O(N log N) with a spill into an O(log N) with a constant of 4. Adding a matching <code>ORDER BY</code> index to a <code>LIMIT</code> query is the single highest ratio of improvement to bytes written in this entire volume.</p><aside class="callout callout--prod"><span class="callout__label">In production</span><p>The readahead framing has a direct operational consequence. On a spinning-disk host, the difference between an index and no index for a range query is not &quot;3 reads vs 256,411 reads&quot; — it is &quot;3 random reads at 8 ms plus a sequential tail&quot; vs &quot;a purely sequential 256,411-page scan that readahead converts into about 4,000 physical reads&quot;. The index-based plan may still be faster, but not by the 80× the naive comparison implies. This is exactly why a benchmark run on a laptop SSD and a decision made against it fails in production, and why <code>EXPLAIN (ANALYZE, BUFFERS)</code> on the <em>production</em> instance is the only measurement that counts.</p></aside><h3 class="vol__h3" id="14-what-an-index-entry-actually-contains">1.4 What an Index Entry Actually Contains</h3><p>Almost nobody can draw the contents of an index entry without hesitating, and the contents are where several performance behaviours are decided.</p><p>A <strong>PostgreSQL</strong> <code>btree</code> entry is a <code>IndexTuple</code>: a 8-byte <code>IndexTupleData</code> header (containing a 4-byte <code>t_tid</code> — the transaction ID of the inserting transaction — and the offset of the key data), followed by the key columns in <code>attr</code> order, followed by — if the index is not the table's primary key and you asked for it — extra columns, and optionally a trailing truncation of the key. There is no row payload, because PostgreSQL indexes point.</p><pre class="diagram"><code>  PostgreSQL btree leaf entry (bigint key, no INCLUDE)
-  ┌──────────┬──────────────┬────────────────┐
-  │ 8 bytes  │ 8 bytes key  │  (TID lives in  │   ← total ≈ 16-24 bytes
-  │ tuple hdr│ id = 42      │   the header)   │
-  └──────────┴──────────────┴────────────────┘
-
-  where the TID points (volume 1, chapter 2, §2.4):
-  ┌───────────┬────────┐
-  │ block =   │ offset │
-  │  90,041   │  = 17  │   → 6 bytes, and it is the whole &quot;where is the row&quot; story
-  └───────────┴────────┘</code></pre><p>A <strong>MySQL InnoDB</strong> secondary index entry is <code>(secondary_key_columns, primary_key_columns)</code> — no row pointer at all, because the primary key <em>is</em> the row locator, and the clustered index is the table. So a secondary index on <code>orders(status)</code> has a <code>status</code> value plus the full 8-byte <code>order_id</code>, and a lookup that needs any other column makes a second descent into the clustered index.</p><p>Three things follow immediately, and all three are interview material:</p><ol><li><strong>A secondary index on a wide table is narrower than the table, by construction.</strong> The <code>status</code> secondary index above is ~30 bytes per entry, so a 40M-row <code>orders</code> table has a 1.1 GB secondary index against a 9.6 GB table. That is why index-only scans are possible and why &quot;the index is a copy of the table&quot; is exactly backwards.</li><li><strong>A secondary index is not free to maintain, and its width is the cost.</strong> Every <code>INSERT</code> into a table with N secondary indexes performs N B+ tree insertions, and each one is a WAL record, a page pin, possibly a page split, and eventually a buffer-pool eviction. This is Chapter 3's subject.</li><li><strong>Non-leaf entries in PostgreSQL are key-only; the <code>t_tid</code> in an internal node is a &quot;high key&quot; separator, not a real row pointer.</strong> A frequent interview confusion.</li></ol><aside class="callout callout--must"><span class="callout__label">Must remember</span><p>An index is an ordered structure over a <em>narrow</em> copy of a subset of your columns, plus a locator. Narrow is why it fits in RAM; ordered is why range scans work; the locator is why a lookup is not free. A column you can make narrower without changing its meaning is a column you can fit more of into the same memory, which is the cheapest index optimisation that exists and almost nobody applies.</p></aside><h4 class="vol__h4" id="common-mistakes">Common Mistakes</h4><ul><li>Conflating B-tree and B+ tree, and describing payloads as living in internal nodes</li><li>Explaining indexes purely as &quot;O(log n) lookups&quot; without the sequential-continuation half that is the actual reason B+ trees won</li><li>Believing an index entry contains the row — on PostgreSQL it is a 6-byte <code>(block, offset)</code> pointer, on InnoDB it is the primary key</li><li>Quoting a &quot;table too small for an index&quot; threshold with no device attached — the threshold moves by 40× between an NVMe and a spinning disk</li><li>Assuming <code>LIMIT 10</code> makes the query cheap regardless of whether the <code>ORDER BY</code> can be satisfied from an index — without one, <code>LIMIT</code> reduces the <em>output</em>, not the <em>work</em></li><li>Forgetting that every index is a write amplification factor, so the &quot;free&quot; index added to fix a report is a permanent tax on every write to that table</li></ul><h4 class="vol__h4" id="interview-questions-why-indexes-exist">Interview Questions — Why Indexes Exist</h4><article class="qa" id="1-why-indexes-exist-1"><p class="qa__q"><a class="qa__num" href="#1-why-indexes-exist-1">Q1</a> What problem does an index actually solve? Give the answer with units. <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>It converts a page-count problem into a page-count problem with a much smaller constant, and the constant differs by access pattern. A scan of a 10M-row, 200-byte-row table on 8 kB pages touches <code>10,000,000 / floor(8152/204) = 256,411</code> pages. The same table with a bigint-keyed B+ tree has a height of 3 at 291 leaf entries per page, so a point lookup is 3 page reads and a 1,000-row range is <code>3 + ceil(1000/291) = 7</code>. The reason this is a win rather than a wash is that the 3 descent pages are ~557 kB of internal nodes that never leave the buffer pool, while the scan pages are 2 GB that mostly do not. Sequential reads on a spinning disk cost about 1/80 of random reads, so the &quot;hard&quot; pages in a scan are far cheaper than the arithmetic suggests, while the index's leaf pages are still random access. Both effects point the same way, which is why the index wins — and why the margin shrinks dramatically on fast storage.</p></div></article><article class="qa" id="1-why-indexes-exist-2"><p class="qa__q"><a class="qa__num" href="#1-why-indexes-exist-2">Q2</a> What is the difference between a B-tree and a B+ tree, and what breaks if you build the wrong one? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>A B-tree stores the payload or a row pointer in every node, including internal nodes. A B+ tree stores only separator keys in internal nodes and all payloads in the leaves, and links the leaves left-to-right in key order. Two consequences break if you get it wrong. First, <strong>fan-out</strong>: a B+ tree internal entry is ~16 bytes (8-byte key, 8-byte page pointer) so an 8 kB page holds ~509 children, while a B-tree internal entry must also carry a 200-byte payload and holds only ~39. The 13× fan-out difference means a lower height, and on a 10M-row index the difference between height 3 and height 4 is a page read on <em>every single lookup</em>. Second, <strong>range traversal</strong>: without the linked leaf list, every row in a range costs a fresh root-to-leaf descent, so <code>WHERE id BETWEEN 1 AND 1000</code> becomes 3,000 page reads instead of 7. Databases store data in heaps precisely so the B+ tree can stay narrow, and pay the second random read in exchange.</p></div></article><article class="qa" id="1-why-indexes-exist-3"><p class="qa__q"><a class="qa__num" href="#1-why-indexes-exist-3">Q3</a> Why is a <code>bigint</code> primary key often a better index key than a <code>uuid</code>? <span class="qa__badge"><code>ADVANCED</code></span></p><div class="qa__a"><p>Width, and width compounds three times. A <code>bigint</code> key is 8 bytes and a <code>uuid</code> is 16 bytes, so leaf entries are ~28 vs ~36 bytes and a leaf page holds 291 vs 226 entries — about 22% more rows per page, which compounds into a smaller tree, a better buffer-pool hit rate, and fewer pages read. The second cost is comparison: binary integer comparison is a single wide load, while a UUID compares 16 bytes byte-by-byte with collation-sensitive branches in some engines, and worse, random UUIDs sort <em>randomly</em> rather than sequentially, so the index's physical layout is uncorrelated with insertion order and the leaf list walk loses the readahead benefit. The third is size on the write path, and in InnoDB a secondary index entry is <code>(secondary_key, primary_key)</code>, so a 16-byte UUID primary key adds 8 bytes to <em>every</em> secondary index entry in the table. A sequential <code>bigint</code> with a time prefix — Twitter's snowflake, ULID in its binary form — is the usual compromise, and the honest staff-level caveat is that it leaks business volume information to anyone who can read an ID.</p></div></article><article class="qa" id="1-why-indexes-exist-4"><p class="qa__q"><a class="qa__num" href="#1-why-indexes-exist-4">Q4</a> Your report says &quot;add an index on <code>orders(customer_id)</code>&quot; and the query got exactly as slow. What are the five things to check, in order? <span class="qa__badge"><code>SCENARIO</code></span></p><div class="qa__a"><p>In order of probability: (1) the table is too small for the index to be worth it, and the optimiser is correctly choosing a sequential scan — check the table's actual page count, not the row count everyone quotes; (2) the predicate is not sargable, so no index could have been used, which means the index is not merely unused but <em>unusable</em> — look for a function or a cast on the column side; (3) statistics are stale, so the optimiser's estimate of the match count is off by orders of magnitude; (4) the query is a small part of a larger problem and the time is in the join or the sort, not the lookup, which <code>EXPLAIN ANALYZE</code> shows immediately; (5) the index exists but the plan is cached, so you are looking at a plan chosen before the index was created. The order matters because the first three are the common ones and the last two are the ones where more indexes make things worse.</p></div></article><h4 class="vol__h4" id="further-reading">Further Reading</h4><ul><li><a href="https://use-the-index-luke.com//what-is-an-index" rel="noopener noreferrer">Use The Index, Luke — What is an index</a> — the best short treatment of why index structure follows from disk geometry.</li><li><a href="https://www.postgresql.org/docs/current/btree.html" rel="noopener noreferrer">PostgreSQL — B-Tree Indexes</a> — the authoritative description of the structure, including the high-key separator entries.</li><li><a href="https://www.cs.cmu.edu/~15451-f22/lectures/08-indexes.pdf" rel="noopener noreferrer">CMU Database Systems — Indexes &amp; B+ Trees</a> — the derivation of fan-out and height that the interview question is really asking for.</li><li><a href="https://www.cs.utexas.edu/~djimenez/utsa/cs3343/Gray%20Book%20on%20Transaction%20Processing.pdf" rel="noopener noreferrer">Jim Gray — Transaction Processing: Chapter 9, The B-Tree</a> — the original treatment of occupancy, split and merge behaviour.</li><li><a href="https://cs.wisc.edu/~yxy/cs764-f20/notes/DBsystems-CompleteBook.pdf" rel="noopener noreferrer">Database Systems: The Complete Book — Chapter 11, Indexing</a> — hash versus tree indexes and the space/time trade-off made explicit.</li></ul><aside class="callout callout--summary"><span class="callout__label">Chapter summary</span><p>An index converts a 256,411-page sequential scan into a 3-page descent because its internal levels are small enough to live permanently in the buffer pool — not because &quot;log n&quot; is impressive. The structure that achieves this is a B+ tree, not a B-tree: payloads only at the leaves, leaves linked in key order, fan-out of ~509 children per 8 kB page instead of ~39. The linked leaf list is what turns a range into a sequential walk, and sequential is 80× cheaper than random on spinning media and still 2× cheaper on an NVMe. An index entry holds a narrow copy of your key plus a locator — a 6-byte <code>(block, offset)</code> in PostgreSQL, a primary key in InnoDB — and the narrowness is the reason it fits in memory at all. Everything in this volume is a consequence of that: how you choose column order (Chapter 4), which structure to use (Chapter 3), and what the optimiser believes about the row counts above it (Chapter 8).</p></aside></section>
+<p>A second trap in the same family: MySQL InnoDB's primary key index is called a <em>clustered</em> index, and the word &quot;clustered&quot; is not a synonym for &quot;B-tree&quot;. It is a B+ tree that happens to store the entire row at the leaf, which makes the table and the index the same structure. Volume 8 Chapter 2 owns that story; the reason to know the distinction here is that it changes what a covering index costs on each engine.</p></blockquote><h3 class="vol__h3" id="13-sequential-io-is-the-entire-point">1.3 Sequential I/O Is the Entire Point</h3><p>The framing that makes every other index decision fall out: <strong>an index exists to shrink the number of pages you touch, and the pages it leaves you touching should be in as close to sequential order as possible.</strong> Both halves matter and most explanations only teach the first.</p><p>The shrink is a function of how much of the index fits in memory, and the arithmetic is in Chapter 2. The short form for a 10M-row <code>int8</code>-keyed index: 509 entries per page, so 19,646 leaf pages (157 MB), 39 second-level pages (312 kB), and one root. Height 3, and the entire non-leaf portion — the part every single lookup must touch — is 320 kB. That is the whole reason the index wins, and Chapter 2 does the arithmetic line by line.</p><p>The second half is subtler and is where good candidates separate from great ones. A B-tree descent is three <em>random</em> reads by nature — the root's child pointers point anywhere. A range scan that follows the leaf list is a mix: the first 3 reads are random, and everything after is sequential. On spinning disk, a query that returns 10 rows converts 3 random reads into 3 sequential-ish reads if the pages happen to be near each other, and cannot do better than 3 random reads otherwise. A query returning 10,000 rows converts 3 random + 35 sequential, and the 35 sequential reads are nearly free.</p><p><strong>This is why <code>LIMIT</code> interacts with index choice so strongly.</strong> <code>ORDER BY created_at LIMIT 10</code> on a table with an index on <code>(created_at)</code> reads 3 random pages plus 1 leaf page. The same query without the index reads the entire heap and sorts it — 256,411 pages plus a 10M-row sort, which in PostgreSQL may spill to a temp file. The index converts an O(N log N) with a spill into an O(log N) with a constant of 4. Adding a matching <code>ORDER BY</code> index to a <code>LIMIT</code> query is the single highest ratio of improvement to bytes written in this entire volume.</p><aside class="callout callout--prod"><span class="callout__label">In production</span><p>The readahead framing has a direct operational consequence. On a spinning-disk host, the difference between an index and no index for a range query is not &quot;3 reads vs 256,411 reads&quot; — it is &quot;3 random reads at 8 ms plus a sequential tail&quot; vs &quot;a purely sequential 256,411-page scan that readahead converts into about 4,000 physical reads&quot;. The index-based plan may still be faster, but not by the 80× the naive comparison implies. This is exactly why a benchmark run on a laptop SSD and a decision made against it fails in production, and why <code>EXPLAIN (ANALYZE, BUFFERS)</code> on the <em>production</em> instance is the only measurement that counts.</p></aside><h3 class="vol__h3" id="14-what-an-index-entry-actually-contains">1.4 What an Index Entry Actually Contains</h3><p>Almost nobody can draw the contents of an index entry without hesitating, and the contents are where several performance behaviours are decided.</p><p>A <strong>PostgreSQL</strong> <code>btree</code> entry is a <code>IndexTuple</code>: a 8-byte <code>IndexTupleData</code> header (containing a 4-byte <code>t_tid</code> — the transaction ID of the inserting transaction — and the offset of the key data), followed by the key columns in <code>attr</code> order, followed by — if the index is not the table's primary key and you asked for it — extra columns, and optionally a trailing truncation of the key. There is no row payload, because PostgreSQL indexes point.</p><figure class="figure">
+  <svg viewBox="0 0 900 260" role="img" aria-label="A PostgreSQL btree leaf entry is an 8-byte tuple header that contains the TID, an 8-byte key, and no payload at all — roughly 16 to 24 bytes in total. The 6-byte TID names a heap block and an offset, which is the entire where-is-the-row story: the index points at the row instead of storing it.">
+    <defs>
+      <marker id="arw-database-04-02-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="label" x="450" y="26" text-anchor="middle">PostgreSQL btree leaf entry — bigint key, no INCLUDE</text>
+    <rect class="node node--accent" x="150" y="50" width="420" height="120" rx="5"/>
+    <path class="edge" d="M 290 56 L 290 164"/>
+    <path class="edge" d="M 430 56 L 430 164"/>
+    <text class="label" x="220" y="92" text-anchor="middle">8 bytes</text>
+    <text class="label label--sub" x="220" y="110" text-anchor="middle">tuple header</text>
+    <text class="label label--sub" x="220" y="126" text-anchor="middle">contains the TID</text>
+    <text class="label" x="360" y="92" text-anchor="middle">8 bytes</text>
+    <text class="label label--sub" x="360" y="110" text-anchor="middle">key: id = 42</text>
+    <text class="label label--sub" x="360" y="126" text-anchor="middle">the search key</text>
+    <text class="label" x="500" y="92" text-anchor="middle">no payload</text>
+    <text class="label label--sub" x="500" y="110" text-anchor="middle">nothing stored</text>
+    <text class="label label--sub" x="500" y="126" text-anchor="middle">the index points</text>
+    <text class="label label--sub" x="360" y="188" text-anchor="middle">total ≈ 16–24 bytes per entry</text>
+    <path class="edge" d="M 570 110 L 636 110" marker-end="url(#arw-database-04-02-a)"/>
+    <rect class="node" x="640" y="50" width="220" height="120" rx="5"/>
+    <text class="label" x="750" y="82" text-anchor="middle">The TID — 6 bytes</text>
+    <text class="label label--sub" x="750" y="106" text-anchor="middle">block = 90,041</text>
+    <text class="label label--sub" x="750" y="124" text-anchor="middle">offset = 17</text>
+    <text class="label label--sub" x="750" y="148" text-anchor="middle">where the row lives</text>
+    <text class="label label--sub" x="450" y="228" text-anchor="middle">the whole "where is the row" story — the entry points at the heap row, it does not hold it</text>
+  </svg>
+  <figcaption><strong>A PostgreSQL btree entry is an 8-byte tuple header plus an 8-byte key and nothing else — roughly 16 to 24 bytes — because the index points at the row instead of holding it.</strong> The header carries the 6-byte TID, block 90,041 offset 17; with no payload term in the arithmetic, a secondary index on a wide table is narrower than the table by construction.</figcaption>
+</figure><p>A <strong>MySQL InnoDB</strong> secondary index entry is <code>(secondary_key_columns, primary_key_columns)</code> — no row pointer at all, because the primary key <em>is</em> the row locator, and the clustered index is the table. So a secondary index on <code>orders(status)</code> has a <code>status</code> value plus the full 8-byte <code>order_id</code>, and a lookup that needs any other column makes a second descent into the clustered index.</p><p>Three things follow immediately, and all three are interview material:</p><ol><li><strong>A secondary index on a wide table is narrower than the table, by construction.</strong> The <code>status</code> secondary index above is ~30 bytes per entry, so a 40M-row <code>orders</code> table has a 1.1 GB secondary index against a 9.6 GB table. That is why index-only scans are possible and why &quot;the index is a copy of the table&quot; is exactly backwards.</li><li><strong>A secondary index is not free to maintain, and its width is the cost.</strong> Every <code>INSERT</code> into a table with N secondary indexes performs N B+ tree insertions, and each one is a WAL record, a page pin, possibly a page split, and eventually a buffer-pool eviction. This is Chapter 3's subject.</li><li><strong>Non-leaf entries in PostgreSQL are key-only; the <code>t_tid</code> in an internal node is a &quot;high key&quot; separator, not a real row pointer.</strong> A frequent interview confusion.</li></ol><aside class="callout callout--must"><span class="callout__label">Must remember</span><p>An index is an ordered structure over a <em>narrow</em> copy of a subset of your columns, plus a locator. Narrow is why it fits in RAM; ordered is why range scans work; the locator is why a lookup is not free. A column you can make narrower without changing its meaning is a column you can fit more of into the same memory, which is the cheapest index optimisation that exists and almost nobody applies.</p></aside><h4 class="vol__h4" id="common-mistakes">Common Mistakes</h4><ul><li>Conflating B-tree and B+ tree, and describing payloads as living in internal nodes</li><li>Explaining indexes purely as &quot;O(log n) lookups&quot; without the sequential-continuation half that is the actual reason B+ trees won</li><li>Believing an index entry contains the row — on PostgreSQL it is a 6-byte <code>(block, offset)</code> pointer, on InnoDB it is the primary key</li><li>Quoting a &quot;table too small for an index&quot; threshold with no device attached — the threshold moves by 40× between an NVMe and a spinning disk</li><li>Assuming <code>LIMIT 10</code> makes the query cheap regardless of whether the <code>ORDER BY</code> can be satisfied from an index — without one, <code>LIMIT</code> reduces the <em>output</em>, not the <em>work</em></li><li>Forgetting that every index is a write amplification factor, so the &quot;free&quot; index added to fix a report is a permanent tax on every write to that table</li></ul><h4 class="vol__h4" id="interview-questions-why-indexes-exist">Interview Questions — Why Indexes Exist</h4><article class="qa" id="1-why-indexes-exist-1"><p class="qa__q"><a class="qa__num" href="#1-why-indexes-exist-1">Q1</a> What problem does an index actually solve? Give the answer with units. <span class="qa__badge"><code>STAFF</code></span></p><div class="qa__a"><p>It converts a page-count problem into a page-count problem with a much smaller constant, and the constant differs by access pattern. A scan of a 10M-row, 200-byte-row table on 8 kB pages touches <code>10,000,000 / floor(8152/204) = 256,411</code> pages. The same table with a bigint-keyed B+ tree has a height of 3 at 291 leaf entries per page, so a point lookup is 3 page reads and a 1,000-row range is <code>3 + ceil(1000/291) = 7</code>. The reason this is a win rather than a wash is that the 3 descent pages are ~557 kB of internal nodes that never leave the buffer pool, while the scan pages are 2 GB that mostly do not. Sequential reads on a spinning disk cost about 1/80 of random reads, so the &quot;hard&quot; pages in a scan are far cheaper than the arithmetic suggests, while the index's leaf pages are still random access. Both effects point the same way, which is why the index wins — and why the margin shrinks dramatically on fast storage.</p></div></article><article class="qa" id="1-why-indexes-exist-2"><p class="qa__q"><a class="qa__num" href="#1-why-indexes-exist-2">Q2</a> What is the difference between a B-tree and a B+ tree, and what breaks if you build the wrong one? <span class="qa__badge"><code>TRICKY</code></span></p><div class="qa__a"><p>A B-tree stores the payload or a row pointer in every node, including internal nodes. A B+ tree stores only separator keys in internal nodes and all payloads in the leaves, and links the leaves left-to-right in key order. Two consequences break if you get it wrong. First, <strong>fan-out</strong>: a B+ tree internal entry is ~16 bytes (8-byte key, 8-byte page pointer) so an 8 kB page holds ~509 children, while a B-tree internal entry must also carry a 200-byte payload and holds only ~39. The 13× fan-out difference means a lower height, and on a 10M-row index the difference between height 3 and height 4 is a page read on <em>every single lookup</em>. Second, <strong>range traversal</strong>: without the linked leaf list, every row in a range costs a fresh root-to-leaf descent, so <code>WHERE id BETWEEN 1 AND 1000</code> becomes 3,000 page reads instead of 7. Databases store data in heaps precisely so the B+ tree can stay narrow, and pay the second random read in exchange.</p></div></article><article class="qa" id="1-why-indexes-exist-3"><p class="qa__q"><a class="qa__num" href="#1-why-indexes-exist-3">Q3</a> Why is a <code>bigint</code> primary key often a better index key than a <code>uuid</code>? <span class="qa__badge"><code>ADVANCED</code></span></p><div class="qa__a"><p>Width, and width compounds three times. A <code>bigint</code> key is 8 bytes and a <code>uuid</code> is 16 bytes, so leaf entries are ~28 vs ~36 bytes and a leaf page holds 291 vs 226 entries — about 22% more rows per page, which compounds into a smaller tree, a better buffer-pool hit rate, and fewer pages read. The second cost is comparison: binary integer comparison is a single wide load, while a UUID compares 16 bytes byte-by-byte with collation-sensitive branches in some engines, and worse, random UUIDs sort <em>randomly</em> rather than sequentially, so the index's physical layout is uncorrelated with insertion order and the leaf list walk loses the readahead benefit. The third is size on the write path, and in InnoDB a secondary index entry is <code>(secondary_key, primary_key)</code>, so a 16-byte UUID primary key adds 8 bytes to <em>every</em> secondary index entry in the table. A sequential <code>bigint</code> with a time prefix — Twitter's snowflake, ULID in its binary form — is the usual compromise, and the honest staff-level caveat is that it leaks business volume information to anyone who can read an ID.</p></div></article><article class="qa" id="1-why-indexes-exist-4"><p class="qa__q"><a class="qa__num" href="#1-why-indexes-exist-4">Q4</a> Your report says &quot;add an index on <code>orders(customer_id)</code>&quot; and the query got exactly as slow. What are the five things to check, in order? <span class="qa__badge"><code>SCENARIO</code></span></p><div class="qa__a"><p>In order of probability: (1) the table is too small for the index to be worth it, and the optimiser is correctly choosing a sequential scan — check the table's actual page count, not the row count everyone quotes; (2) the predicate is not sargable, so no index could have been used, which means the index is not merely unused but <em>unusable</em> — look for a function or a cast on the column side; (3) statistics are stale, so the optimiser's estimate of the match count is off by orders of magnitude; (4) the query is a small part of a larger problem and the time is in the join or the sort, not the lookup, which <code>EXPLAIN ANALYZE</code> shows immediately; (5) the index exists but the plan is cached, so you are looking at a plan chosen before the index was created. The order matters because the first three are the common ones and the last two are the ones where more indexes make things worse.</p></div></article><h4 class="vol__h4" id="further-reading">Further Reading</h4><ul><li><a href="https://use-the-index-luke.com//what-is-an-index" rel="noopener noreferrer">Use The Index, Luke — What is an index</a> — the best short treatment of why index structure follows from disk geometry.</li><li><a href="https://www.postgresql.org/docs/current/btree.html" rel="noopener noreferrer">PostgreSQL — B-Tree Indexes</a> — the authoritative description of the structure, including the high-key separator entries.</li><li><a href="https://www.cs.cmu.edu/~15451-f22/lectures/08-indexes.pdf" rel="noopener noreferrer">CMU Database Systems — Indexes &amp; B+ Trees</a> — the derivation of fan-out and height that the interview question is really asking for.</li><li><a href="https://www.cs.utexas.edu/~djimenez/utsa/cs3343/Gray%20Book%20on%20Transaction%20Processing.pdf" rel="noopener noreferrer">Jim Gray — Transaction Processing: Chapter 9, The B-Tree</a> — the original treatment of occupancy, split and merge behaviour.</li><li><a href="https://cs.wisc.edu/~yxy/cs764-f20/notes/DBsystems-CompleteBook.pdf" rel="noopener noreferrer">Database Systems: The Complete Book — Chapter 11, Indexing</a> — hash versus tree indexes and the space/time trade-off made explicit.</li></ul><aside class="callout callout--summary"><span class="callout__label">Chapter summary</span><p>An index converts a 256,411-page sequential scan into a 3-page descent because its internal levels are small enough to live permanently in the buffer pool — not because &quot;log n&quot; is impressive. The structure that achieves this is a B+ tree, not a B-tree: payloads only at the leaves, leaves linked in key order, fan-out of ~509 children per 8 kB page instead of ~39. The linked leaf list is what turns a range into a sequential walk, and sequential is 80× cheaper than random on spinning media and still 2× cheaper on an NVMe. An index entry holds a narrow copy of your key plus a locator — a 6-byte <code>(block, offset)</code> in PostgreSQL, a primary key in InnoDB — and the narrowness is the reason it fits in memory at all. Everything in this volume is a consequence of that: how you choose column order (Chapter 4), which structure to use (Chapter 3), and what the optimiser believes about the row counts above it (Chapter 8).</p></aside></section>
 
 <section id="chapter-2-b-trees-in-detail" data-filter-target><h2 class="vol__h2">Chapter 2 — B+ Trees in Detail</h2><h3 class="vol__h3" id="21-fan-out-arithmetic-done-on-screen">2.1 Fan-Out Arithmetic, Done on Screen</h3><p>Height is the only number that matters, and height is a pure function of fan-out. So compute the fan-out rather than quoting a rule of thumb.</p><pre class="diagram"><code>  POSTGRESQL btree, 8 kB page, bigint key, no INCLUDE columns
   ────────────────────────────────────────────────────────────────────
@@ -96,68 +153,111 @@ Production Example → Interview Questions</code></pre><p>Not every chapter uses
         10,000 .. 131,950,029          3                  3
    100,000,000 ..  67,162,164,961      4                  4
   ─────────────────────────────────────────────────────────────────
-  509^2 = 259,081    509^3 = 131,950,029    509^4 = 67,162,164,961</code></pre><p>The jump from three to four is the punchline: <strong>a B+ tree on an 8-byte key stays three levels tall for the entire range of table sizes a real system will ever see.</strong> The &quot;logarithmic depth&quot; framing is true and mostly irrelevant — the <em>constant</em> is what you are optimising, and the constant is the fan-out, and the fan-out is a function of how many bytes your key column occupies. That is the actionable form of the whole theory: <strong>narrow your key.</strong></p><h3 class="vol__h3" id="22-the-structure-drawn-properly">2.2 The Structure, Drawn Properly</h3><pre class="diagram"><code>  ┌─────────────────────────────────────────────────────────────────────┐
-  │  NODE 1  (root, page 0)                          height 1, 1 page   │
-  │  ┌──────────┬──────────┬──────────┬──────────┬──────────┐            │
-  │  │  &lt; 1012  │  &lt; 2048  │  &lt; 3061  │  &lt; 4096  │  &lt; 5100  │  ← high  │
-  │  │ page 41  │ page 88  │ page 12  │ page 77  │ page 33  │    keys   │
-  │  └──────────┴──────────┴──────────┴──────────┴──────────┘            │
-  └─────────────────────────────────────────────────────────────────────┘
-       │            │            │            │            │
-       ▼            ▼            ▼            ▼            ▼
-  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐
-  │ page 41 │  │ page 88 │  │ page 12 │  │ page 77 │  │ page 33 │  height 2
-  │ 1002..  │  │ 2049..  │  │ 3062..  │  │ 4097..  │  │ 5101..  │  5 pages
-  │ 2047    │  │ 3060    │  │ 4095    │  │ 5100    │  │ 6000    │  (of 39)
-  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘
-       │            │            │            │            │
-  ┌────▼─────┐ ┌────▼─────┐ ┌────▼─────┐ ┌───▼──────┐ ┌───▼──────┐
-  │ leaf 101 │ │ leaf 202 │ │ leaf 301 │ │ leaf 401 │ │ leaf 501 │  height 3
-  │ 1002..   │ │ 2049..   │ │ 3062..   │ │ 4097..   │ │ 5101..   │
-  │ 1500     │ │ 2500     │ │ 3500     │ │ 4500     │ │ 5500     │  leaves
-  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘
-       └────────────┴───────────┴────────────┴────────────┘
-                            ▲
-              THE LEAF LIST — doubly linked in every real implementation
-              a range scan walks this chain left to right and never
-              re-ascends to the root. This is the single structural
-              feature that makes ranges cheap, and it is the thing
-              that distinguishes a B+ tree from a B-tree.
-
-  Point lookup for id = 3,500:
-     root (page 0)   →  &quot;3500 &gt;= 3061, go to page 12&quot;       1 page read
-     page 12         →  &quot;3500 is in 3062..4095, follow link&quot;  1 page read
-     leaf 301        →  &quot;found at offset 88 in this page&quot;     1 page read
-     ───────────────────────────────────────────────────────
-                                                     total: 3 page reads</code></pre><p>Two details in that diagram are load-bearing and routinely missed in interviews.</p><p><strong>The internal entries are high keys, not &quot;the first key on the page below&quot;.</strong> In PostgreSQL the root's <code>3061</code> separator means <em>everything less than 3061 goes left; 3061 itself lives in the page to the right</em>. This is why a key equal to a separator value costs exactly the same as any other key. Getting this backwards is what produces the claim that &quot;finding a key that happens to be a boundary requires a special case&quot;.</p><p><strong>The leaf chain is bidirectional.</strong> Forward links serve the range scan; backward links serve nothing user-visible but are what make concurrent insert placement and page splits simpler to implement. Candidates sometimes say &quot;singly linked&quot; and it costs nothing operationally, but &quot;doubly linked&quot; is the correct answer and demonstrates you have looked at an actual implementation.</p><h3 class="vol__h3" id="23-occupancy-fill-factor-and-page-splits">2.3 Occupancy, Fill Factor, and Page Splits</h3><p>A B+ tree node is a fixed-size page, and pages fill up. When a leaf has no room, it <strong>splits</strong>: the entries are divided approximately in half between the original page and a new page, a separator is inserted into the parent, and if the parent is now full it splits too, potentially all the way to the root. A split therefore costs <code>O(height)</code> page writes in the worst case, and the tree's occupancy after a bulk load depends entirely on how the load was done.</p><pre class="diagram"><code>  LEAF PAGE SPLIT — 291-entry leaf, inserting key 5,000
-  ───────────────────────────────────────────────────────────────────
-  BEFORE (page 77, 291/509 entries = 57% full, 291*16 = 4,656 B used)
-  ┌───────────────────────────────────────────────┐
-  │ 4097 4098 4099 4100 ... 4999 5000  (no room) │
-  │ free: 0 bytes                                  │
-  └───────────────────────────────────────────────┘
-
-  INSERT key 5,000 → no space → SPLIT at the midpoint
-  (PostgreSQL's page split uses a fillfactor and a
-   suffix/prefix split algorithm, not a blind 50/50;
-   the result is that the two halves are each
-   ~50% full, which is why a bulk-loaded index ends up
-   at exactly 50% fill — the worst case for space
-   and the best case for split avoidance thereafter.)
-
-  AFTER
-       ┌──────────────────────┐   ┌──────────────────────┐
-       │ page 77 (new)       │   │ page 44 (old)       │
-       │ 4097 .. 4548        │◄─►│ 4549 .. 5000        │
-       │ 146 entries, 48%    │   │ 152 entries, 50%    │
-       └──────────────────────┘   └──────────┬───────────┘
-                                                │ separator 4549
-                                                ▼ goes into page 12
-  ───────────────────────────────────────────────────────────────────
-  write cost: 2 leaf pages rewritten + 1 internal page updated
-  amortised: a leaf at 50% fill must absorb ~250 inserts before
-             splitting again, so 2 page writes / 250 inserts
-             = 0.008 page writes per insert</code></pre><p>PostgreSQL's <code>fillfactor</code> is the knob that changes this arithmetic, and it is one of the most misunderstood settings in the engine.</p><pre class="snippet" data-lang="sql"><code>-- Reserve 20% of each leaf page so sequential inserts land in place
+  509^2 = 259,081    509^3 = 131,950,029    509^4 = 67,162,164,961</code></pre><p>The jump from three to four is the punchline: <strong>a B+ tree on an 8-byte key stays three levels tall for the entire range of table sizes a real system will ever see.</strong> The &quot;logarithmic depth&quot; framing is true and mostly irrelevant — the <em>constant</em> is what you are optimising, and the constant is the fan-out, and the fan-out is a function of how many bytes your key column occupies. That is the actionable form of the whole theory: <strong>narrow your key.</strong></p><h3 class="vol__h3" id="22-the-structure-drawn-properly">2.2 The Structure, Drawn Properly</h3><figure class="figure">
+  <svg viewBox="0 0 900 610" role="img" aria-label="A three-level B+ tree: a root page holding five high-key separators, five level-one pages, and five leaves linked into a doubly-linked list. A point lookup for id 3,500 descends root, page 12 and leaf 301 — three page reads — and a range scan walks the leaf chain without ever re-descending.">
+    <defs>
+      <marker id="arw-database-04-03-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="370" y="20" width="160" height="64" rx="5"/>
+    <text class="label" x="450" y="48" text-anchor="middle">Root — page 0</text>
+    <text class="label label--sub" x="450" y="64" text-anchor="middle">high keys</text>
+    <path class="edge" d="M 450 84 L 100 190" marker-end="url(#arw-database-04-03-a)"/>
+    <path class="edge" d="M 450 84 L 270 190" marker-end="url(#arw-database-04-03-a)"/>
+    <path class="edge" d="M 450 84 L 440 190" marker-end="url(#arw-database-04-03-a)"/>
+    <path class="edge" d="M 450 84 L 610 190" marker-end="url(#arw-database-04-03-a)"/>
+    <path class="edge" d="M 450 84 L 780 190" marker-end="url(#arw-database-04-03-a)"/>
+    <text class="edge-label" x="275" y="129" text-anchor="middle">&lt; 1012</text>
+    <text class="edge-label" x="360" y="129" text-anchor="middle">&lt; 2048</text>
+    <text class="edge-label" x="445" y="129" text-anchor="middle">&lt; 3061</text>
+    <text class="edge-label" x="530" y="129" text-anchor="middle">&lt; 4096</text>
+    <text class="edge-label" x="615" y="129" text-anchor="middle">&lt; 5100</text>
+    <rect class="node" x="30" y="190" width="140" height="64" rx="5"/>
+    <text class="label" x="100" y="218" text-anchor="middle">Page 41</text>
+    <text class="label label--sub" x="100" y="234" text-anchor="middle">1002..2047</text>
+    <rect class="node" x="200" y="190" width="140" height="64" rx="5"/>
+    <text class="label" x="270" y="218" text-anchor="middle">Page 88</text>
+    <text class="label label--sub" x="270" y="234" text-anchor="middle">2049..3060</text>
+    <rect class="node node--good" x="370" y="190" width="140" height="64" rx="5"/>
+    <text class="label" x="440" y="218" text-anchor="middle">Page 12</text>
+    <text class="label label--sub" x="440" y="234" text-anchor="middle">3062..4095</text>
+    <rect class="node" x="540" y="190" width="140" height="64" rx="5"/>
+    <text class="label" x="610" y="218" text-anchor="middle">Page 77</text>
+    <text class="label label--sub" x="610" y="234" text-anchor="middle">4097..5100</text>
+    <rect class="node" x="710" y="190" width="140" height="64" rx="5"/>
+    <text class="label" x="780" y="218" text-anchor="middle">Page 33</text>
+    <text class="label label--sub" x="780" y="234" text-anchor="middle">5101..6000</text>
+    <path class="edge" d="M 100 254 L 100 300" marker-end="url(#arw-database-04-03-a)"/>
+    <path class="edge" d="M 270 254 L 270 300" marker-end="url(#arw-database-04-03-a)"/>
+    <path class="edge" d="M 440 254 L 440 300" marker-end="url(#arw-database-04-03-a)"/>
+    <path class="edge" d="M 610 254 L 610 300" marker-end="url(#arw-database-04-03-a)"/>
+    <path class="edge" d="M 780 254 L 780 300" marker-end="url(#arw-database-04-03-a)"/>
+    <rect class="node" x="30" y="300" width="140" height="70" rx="5"/>
+    <text class="label" x="100" y="328" text-anchor="middle">Leaf 101</text>
+    <text class="label label--sub" x="100" y="344" text-anchor="middle">1002..1500</text>
+    <rect class="node" x="200" y="300" width="140" height="70" rx="5"/>
+    <text class="label" x="270" y="328" text-anchor="middle">Leaf 202</text>
+    <text class="label label--sub" x="270" y="344" text-anchor="middle">2049..2500</text>
+    <rect class="node node--good" x="370" y="300" width="140" height="70" rx="5"/>
+    <text class="label" x="440" y="328" text-anchor="middle">Leaf 301</text>
+    <text class="label label--sub" x="440" y="344" text-anchor="middle">3062..3500</text>
+    <rect class="node" x="540" y="300" width="140" height="70" rx="5"/>
+    <text class="label" x="610" y="328" text-anchor="middle">Leaf 401</text>
+    <text class="label label--sub" x="610" y="344" text-anchor="middle">4097..4500</text>
+    <rect class="node" x="710" y="300" width="140" height="70" rx="5"/>
+    <text class="label" x="780" y="328" text-anchor="middle">Leaf 501</text>
+    <text class="label label--sub" x="780" y="344" text-anchor="middle">5101..5500</text>
+    <path class="edge" d="M 170 335 L 196 335" marker-end="url(#arw-database-04-03-a)" marker-start="url(#arw-database-04-03-a)"/>
+    <path class="edge" d="M 340 335 L 366 335" marker-end="url(#arw-database-04-03-a)" marker-start="url(#arw-database-04-03-a)"/>
+    <path class="edge" d="M 510 335 L 536 335" marker-end="url(#arw-database-04-03-a)" marker-start="url(#arw-database-04-03-a)"/>
+    <path class="edge" d="M 680 335 L 706 335" marker-end="url(#arw-database-04-03-a)" marker-start="url(#arw-database-04-03-a)"/>
+    <text class="label" x="450" y="410" text-anchor="middle">THE LEAF LIST — doubly linked in every real implementation</text>
+    <text class="label label--sub" x="450" y="426" text-anchor="middle">a range scan walks this chain left to right and never re-ascends</text>
+    <rect class="node node--good" x="240" y="460" width="420" height="130" rx="5"/>
+    <text class="label" x="450" y="488" text-anchor="middle">Point lookup — id = 3,500</text>
+    <text class="label label--sub" x="450" y="508" text-anchor="middle">root (page 0): 3500 &gt;= 3061, go to page 12</text>
+    <text class="label label--sub" x="450" y="524" text-anchor="middle">page 12: 3500 is in 3062..4095, follow link</text>
+    <text class="label label--sub" x="450" y="540" text-anchor="middle">leaf 301: found at offset 88 in this page</text>
+    <text class="label label--sub" x="450" y="556" text-anchor="middle">total: 3 page reads</text>
+  </svg>
+  <figcaption><strong>Every internal entry is a high key — the root's 3061 sends everything less than 3061 left and keeps 3061 itself in the page to the right — and the leaves are doubly linked.</strong> The lookup for id = 3,500 reads pages 0, 12 and 301, and the leaf chain is what lets a range scan continue left to right without re-descending; both details are the ones interviews routinely get backwards.</figcaption>
+</figure><p>Two details in that diagram are load-bearing and routinely missed in interviews.</p><p><strong>The internal entries are high keys, not &quot;the first key on the page below&quot;.</strong> In PostgreSQL the root's <code>3061</code> separator means <em>everything less than 3061 goes left; 3061 itself lives in the page to the right</em>. This is why a key equal to a separator value costs exactly the same as any other key. Getting this backwards is what produces the claim that &quot;finding a key that happens to be a boundary requires a special case&quot;.</p><p><strong>The leaf chain is bidirectional.</strong> Forward links serve the range scan; backward links serve nothing user-visible but are what make concurrent insert placement and page splits simpler to implement. Candidates sometimes say &quot;singly linked&quot; and it costs nothing operationally, but &quot;doubly linked&quot; is the correct answer and demonstrates you have looked at an actual implementation.</p><h3 class="vol__h3" id="23-occupancy-fill-factor-and-page-splits">2.3 Occupancy, Fill Factor, and Page Splits</h3><p>A B+ tree node is a fixed-size page, and pages fill up. When a leaf has no room, it <strong>splits</strong>: the entries are divided approximately in half between the original page and a new page, a separator is inserted into the parent, and if the parent is now full it splits too, potentially all the way to the root. A split therefore costs <code>O(height)</code> page writes in the worst case, and the tree's occupancy after a bulk load depends entirely on how the load was done.</p><figure class="figure">
+  <svg viewBox="0 0 900 420" role="img" aria-label="A full 291-entry leaf page splits when key 5,000 arrives: the entries divide at the midpoint into 146 and 152 entries at 48 and 50 percent fill, separator 4549 moves up into parent page 12, and the write cost is two leaf pages plus one internal page — amortised to 0.008 page writes per insert.">
+    <defs>
+      <marker id="arw-database-04-04-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--warn" x="40" y="24" width="340" height="96" rx="5"/>
+    <text class="label" x="210" y="52" text-anchor="middle">Leaf page 77 — full</text>
+    <text class="label label--sub" x="210" y="70" text-anchor="middle">291 of 509 entries — 57% full</text>
+    <text class="label label--sub" x="210" y="86" text-anchor="middle">key 5,000 arrives — no room</text>
+    <path class="edge" d="M 380 72 L 426 72" marker-end="url(#arw-database-04-04-a)"/>
+    <rect class="node" x="430" y="44" width="200" height="56" rx="5"/>
+    <text class="label" x="530" y="72" text-anchor="middle">Split at the midpoint</text>
+    <text class="label label--sub" x="530" y="88" text-anchor="middle">entries divided in half</text>
+    <path class="edge" d="M 630 72 L 676 72" marker-end="url(#arw-database-04-04-a)"/>
+    <rect class="node node--accent" x="680" y="24" width="190" height="96" rx="5"/>
+    <text class="label" x="775" y="52" text-anchor="middle">Page 12 — parent</text>
+    <text class="label label--sub" x="775" y="70" text-anchor="middle">receives separator 4549</text>
+    <text class="label label--sub" x="775" y="86" text-anchor="middle">1 internal page write</text>
+    <path class="edge" d="M 490 100 L 272 260" marker-end="url(#arw-database-04-04-a)"/>
+    <path class="edge" d="M 570 100 L 628 260" marker-end="url(#arw-database-04-04-a)"/>
+    <rect class="node" x="120" y="264" width="300" height="96" rx="5"/>
+    <text class="label" x="270" y="292" text-anchor="middle">Page 77 (new)</text>
+    <text class="label label--sub" x="270" y="310" text-anchor="middle">4097 .. 4548</text>
+    <text class="label label--sub" x="270" y="326" text-anchor="middle">146 entries — 48% full</text>
+    <rect class="node" x="480" y="264" width="300" height="96" rx="5"/>
+    <text class="label" x="630" y="292" text-anchor="middle">Page 44 (old)</text>
+    <text class="label label--sub" x="630" y="310" text-anchor="middle">4549 .. 5000</text>
+    <text class="label label--sub" x="630" y="326" text-anchor="middle">152 entries — 50% full</text>
+    <path class="edge" d="M 420 312 L 476 312" marker-end="url(#arw-database-04-04-a)" marker-start="url(#arw-database-04-04-a)"/>
+    <text class="label" x="450" y="384" text-anchor="middle">Write cost: 2 leaf pages rewritten + 1 internal page updated</text>
+    <text class="label label--sub" x="450" y="400" text-anchor="middle">Amortised: ~250 inserts per split — 0.008 page writes per insert</text>
+  </svg>
+  <figcaption><strong>A full leaf splits into two half-full leaves and pushes one separator into the parent, for three page writes that amortise to 0.008 per insert.</strong> The split divides page 77's 291 entries at the midpoint — 146 and 152, at 48% and 50% fill — and the parent update is the internal page 12; PostgreSQL's fillfactor is the knob that changes this arithmetic, because a leaf at 50% fill must absorb ~250 inserts before it splits again.</figcaption>
+</figure><p>PostgreSQL's <code>fillfactor</code> is the knob that changes this arithmetic, and it is one of the most misunderstood settings in the engine.</p><pre class="snippet" data-lang="sql"><code>-- Reserve 20% of each leaf page so sequential inserts land in place
 -- instead of splitting pages.
 CREATE INDEX CONCURRENTLY idx_orders_created_at
     ON orders (created_at)
@@ -478,21 +578,56 @@ SELECT * FROM events WHERE user_ref = 9182;    -- ! integer literal</code></pre>
 --   (fine when both branches are selective), or use idx(a) and never
 --   touch the b branch (wrong answer — no, it will not do this)
 EXPLAIN SELECT * FROM events
- WHERE user_ref = 9182 OR ip_address = '10.0.0.7';</code></pre><pre class="diagram"><code>  BitmapOr works when BOTH branches are selective:
-  ───────────────────────────────────────────────────────────────────
-  BitmapOr
-    → Bitmap Index Scan on idx_events_user_ref      (rows=20)
-    → Bitmap Index Scan on idx_events_ip            (rows=15)
-    → Bitmap Heap Scan on events                     (rows=35, 1,204 pages)
-  Buffers: shared hit=1204    Planning Time: 0.14 ms
-
-  BitmapOr is a BAD idea when either branch is unselective:
-  ───────────────────────────────────────────────────────────────────
-  WHERE user_ref = 9182 OR user_ref IS NULL
-  → the IS NULL branch matches 11,999,960 rows (PostgreSQL does not
-    index IS NULL efficiently by default without a matching partial index)
-  → the planner sees a 100% match, chooses a Seq Scan, and is RIGHT.
-  The presence of one selective branch does not help if the other is total.</code></pre><p>The rewrite that always works, and the one to offer when asked &quot;how do I make <code>OR</code> fast&quot;:</p><pre class="snippet" data-lang="sql"><code>-- UNION ALL, not UNION: UNION deduplicates, which forces a sort or a hash
+ WHERE user_ref = 9182 OR ip_address = '10.0.0.7';</code></pre><figure class="figure">
+  <svg viewBox="0 0 900 430" role="img" aria-label="A BitmapOr node unions two bitmap index scans — 20 rows from idx_events_user_ref and 15 from idx_events_ip — into one heap scan that fetches 35 rows from 1,204 pages. But an OR whose second branch is IS NULL matches 11,999,960 rows, so the planner sees a 100% match and the sequential scan it chooses is the right plan.">
+    <defs>
+      <marker id="arw-database-04-05-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="label" x="225" y="26" text-anchor="middle">OR across two indexes</text>
+    <text class="label label--sub" x="225" y="42" text-anchor="middle">both branches selective</text>
+    <rect class="node node--accent" x="105" y="56" width="240" height="48" rx="5"/>
+    <text class="label" x="225" y="84" text-anchor="middle">BitmapOr</text>
+    <path class="edge" d="M 195 104 L 130 156" marker-end="url(#arw-database-04-05-a)"/>
+    <path class="edge" d="M 255 104 L 320 156" marker-end="url(#arw-database-04-05-a)"/>
+    <rect class="node" x="40" y="160" width="180" height="76" rx="5"/>
+    <text class="label" x="130" y="188" text-anchor="middle">Bitmap Index Scan</text>
+    <text class="label label--sub" x="130" y="204" text-anchor="middle">idx_events_user_ref</text>
+    <text class="label label--sub" x="130" y="220" text-anchor="middle">rows=20</text>
+    <rect class="node" x="230" y="160" width="180" height="76" rx="5"/>
+    <text class="label" x="320" y="188" text-anchor="middle">Bitmap Index Scan</text>
+    <text class="label label--sub" x="320" y="204" text-anchor="middle">idx_events_ip</text>
+    <text class="label label--sub" x="320" y="220" text-anchor="middle">rows=15</text>
+    <path class="edge" d="M 130 236 L 170 288" marker-end="url(#arw-database-04-05-a)"/>
+    <path class="edge" d="M 320 236 L 280 288" marker-end="url(#arw-database-04-05-a)"/>
+    <rect class="node node--good" x="90" y="292" width="270" height="76" rx="5"/>
+    <text class="label" x="225" y="320" text-anchor="middle">Bitmap Heap Scan</text>
+    <text class="label label--sub" x="225" y="336" text-anchor="middle">events — rows=35</text>
+    <text class="label label--sub" x="225" y="352" text-anchor="middle">1,204 pages, all hit</text>
+    <text class="label label--sub" x="225" y="410" text-anchor="middle">shared hit=1204 — one heap pass for 35 rows</text>
+    <text class="label" x="675" y="26" text-anchor="middle">OR within one index</text>
+    <text class="label label--sub" x="675" y="42" text-anchor="middle">one branch is total</text>
+    <rect class="node" x="520" y="56" width="310" height="64" rx="5"/>
+    <text class="label" x="675" y="84" text-anchor="middle">WHERE user_ref = 9182</text>
+    <text class="label label--sub" x="675" y="100" text-anchor="middle">OR user_ref IS NULL</text>
+    <path class="edge" d="M 640 120 L 595 172" marker-end="url(#arw-database-04-05-a)"/>
+    <path class="edge" d="M 710 120 L 755 172" marker-end="url(#arw-database-04-05-a)"/>
+    <rect class="node" x="520" y="176" width="150" height="70" rx="5"/>
+    <text class="label" x="595" y="204" text-anchor="middle">= 9182</text>
+    <text class="label label--sub" x="595" y="220" text-anchor="middle">20 rows</text>
+    <rect class="node node--bad" x="680" y="176" width="150" height="70" rx="5"/>
+    <text class="label" x="755" y="204" text-anchor="middle">IS NULL</text>
+    <text class="label label--sub" x="755" y="220" text-anchor="middle">11,999,960 rows</text>
+    <path class="edge" d="M 595 246 L 640 298" marker-end="url(#arw-database-04-05-a)"/>
+    <path class="edge" d="M 755 246 L 710 298" marker-end="url(#arw-database-04-05-a)"/>
+    <rect class="node node--bad" x="520" y="302" width="310" height="60" rx="5"/>
+    <text class="label" x="675" y="330" text-anchor="middle">Planner sees a 100% match</text>
+    <text class="label label--sub" x="675" y="346" text-anchor="middle">chooses a Seq Scan — and is right</text>
+    <text class="label label--sub" x="675" y="410" text-anchor="middle">one selective branch does not help if the other is total</text>
+  </svg>
+  <figcaption><strong>A BitmapOr unions per-index bitmaps into a single heap pass when both branches are selective, but an OR with a near-universal branch makes the sequential scan the correct plan.</strong> The good case fetches 35 rows from 1,204 pages after scanning idx_events_user_ref (20 rows) and idx_events_ip (15 rows); the bad case's IS NULL branch matches 11,999,960 of 12,000,000 rows, and one selective branch does not help when the other is total.</figcaption>
+</figure><p>The rewrite that always works, and the one to offer when asked &quot;how do I make <code>OR</code> fast&quot;:</p><pre class="snippet" data-lang="sql"><code>-- UNION ALL, not UNION: UNION deduplicates, which forces a sort or a hash
 -- over the combined result and can cost more than the OR saved.
 SELECT * FROM events WHERE user_ref = 9182
 UNION ALL
@@ -819,42 +954,63 @@ Q5  SELECT count(*) FROM messages WHERE sent_at &gt; $1           -- daily rollu
           work_mem&quot; is a staff-level answer and not a junior one.
        PostgreSQL 13+ has hash_mem_multiplier, which scales work_mem for the
        hash join specifically and is safer than raising work_mem globally.</code></pre><blockquote class="note"><p><strong>INTERVIEW TRAP — &quot;WHICH SIDE GOES IN THE HASH TABLE?&quot;</strong></p>
-<p>The trap is answering &quot;the smaller one&quot; without the caveat, because the build side is not chosen by row count. It is chosen by the plan that produces the cheapest input, which is usually — but not always — the smaller relation, and the deciding factor is <strong>whether memory is available at the time the join starts</strong>. A query running concurrently with nine other queries each using 200 MB of <code>work_mem</code> may find that a nominally smaller build side does not fit, and the planner will swap sides to use the one it can hold. The sharper version of the question is <em>&quot;what happens when the build side does not fit?&quot;</em> and the answer must include: the join spills to disk in <code>work_mem</code>-sized hash partitions, both inputs are partitioned by the same hash function so each pair can be processed independently, the cost goes from one sequential pass to two passes plus 2× the batch count in random disk writes, and the right response is usually to reduce the build side — add the predicate that filters it, add a covering index that makes it narrow, or let a nested loop handle it instead — rather than to raise <code>work_mem</code> globally, because <code>work_mem</code> is allocated per operation per worker and raising it globally on a pool of 200 connections is how a database runs out of RAM.</p></blockquote><h3 class="vol__h3" id="63-merge-join">6.3 Merge Join</h3><p>Sort both inputs, then walk them in lockstep. It is the only algorithm that produces output in sorted order, and it is the natural choice when the inputs are <em>already</em> sorted.</p><pre class="diagram"><code>  MERGE JOIN — the lockstep walk
-  ───────────────────────────────────────────────────────────────────────────
-
-    sort(A)                    sort(B)
-    ─────────                  ─────────
-    1  Alice                   1  Alice   → MATCH, emit (1,1), advance both
-    2  Bob                     2  Bob     → MATCH, emit (2,2), advance both
-    3  Carol                   3  Dave    → A &lt; B, emit (3,∅), advance A only
-    4  Dave                    4  Erin    → MATCH, emit (4,4), advance both
-    5  Frank                   5  Frank   → MATCH, emit (5,5), advance both
-    6  Grace
-
-    advance pointer ──────────────────────────────────────────────►
-    each row is read exactly ONCE from each side.  Total comparisons
-    are O(|A| + |B|) after the sorts, not O(|A| × |B|).
-  ───────────────────────────────────────────────────────────────────────────
-
-  CRITICAL PRECONDITION: BOTH INPUTS MUST BE SORTED ON THE JOIN KEY
-  ───────────────────────────────────────────────────────────────────────────
-  If the plan shows a &quot;Sort&quot; node above a relation that feeds a
-  Merge Join, you are paying:
-
-      sort 1,200,000 rows of 180 bytes = 216 MB
-      external merge sort → 216 MB / work_mem(4 MB) = 54 disk batches
-      written to a temp file and read back
-      = ~108 random 8 kB I/Os = 0.54 s of pure sort cost
-
-  and if the sort is a top-N or an index scan that avoids it entirely,
-  the merge join becomes dramatically cheaper.  This is the entire
-  practical argument for the classic advice:
-
-      create the index so the sort disappears
-      → Merge Join without a Sort node
-      → which requires the join predicate to match the index's
-        leading column, in the same order
-  ───────────────────────────────────────────────────────────────────────────</code></pre><p>Merge join wins in three situations, and it is worth being able to name all three: (1) <strong>both inputs arrive already sorted</strong>, so no sort node is needed — the most common real case, and the reason <code>ORDER BY</code> + <code>LIMIT</code> queries sometimes get merge joins; (2) <strong>the output must be sorted anyway</strong>, in which case the sort is not wasted work and every other algorithm would pay for it separately; (3) <strong>both relations are large and neither fits in <code>work_mem</code></strong>, where merge join's streaming behaviour beats a hash join that would spill in the same way but with random I/O rather than sequential.</p><h3 class="vol__h3" id="64-how-the-planner-actually-picks">6.4 How the Planner Actually Picks</h3><p>The decision procedure, and it is genuinely just this:</p><pre class="diagram"><code>  FOR EACH CANDIDATE JOIN ORDER (the planner enumerates &quot;interesting&quot; ones,
+<p>The trap is answering &quot;the smaller one&quot; without the caveat, because the build side is not chosen by row count. It is chosen by the plan that produces the cheapest input, which is usually — but not always — the smaller relation, and the deciding factor is <strong>whether memory is available at the time the join starts</strong>. A query running concurrently with nine other queries each using 200 MB of <code>work_mem</code> may find that a nominally smaller build side does not fit, and the planner will swap sides to use the one it can hold. The sharper version of the question is <em>&quot;what happens when the build side does not fit?&quot;</em> and the answer must include: the join spills to disk in <code>work_mem</code>-sized hash partitions, both inputs are partitioned by the same hash function so each pair can be processed independently, the cost goes from one sequential pass to two passes plus 2× the batch count in random disk writes, and the right response is usually to reduce the build side — add the predicate that filters it, add a covering index that makes it narrow, or let a nested loop handle it instead — rather than to raise <code>work_mem</code> globally, because <code>work_mem</code> is allocated per operation per worker and raising it globally on a pool of 200 connections is how a database runs out of RAM.</p></blockquote><h3 class="vol__h3" id="63-merge-join">6.3 Merge Join</h3><p>Sort both inputs, then walk them in lockstep. It is the only algorithm that produces output in sorted order, and it is the natural choice when the inputs are <em>already</em> sorted.</p><figure class="figure">
+  <svg viewBox="0 0 900 470" role="img" aria-label="Merge join walks two sorted inputs in lockstep: matching rows are emitted and both pointers advance, a row that sorts first is emitted unmatched and only its side advances. Each row is read exactly once — O(|A| + |B|) comparisons — provided both inputs arrive sorted, because a Sort node over 1,200,000 rows costs 0.54 seconds.">
+    <defs>
+      <marker id="arw-database-04-06-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <text class="label label--sub" x="40" y="44">sort(A)</text>
+    <text class="label label--sub" x="40" y="164">sort(B)</text>
+    <rect class="node" x="40" y="52" width="110" height="50" rx="5"/>
+    <text class="label" x="95" y="82" text-anchor="middle">1 Alice</text>
+    <rect class="node" x="172" y="52" width="110" height="50" rx="5"/>
+    <text class="label" x="227" y="82" text-anchor="middle">2 Bob</text>
+    <rect class="node" x="304" y="52" width="110" height="50" rx="5"/>
+    <text class="label" x="359" y="82" text-anchor="middle">3 Carol</text>
+    <rect class="node" x="436" y="52" width="110" height="50" rx="5"/>
+    <text class="label" x="491" y="82" text-anchor="middle">4 Dave</text>
+    <rect class="node" x="568" y="52" width="110" height="50" rx="5"/>
+    <text class="label" x="623" y="82" text-anchor="middle">5 Frank</text>
+    <rect class="node" x="700" y="52" width="110" height="50" rx="5"/>
+    <text class="label" x="755" y="82" text-anchor="middle">6 Grace</text>
+    <rect class="node" x="40" y="172" width="110" height="50" rx="5"/>
+    <text class="label" x="95" y="202" text-anchor="middle">1 Alice</text>
+    <rect class="node" x="172" y="172" width="110" height="50" rx="5"/>
+    <text class="label" x="227" y="202" text-anchor="middle">2 Bob</text>
+    <rect class="node" x="304" y="172" width="110" height="50" rx="5"/>
+    <text class="label" x="359" y="202" text-anchor="middle">3 Dave</text>
+    <rect class="node" x="436" y="172" width="110" height="50" rx="5"/>
+    <text class="label" x="491" y="202" text-anchor="middle">4 Erin</text>
+    <rect class="node" x="568" y="172" width="110" height="50" rx="5"/>
+    <text class="label" x="623" y="202" text-anchor="middle">5 Frank</text>
+    <path class="edge" d="M 95 102 L 95 168" marker-end="url(#arw-database-04-06-a)"/>
+    <path class="edge" d="M 227 102 L 227 168" marker-end="url(#arw-database-04-06-a)"/>
+    <path class="edge" d="M 491 102 L 359 168" marker-end="url(#arw-database-04-06-a)"/>
+    <path class="edge" d="M 623 102 L 623 168" marker-end="url(#arw-database-04-06-a)"/>
+    <text class="edge-label" x="95" y="135" text-anchor="middle">MATCH</text>
+    <text class="edge-label" x="227" y="135" text-anchor="middle">MATCH</text>
+    <text class="edge-label" x="425" y="135" text-anchor="middle">MATCH</text>
+    <text class="edge-label" x="623" y="135" text-anchor="middle">MATCH</text>
+    <text class="label label--sub" x="40" y="290">1.  Alice = Alice   → MATCH, emit (1,1), advance both</text>
+    <text class="label label--sub" x="40" y="308">2.  Bob = Bob   → MATCH, emit (2,2), advance both</text>
+    <text class="label label--sub" x="40" y="326">3.  Carol &lt; Dave   → emit (3,∅), advance A only</text>
+    <text class="label label--sub" x="40" y="344">4.  Dave = Dave   → MATCH, emit (4,3), advance both</text>
+    <text class="label label--sub" x="40" y="362">5.  Frank &gt; Erin   → emit (∅,4), advance B only</text>
+    <text class="label label--sub" x="40" y="380">6.  Frank = Frank   → MATCH, emit (5,5), advance both</text>
+    <text class="label label--sub" x="40" y="398">7.  Grace, B exhausted   → emit (6,∅), stop</text>
+    <rect class="node node--warn" x="420" y="276" width="440" height="130" rx="5"/>
+    <text class="label" x="640" y="302" text-anchor="middle">CRITICAL PRECONDITION</text>
+    <text class="label label--sub" x="640" y="320" text-anchor="middle">both inputs must be sorted on the join key</text>
+    <text class="label label--sub" x="640" y="338" text-anchor="middle">a Sort node above the join costs:</text>
+    <text class="label label--sub" x="640" y="356" text-anchor="middle">1,200,000 rows × 180 B = 216 MB</text>
+    <text class="label label--sub" x="640" y="374" text-anchor="middle">54 disk batches, read back = 108 random I/Os</text>
+    <text class="label label--sub" x="640" y="392" text-anchor="middle">0.54 s of pure sort cost</text>
+    <text class="label label--sub" x="450" y="446" text-anchor="middle">each row is read exactly once — O(|A| + |B|), not O(|A| × |B|)</text>
+  </svg>
+  <figcaption><strong>Merge join reads each row exactly once — O(|A| + |B|) after the sorts — but only if both inputs arrive already sorted.</strong> The walk emits (3,∅) when Carol sorts before Dave and (∅,4) when Erin sorts before Frank, advancing only the lagging pointer; a Sort node above the join is the precondition's price — 1,200,000 rows at 180 bytes spill to 54 disk batches, roughly 108 random I/Os — which is why the practical advice is to create the index so the sort disappears.</figcaption>
+</figure><p>Merge join wins in three situations, and it is worth being able to name all three: (1) <strong>both inputs arrive already sorted</strong>, so no sort node is needed — the most common real case, and the reason <code>ORDER BY</code> + <code>LIMIT</code> queries sometimes get merge joins; (2) <strong>the output must be sorted anyway</strong>, in which case the sort is not wasted work and every other algorithm would pay for it separately; (3) <strong>both relations are large and neither fits in <code>work_mem</code></strong>, where merge join's streaming behaviour beats a hash join that would spill in the same way but with random I/O rather than sequential.</p><h3 class="vol__h3" id="64-how-the-planner-actually-picks">6.4 How the Planner Actually Picks</h3><p>The decision procedure, and it is genuinely just this:</p><pre class="diagram"><code>  FOR EACH CANDIDATE JOIN ORDER (the planner enumerates &quot;interesting&quot; ones,
   not all n! permutations — Volume 1, §1.3):
   ───────────────────────────────────────────────────────────────────────────
     FOR EACH candidate join METHOD (nested loop / hash / merge):
@@ -965,41 +1121,57 @@ SELECT c.id, c.name, t.total
 
   3.  EXPLAIN (ANALYZE, BUFFERS) &lt;query&gt;
       →  only now, ideally on a replica, with a statement_timeout set
-      →  this is the only step that measures</code></pre><h3 class="vol__h3" id="72-the-plan-tree-annotated">7.2 The Plan Tree, Annotated</h3><pre class="diagram"><code>  Sort  (cost=184523.40..184523.45 rows=40000 width=64)
-        (actual time=8120.441..8122.109 rows=38120 loops=1)
-        Sort Key: t.total DESC          Sort Method: quicksort  Memory: 4212kB
-      Buffers: shared hit=20418
-   ▲ total 8122 ms, but a 4212 kB in-memory quicksort is ~180 ms of that.
-     The time is in the child.  Always read the tree leaves-up.
-
-  -&gt;  Aggregate  (actual time=8120.112..8120.401 rows=40000 loops=1)
-                    Group Key: t.customer_id
-                    -&gt;  Nested Loop  (actual time=8118.902..8110.442 rows=40000 loops=1)
-                                    Buffers: shared hit=20412
-        -&gt;  Index Only Scan using orders_covering on orders o
-              (cost=0.43..4.12 rows=42 width=28)
-              (actual time=0.041..0.187 rows=40 loops=1000)   ◄── READ THIS LINE
-              Index Cond: (region = 'EU'::text)     Heap Fetches: 0
-              -&gt;  Index Only Scan using customers_pkey on customers c
-                    (cost=0.43..8.31 rows=1 width=180)
-                    (actual time=0.003..0.004 rows=1 loops=40000) ◄── AND THIS
-                    Index Cond: (c.id = o.customer_id)
-
-  Planning Time: 0.312 ms       Execution Time: 8122.556 ms
-  ───────────────────────────────────────────────────────────────────────────
-  WHERE THE TIME WENT:
-    Nested Loop                8110 ms   ─┐
-      orders scan, 1000 loops    187 ms   │ the inner lookup, 40,000 times,
-      customers scan, 40k loops  160 ms  ─┘ is 160 of 8110 ms = 2%
-      outer per-loop overhead   7750 ms     executor bookkeeping, buffer
-                                           lookups, visibility checks
-    Aggregate                    0.3 ms
-    Sort                        180 ms
-  ───────────────────────────────────────────────────────────────────────────
-  THE TWO NUMBERS THAT MATTER:
-    orders:    actual rows=40,  loops=1000  →  40,000 rows total
-    customers: actual rows=1,   loops=40000 →  40,000 rows total
-  NEITHER `rows=40` NOR `rows=1` IS THE TOTAL.  §7.3.</code></pre><p>The structural reading rules, in the order a senior candidate should apply them:</p><ol><li><strong><code>Execution Time</code> at the bottom is the wall clock.</strong> But a query can also be limited by a <code>LIMIT</code> at the top, in which case the top node's <code>actual time</code> is what matters, not the root's — with <code>LIMIT 10</code>, the executor stops feeding the top once it has 10 rows.</li><li><strong>Read leaves to root.</strong> A parent node's <code>actual time</code> <em>includes</em> its children's. A node whose own time (parent time minus max child time) is large is doing local work — a sort, a hash build, a filter evaluation. A node whose own time is small and whose child is large is a pass-through and the child is the problem.</li><li><strong>Look for a <code>Sort</code> node whose <code>Sort Method</code> is <code>external merge Disk: 84MB</code>.</strong> That is a query about to be limited by disk. <code>quicksort Memory: 4212kB</code> is fine; <code>external merge Disk: 42120kB</code> is an incident.</li><li><strong><code>Rows Removed by Filter</code> is the CPU you wasted.</strong> A node with <code>rows=1,180,233</code> and <code>Rows Removed by Filter: 8,819,767</code> evaluated 10M predicates to return 11% of the table — that is 8.8M wasted <code>cpu_operator_cost</code> evaluations.</li><li><strong><code>Buffers: shared hit=N</code> and <code>shared read=N</code> are two different latencies.</strong> <code>hit</code> is RAM at ~100 ns; <code>read</code> is the OS cache or the device. A query with <code>hit=20418, read=0</code> is doing almost all its work in RAM and its 8 seconds is CPU and executor overhead, not I/O. A query with <code>hit=200, read=20418</code> is doing device I/O. The <em>ratio</em> tells you which problem you have, and they have completely different fixes.</li></ol><h3 class="vol__h3" id="73-the-rows-loops-trap-the-most-common-explain-error">7.3 The <code>rows × loops</code> Trap — the Most Common <code>EXPLAIN</code> Error</h3><p>This deserves its own section because it is the single most common misreading of <code>EXPLAIN</code> output in production, and it produces a diagnosis that is exactly backwards.</p><pre class="diagram"><code>  WHAT THE PLAN SAYS
+      →  this is the only step that measures</code></pre><h3 class="vol__h3" id="72-the-plan-tree-annotated">7.2 The Plan Tree, Annotated</h3><figure class="figure">
+  <svg viewBox="0 0 900 610" role="img" aria-label="An annotated plan tree: a Sort whose 8,122 ms holds only 180 ms of quicksort, an Aggregate at 0.3 ms, and a Nested Loop at 8,110 ms. Its two index-only scans — orders_covering rows=40 loops=1000, customers_pkey rows=1 loops=40000 — each total 40,000 rows; the inner lookups are 160 ms, 2% of the loop, and 7,750 ms is per-loop overhead.">
+    <defs>
+      <marker id="arw-database-04-07-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="330" y="20" width="240" height="64" rx="5"/>
+    <text class="label" x="450" y="46" text-anchor="middle">Sort — 8,122 ms</text>
+    <text class="label label--sub" x="450" y="62" text-anchor="middle">quicksort ≈ 180 ms of it</text>
+    <text class="label label--sub" x="450" y="76" text-anchor="middle">the time is in the child</text>
+    <path class="edge" d="M 450 84 L 450 108" marker-end="url(#arw-database-04-07-a)"/>
+    <rect class="node" x="330" y="108" width="240" height="56" rx="5"/>
+    <text class="label" x="450" y="132" text-anchor="middle">Aggregate — 0.3 ms</text>
+    <text class="label label--sub" x="450" y="148" text-anchor="middle">Group Key: t.customer_id</text>
+    <path class="edge" d="M 450 164 L 450 188" marker-end="url(#arw-database-04-07-a)"/>
+    <rect class="node node--warn" x="330" y="188" width="240" height="64" rx="5"/>
+    <text class="label" x="450" y="214" text-anchor="middle">Nested Loop — 8,110 ms</text>
+    <text class="label label--sub" x="450" y="230" text-anchor="middle">inner scans 160 ms — 2%</text>
+    <text class="label label--sub" x="450" y="246" text-anchor="middle">per-loop overhead 7,750 ms</text>
+    <path class="edge" d="M 400 252 L 250 296" marker-end="url(#arw-database-04-07-a)"/>
+    <path class="edge" d="M 500 252 L 650 296" marker-end="url(#arw-database-04-07-a)"/>
+    <rect class="node node--good" x="80" y="296" width="340" height="92" rx="5"/>
+    <text class="label" x="250" y="322" text-anchor="middle">Index Only Scan — orders_covering</text>
+    <text class="label label--sub" x="250" y="340" text-anchor="middle">rows=40 × loops=1000</text>
+    <text class="label label--sub" x="250" y="356" text-anchor="middle">= 40,000 rows — read this line</text>
+    <text class="label label--sub" x="250" y="372" text-anchor="middle">Heap Fetches: 0</text>
+    <rect class="node node--good" x="480" y="296" width="340" height="92" rx="5"/>
+    <text class="label" x="650" y="322" text-anchor="middle">Index Only Scan — customers_pkey</text>
+    <text class="label label--sub" x="650" y="340" text-anchor="middle">rows=1 × loops=40000</text>
+    <text class="label label--sub" x="650" y="356" text-anchor="middle">= 40,000 rows — and this</text>
+    <text class="label label--sub" x="650" y="372" text-anchor="middle">Index Cond: (c.id = o.customer_id)</text>
+    <rect class="node" x="40" y="440" width="400" height="150" rx="5"/>
+    <text class="label" x="240" y="466" text-anchor="middle">WHERE THE TIME WENT</text>
+    <text class="label label--sub" x="240" y="482" text-anchor="middle">Nested Loop  8,110 ms</text>
+    <text class="label label--sub" x="240" y="498" text-anchor="middle">orders scan, 1000 loops — 187 ms</text>
+    <text class="label label--sub" x="240" y="514" text-anchor="middle">customers scan, 40k loops — 160 ms</text>
+    <text class="label label--sub" x="240" y="530" text-anchor="middle">the inner lookup is 2% of 8,110 ms</text>
+    <text class="label label--sub" x="240" y="546" text-anchor="middle">outer per-loop overhead — 7,750 ms</text>
+    <text class="label label--sub" x="240" y="562" text-anchor="middle">executor bookkeeping, buffer lookups,</text>
+    <text class="label label--sub" x="240" y="578" text-anchor="middle">Aggregate 0.3 ms — Sort 180 ms</text>
+    <rect class="node" x="460" y="440" width="400" height="150" rx="5"/>
+    <text class="label" x="660" y="466" text-anchor="middle">THE TWO NUMBERS THAT MATTER</text>
+    <text class="label label--sub" x="660" y="482" text-anchor="middle">orders:  rows=40 × loops=1000</text>
+    <text class="label label--sub" x="660" y="498" text-anchor="middle">customers:  rows=1 × loops=40000</text>
+    <text class="label label--sub" x="660" y="514" text-anchor="middle">both total 40,000 rows</text>
+    <text class="label label--sub" x="660" y="530" text-anchor="middle">neither top-line number is the total</text>
+    <text class="label label--sub" x="660" y="546" text-anchor="middle">the multiplier is §7.3</text>
+  </svg>
+  <figcaption><strong>In a nested-loop plan the top-line rows number is per loop, not the total — and the time is in the child, not the node that names it.</strong> The Sort's 8,122 ms contains only ≈180 ms of quicksort; the Nested Loop's 8,110 ms is 7,750 ms of per-loop overhead plus 347 ms of scans; and both index-only scans total 40,000 rows (40 × 1000 and 1 × 40000) even though neither line says 40,000.</figcaption>
+</figure><p>The structural reading rules, in the order a senior candidate should apply them:</p><ol><li><strong><code>Execution Time</code> at the bottom is the wall clock.</strong> But a query can also be limited by a <code>LIMIT</code> at the top, in which case the top node's <code>actual time</code> is what matters, not the root's — with <code>LIMIT 10</code>, the executor stops feeding the top once it has 10 rows.</li><li><strong>Read leaves to root.</strong> A parent node's <code>actual time</code> <em>includes</em> its children's. A node whose own time (parent time minus max child time) is large is doing local work — a sort, a hash build, a filter evaluation. A node whose own time is small and whose child is large is a pass-through and the child is the problem.</li><li><strong>Look for a <code>Sort</code> node whose <code>Sort Method</code> is <code>external merge Disk: 84MB</code>.</strong> That is a query about to be limited by disk. <code>quicksort Memory: 4212kB</code> is fine; <code>external merge Disk: 42120kB</code> is an incident.</li><li><strong><code>Rows Removed by Filter</code> is the CPU you wasted.</strong> A node with <code>rows=1,180,233</code> and <code>Rows Removed by Filter: 8,819,767</code> evaluated 10M predicates to return 11% of the table — that is 8.8M wasted <code>cpu_operator_cost</code> evaluations.</li><li><strong><code>Buffers: shared hit=N</code> and <code>shared read=N</code> are two different latencies.</strong> <code>hit</code> is RAM at ~100 ns; <code>read</code> is the OS cache or the device. A query with <code>hit=20418, read=0</code> is doing almost all its work in RAM and its 8 seconds is CPU and executor overhead, not I/O. A query with <code>hit=200, read=20418</code> is doing device I/O. The <em>ratio</em> tells you which problem you have, and they have completely different fixes.</li></ol><h3 class="vol__h3" id="73-the-rows-loops-trap-the-most-common-explain-error">7.3 The <code>rows × loops</code> Trap — the Most Common <code>EXPLAIN</code> Error</h3><p>This deserves its own section because it is the single most common misreading of <code>EXPLAIN</code> output in production, and it produces a diagnosis that is exactly backwards.</p><pre class="diagram"><code>  WHAT THE PLAN SAYS
   ───────────────────────────────────────────────────────────────────────────
   -&gt;  Nested Loop  (actual rows=1 loops=100000)
         -&gt;  Index Scan using t_pkey on t
@@ -1073,30 +1245,52 @@ SELECT c.id, c.name, t.total
   1,000,000 makes the parent's estimate wrong, which makes the grandparent's
   wrong, and so on to the root.  The top node's 100x error is a symptom.
   The leaf's 100x error is the disease.
-  ────────────────────────────────────────────────────────────────────</code></pre><p>Worked:</p><pre class="diagram"><code>  Aggregate    (rows=2000)   (actual rows=1180000)    ratio 590x   ← consequence
-    -&gt;  Hash Join (rows=2000) (actual rows=1180000)   ratio 590x   ← consequence
-          -&gt;  Seq Scan orders (rows=400000) (actual rows=400000)  ratio 1.0  ✓
-          -&gt;  Hash (rows=2000) (actual rows=1180000)  ratio 590x   ← consequence
-                -&gt;  Index Scan customers (rows=1200000) (actual 1200000) ratio 1.0 ✓
-                -&gt;  Index Scan countries (rows=2000) (actual rows=2000) ratio 1.0 ✓
-  ────────────────────────────────────────────────────────────────────
-  BOTH base relations and BOTH leaf access paths were estimated correctly.
-  The error is in the HASH node: it says 2,000 output rows and produces
-  1,180,000.
-
-  What that means:  the planner believed the join would be highly
-  selective — 2,000 rows out of 1,200,000 — and therefore picked a plan
-  whose cost is proportional to the small side.  It actually produced
-  1,180,000.  The plan is not &quot;wrong&quot; in shape; it is wrong because it
-  costed a 2,000-row join as cheap and got a 1,180,000-row join.
-  ────────────────────────────────────────────────────────────────────
-  WHY the hash node mis-estimated, and the answer is not &quot;the planner is
-  dumb&quot;:  the estimate of a join's output cardinality assumes INDEPENDENCE
-  between the join predicates unless extended statistics declare otherwise.
-  If `customers.country_id` and `customers.active` are correlated —
-  99% of active customers are in 3 countries — the true join result is
-  ~590x larger than the product of the two selectivities.
-  Fix: CREATE STATISTICS ON country_id, active FROM customers;  §8.4.</code></pre><p>The other direction — actual <em>lower</em> than estimated — matters too and is less discussed. A node estimated at 1,000,000 and producing 40 means the planner over-priced it, usually picked a sequential scan over an index scan, and the query is doing far more work than it needed. The same diagnostic finds it: the deepest node with a large error ratio, in the other direction.</p><h3 class="vol__h3" id="75-buffers-hit-vs-read-and-where-the-time-really-goes">7.5 Buffers: Hit vs Read, and Where the Time Really Goes</h3><pre class="snippet" data-lang="sql"><code>EXPLAIN (ANALYZE, BUFFERS, WAL) &lt;query&gt;;</code></pre><pre class="diagram"><code>  Buffers: shared hit=20418 read=918 dirty=0
+  ────────────────────────────────────────────────────────────────────</code></pre><p>Worked:</p><figure class="figure">
+  <svg viewBox="0 0 900 610" role="img" aria-label="An error-propagation tree: the Aggregate and Hash Join estimated 2,000 rows and produced 1,180,000, a 590× ratio, while the Seq Scan on orders and both index scans were estimated exactly. The error sits in the Hash node: join cardinality assumes independence, but customers.country_id and customers.active are correlated.">
+    <defs>
+      <marker id="arw-database-04-08-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--bad" x="340" y="20" width="220" height="70" rx="5"/>
+    <text class="label" x="450" y="46" text-anchor="middle">Aggregate</text>
+    <text class="label label--sub" x="450" y="62" text-anchor="middle">est 2,000 — actual 1,180,000</text>
+    <text class="label label--sub" x="450" y="78" text-anchor="middle">ratio 590× — consequence</text>
+    <path class="edge" d="M 450 90 L 450 114" marker-end="url(#arw-database-04-08-a)"/>
+    <rect class="node node--bad" x="340" y="114" width="220" height="70" rx="5"/>
+    <text class="label" x="450" y="140" text-anchor="middle">Hash Join</text>
+    <text class="label label--sub" x="450" y="156" text-anchor="middle">est 2,000 — actual 1,180,000</text>
+    <text class="label label--sub" x="450" y="172" text-anchor="middle">ratio 590× — consequence</text>
+    <path class="edge" d="M 410 184 L 190 232" marker-end="url(#arw-database-04-08-a)"/>
+    <path class="edge" d="M 490 184 L 710 232" marker-end="url(#arw-database-04-08-a)"/>
+    <rect class="node node--good" x="40" y="232" width="300" height="70" rx="5"/>
+    <text class="label" x="190" y="258" text-anchor="middle">Seq Scan — orders</text>
+    <text class="label label--sub" x="190" y="274" text-anchor="middle">est 400,000 — actual 400,000</text>
+    <text class="label label--sub" x="190" y="290" text-anchor="middle">ratio 1.0× — estimated correctly</text>
+    <rect class="node node--bad" x="560" y="232" width="300" height="70" rx="5"/>
+    <text class="label" x="710" y="258" text-anchor="middle">Hash</text>
+    <text class="label label--sub" x="710" y="274" text-anchor="middle">est 2,000 — actual 1,180,000</text>
+    <text class="label label--sub" x="710" y="290" text-anchor="middle">ratio 590× — the error is here</text>
+    <path class="edge" d="M 660 302 L 550 344" marker-end="url(#arw-database-04-08-a)"/>
+    <path class="edge" d="M 800 302 L 780 344" marker-end="url(#arw-database-04-08-a)"/>
+    <rect class="node node--good" x="420" y="348" width="260" height="70" rx="5"/>
+    <text class="label" x="550" y="374" text-anchor="middle">Index Scan — customers</text>
+    <text class="label label--sub" x="550" y="390" text-anchor="middle">est 1,200,000 — actual 1,200,000</text>
+    <text class="label label--sub" x="550" y="406" text-anchor="middle">ratio 1.0×</text>
+    <rect class="node node--good" x="690" y="348" width="180" height="70" rx="5"/>
+    <text class="label" x="780" y="374" text-anchor="middle">Index Scan — countries</text>
+    <text class="label label--sub" x="780" y="390" text-anchor="middle">est 2,000 — actual 2,000</text>
+    <text class="label label--sub" x="780" y="406" text-anchor="middle">ratio 1.0×</text>
+    <rect class="node" x="40" y="460" width="820" height="130" rx="5"/>
+    <text class="label" x="450" y="488" text-anchor="middle">WHY THE HASH NODE MIS-ESTIMATED</text>
+    <text class="label label--sub" x="450" y="504" text-anchor="middle">join cardinality assumes the predicates are INDEPENDENT</text>
+    <text class="label label--sub" x="450" y="520" text-anchor="middle">customers.country_id and customers.active are correlated:</text>
+    <text class="label label--sub" x="450" y="536" text-anchor="middle">99% of active customers are in 3 countries, so the true result</text>
+    <text class="label label--sub" x="450" y="552" text-anchor="middle">is ~590× the product of the two selectivities</text>
+    <text class="label label--sub" x="450" y="568" text-anchor="middle">Fix: CREATE STATISTICS ON country_id, active FROM customers (§8.4)</text>
+  </svg>
+  <figcaption><strong>Both base relations and both leaf access paths were estimated exactly — the error sits in the Hash node, which costed a 2,000-row join and got a 1,180,000-row one.</strong> The estimator multiplies selectivities, which assumes independence; customers.country_id and customers.active are correlated (99% of active customers live in three countries), so the true result is ~590× the product, and the fix is CREATE STATISTICS ON country_id, active FROM customers (§8.4).</figcaption>
+</figure><p>The other direction — actual <em>lower</em> than estimated — matters too and is less discussed. A node estimated at 1,000,000 and producing 40 means the planner over-priced it, usually picked a sequential scan over an index scan, and the query is doing far more work than it needed. The same diagnostic finds it: the deepest node with a large error ratio, in the other direction.</p><h3 class="vol__h3" id="75-buffers-hit-vs-read-and-where-the-time-really-goes">7.5 Buffers: Hit vs Read, and Where the Time Really Goes</h3><pre class="snippet" data-lang="sql"><code>EXPLAIN (ANALYZE, BUFFERS, WAL) &lt;query&gt;;</code></pre><pre class="diagram"><code>  Buffers: shared hit=20418 read=918 dirty=0
             temp read=18422 written=18422
   ───────────────────────────────────────────────────────────────────────────
   shared hit=20,418    20,418 pages served from the database's own buffer
@@ -1323,40 +1517,61 @@ ANALYZE customers;</code></pre><pre class="diagram"><code>  WHAT EACH KIND GIVES
   • the plan_cache_mode problem.  Extended statistics do not fix
     parameter sniffing; they help the generic plan be costed better,
     but the generic plan still has no value to reason with.
-  ───────────────────────────────────────────────────────────────────────────</code></pre><p>The one-line staff summary: <strong>extended statistics convert a guess the optimiser is forced to make into a measurement you took</strong>, and the columns worth declaring are exactly the ones where your application's invariant means one column determines another — tenant_id determines region, country determines currency, order_status determines whether <code>fulfilled_at</code> is non-null.</p><h3 class="vol__h3" id="85-the-parameter-sniffing-trap-in-full">8.5 The Parameter Sniffing Trap in Full</h3><p>This is the most valuable single topic in the chapter, because it is the one that most often produces a production incident that nobody can reproduce in staging.</p><pre class="diagram"><code>  THE SCENARIO — orders, 40M rows, skew that makes the cache decision a coin flip
-  ───────────────────────────────────────────────────────────────────────────
-    region:  'EU' = 1.1%    'US' = 8.2%    'APAC' = 0.6%    'LATAM' = 0.05%
-  Query:  SELECT ... FROM orders WHERE region = $1 AND created_at &gt;= $2
-
-  EXECUTION 1.  The internal ops dashboard opens the new feature first.
-  $1 = 'US' (8.2%).
-
-      executions 1-5:  custom plan with the value inlined
-                       → index scan on (region, created_at), 2,941 rows
-                       → cost 0.42 .. 1,918.44
-                       → the generic plan (no value known) costs 2,091.03
-                       → ratio 2,091.03/1,918.44 = 1.09
-      1.09 &lt; generic_plan_cost_ratio (1.10)  ⇒  ADOPT THE GENERIC PLAN
-
-  EXECUTION 2.  LatAm's first request arrives.  $1 = 'LATAM' (0.05%).
-
-      The generic plan was costed with NO value, so it assumed the common
-      case — where the sequential scan is 9% cheaper than the index scan.
-      It runs that plan.
-
-      → 29,184 ms, 292 MB read, 20,000 rows returned.  For the 10th tenant.
-
-  ───────────────────────────────────────────────────────────────────────────
-  THE MARGIN THAT DECIDED IT: had the first five callers been the EU
-  dashboard (1.1%), the ratio would have been 1,043.19/892.10 = 1.17, the
-  generic plan would NOT have been adopted, and none of this would happen.
-  The bug was a 0.01 difference in a cost ratio, decided by which user
-  clicked first.
-
-  WHY STAGING NEVER SEES IT:
-    30,000 rows and one tenant, so every plan is trivially correct and the
-    seq scan is genuinely right.  And the same value every time, so custom
-    and generic agree and the switch is invisible.</code></pre><pre class="diagram"><code>  THE FIXES, IN THE ORDER I WOULD APPLY THEM
+  ───────────────────────────────────────────────────────────────────────────</code></pre><p>The one-line staff summary: <strong>extended statistics convert a guess the optimiser is forced to make into a measurement you took</strong>, and the columns worth declaring are exactly the ones where your application's invariant means one column determines another — tenant_id determines region, country determines currency, order_status determines whether <code>fulfilled_at</code> is non-null.</p><h3 class="vol__h3" id="85-the-parameter-sniffing-trap-in-full">8.5 The Parameter Sniffing Trap in Full</h3><p>This is the most valuable single topic in the chapter, because it is the one that most often produces a production incident that nobody can reproduce in staging.</p><figure class="figure">
+  <svg viewBox="0 0 900 670" role="img" aria-label="A region-skewed 40-million-row table runs WHERE region = $1 AND created_at &gt;= $2. The first five executions pass 'US' (8.2%): the custom plan costs 1,918.44 against the generic 2,091.03, a ratio of 1.09, under the 1.10 threshold, so the generic plan is adopted. LatAm's first request then runs that plan as a sequential scan — 29,184 ms and 292 MB.">
+    <defs>
+      <marker id="arw-database-04-09-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+      </marker>
+    </defs>
+    <rect class="node node--accent" x="120" y="20" width="660" height="88" rx="5"/>
+    <text class="label" x="450" y="46" text-anchor="middle">orders — 40M rows, skewed by region</text>
+    <text class="label label--sub" x="450" y="62" text-anchor="middle">EU 1.1% · US 8.2% · APAC 0.6% · LATAM 0.05%</text>
+    <text class="label label--sub" x="450" y="78" text-anchor="middle">WHERE region = $1 AND created_at &gt;= $2</text>
+    <rect class="node" x="40" y="150" width="250" height="80" rx="5"/>
+    <text class="label" x="165" y="176" text-anchor="middle">Executions 1–5</text>
+    <text class="label label--sub" x="165" y="192" text-anchor="middle">$1 = 'US' (8.2%)</text>
+    <text class="label label--sub" x="165" y="208" text-anchor="middle">custom plan, value inlined</text>
+    <path class="edge" d="M 290 190 L 336 190" marker-end="url(#arw-database-04-09-a)"/>
+    <rect class="node node--good" x="340" y="150" width="250" height="80" rx="5"/>
+    <text class="label" x="465" y="176" text-anchor="middle">Custom plan: index scan</text>
+    <text class="label label--sub" x="465" y="192" text-anchor="middle">(region, created_at)</text>
+    <text class="label label--sub" x="465" y="208" text-anchor="middle">2,941 rows — cost 1,918.44</text>
+    <path class="edge" d="M 590 190 L 636 190" marker-end="url(#arw-database-04-09-a)"/>
+    <rect class="node" x="640" y="150" width="230" height="80" rx="5"/>
+    <text class="label" x="755" y="176" text-anchor="middle">Generic plan: no value</text>
+    <text class="label label--sub" x="755" y="192" text-anchor="middle">costs 2,091.03</text>
+    <text class="label label--sub" x="755" y="208" text-anchor="middle">ratio 2,091.03 / 1,918.44</text>
+    <path class="edge" d="M 755 230 L 755 254 L 465 254 L 465 276" marker-end="url(#arw-database-04-09-a)"/>
+    <rect class="node node--warn" x="340" y="280" width="250" height="56" rx="5"/>
+    <text class="label" x="465" y="306" text-anchor="middle">1.09 &lt; 1.10 — the threshold</text>
+    <text class="label label--sub" x="465" y="322" text-anchor="middle">adopt the generic plan</text>
+    <rect class="node" x="40" y="390" width="250" height="80" rx="5"/>
+    <text class="label" x="165" y="416" text-anchor="middle">Execution 6 onward</text>
+    <text class="label label--sub" x="165" y="432" text-anchor="middle">$1 = 'LATAM' (0.05%)</text>
+    <text class="label label--sub" x="165" y="448" text-anchor="middle">the 10th tenant</text>
+    <path class="edge" d="M 290 430 L 336 430" marker-end="url(#arw-database-04-09-a)"/>
+    <rect class="node node--bad" x="340" y="390" width="250" height="96" rx="5"/>
+    <text class="label" x="465" y="416" text-anchor="middle">The generic plan runs</text>
+    <text class="label label--sub" x="465" y="432" text-anchor="middle">costed for no value — assumed</text>
+    <text class="label label--sub" x="465" y="448" text-anchor="middle">the common case: a seq scan</text>
+    <text class="label label--sub" x="465" y="464" text-anchor="middle">9% cheaper than the index scan</text>
+    <path class="edge" d="M 590 438 L 636 438" marker-end="url(#arw-database-04-09-a)"/>
+    <rect class="node node--bad" x="640" y="390" width="230" height="96" rx="5"/>
+    <text class="label" x="755" y="416" text-anchor="middle">29,184 ms — 292 MB read</text>
+    <text class="label label--sub" x="755" y="432" text-anchor="middle">20,000 rows returned</text>
+    <text class="label label--sub" x="755" y="448" text-anchor="middle">for the 0.05% tenant</text>
+    <text class="label label--sub" x="755" y="464" text-anchor="middle">the plan is wrong for it</text>
+    <path class="edge" d="M 465 336 L 465 386" marker-end="url(#arw-database-04-09-a)"/>
+    <rect class="node node--warn" x="40" y="530" width="820" height="90" rx="5"/>
+    <text class="label" x="450" y="556" text-anchor="middle">THE MARGIN THAT DECIDED IT</text>
+    <text class="label label--sub" x="450" y="574" text-anchor="middle">had the first five callers been the EU dashboard (1.1%), the ratio would</text>
+    <text class="label label--sub" x="450" y="590" text-anchor="middle">have been 1,043.19 / 892.10 = 1.17 — no adoption, and none of this happens</text>
+    <text class="label label--sub" x="450" y="606" text-anchor="middle">a 0.01 difference in a cost ratio, decided by which user clicked first</text>
+    <text class="label label--sub" x="450" y="650" text-anchor="middle">why staging never sees it: 30,000 rows, one tenant, the same value every time — custom and generic agree</text>
+  </svg>
+  <figcaption><strong>The generic plan was adopted because the first five callers made it look only 9% more expensive — a 0.01 margin in the cost ratio, decided by which tenant clicked first.</strong> The custom plan costed with 'US' inlined was 1,918.44 against the generic 2,091.03 (ratio 1.09, under the 1.10 threshold); had the first five callers been the EU dashboard the ratio would have been 1.17 and the generic plan rejected; the LatAm execution then ran a sequential scan for 29,184 ms and 292 MB.</figcaption>
+</figure><pre class="diagram"><code>  THE FIXES, IN THE ORDER I WOULD APPLY THEM
   ───────────────────────────────────────────────────────────────────────────
 
   1. MAKE THE GOOD PLAN THE ONLY PLAN   ◄── the structural fix
